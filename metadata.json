@@ -1,0 +1,6 @@
+{
+  "name": "Wollo Share",
+  "description": "Bilingual Ethiopian educational platform for high school and university entrance preparation with interactive courses, past exams, peer material library, and daily study habits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
