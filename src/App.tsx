@@ -100,8 +100,8 @@ export default function App() {
     }
   });
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(true);
-  const [loginEmail, setLoginEmail] = useState<string>(DEFAULT_ADMIN_CREDENTIALS.email);
-  const [loginPassword, setLoginPassword] = useState<string>(DEFAULT_ADMIN_CREDENTIALS.password);
+  const [loginEmail, setLoginEmail] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // Material Categories & Shared Materials State (100% Free & Open)
@@ -260,11 +260,7 @@ export default function App() {
     const isMatchingEmail =
       loginEmail.trim().toLowerCase() === adminCredentials.email.toLowerCase() ||
       loginEmail.trim().toLowerCase() === 'admin';
-    const isMatchingPassword =
-      loginPassword === adminCredentials.password ||
-      loginPassword === 'habib123' ||
-      loginPassword === 'admin123' ||
-      loginPassword === 'habib';
+    const isMatchingPassword = loginPassword === adminCredentials.password;
 
     if (isMatchingEmail && isMatchingPassword) {
       setIsAdminAuthenticated(true);
