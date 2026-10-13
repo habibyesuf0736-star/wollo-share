@@ -18,6 +18,13 @@ function getRateLimitSeconds(message) {
   return match ? Number(match[1]) : 0;
 }
 
+function getEmailRedirectUrl(email) {
+  const redirectUrl = new URL(import.meta.env.BASE_URL, window.location.origin);
+  redirectUrl.searchParams.set("verify", "1");
+  redirectUrl.searchParams.set("email", email);
+  return redirectUrl.href;
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -29,7 +36,14 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [resendBusy, setResendBusy] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [authEmail, setAuthEmail] = useState("");
+  const [authEmail, setAuthEmail] = useState(() => (
+    new URLSearchParams(window.location.search).get("email") || ""
+  ));
+  const [emailOtp, setEmailOtp] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [verificationStage, setVerificationStage] = useState(() => (
+    new URLSearchParams(window.location.search).get("verify") === "1" ? "email" : null
+  ));
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState(false);
   const [appMessage, setAppMessage] = useState("");
@@ -61,8 +75,10 @@ export default function App() {
   const userId = session?.user?.id;
   const isAdmin = profile?.id === userId &&
     profile?.role === "admin" &&
+    profile?.invite_code_verified === true &&
     session?.user?.email?.toLowerCase() === ADMIN_EMAIL;
-  const hasAppAccess = isAdmin || profile?.access_granted === true;
+  const hasAppAccess = profile?.invite_code_verified === true &&
+    (isAdmin || profile?.access_granted === true);
   const progressCount = completedVideos.size;
   const libraryResources = [
     ...resources,
@@ -224,12 +240,13 @@ export default function App() {
       return () => { active = false; };
     }
 
-    supabase.from("profiles").select("id,role,access_granted").eq("id", userId).single().then(async (profileResult) => {
+    supabase.from("profiles").select("id,role,access_granted,invite_code_verified").eq("id", userId).single().then(async (profileResult) => {
       if (profileResult.error) throw profileResult.error;
       if (!active) return;
       setProfile(profileResult.data);
 
-      if (profileResult.data.role !== "admin" && !profileResult.data.access_granted) {
+      if (profileResult.data.invite_code_verified !== true ||
+        (profileResult.data.role !== "admin" && !profileResult.data.access_granted)) {
         setCompletedVideos(new Set());
         return;
       }
@@ -382,14 +399,15 @@ export default function App() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: window.location.origin }
+          options: { emailRedirectTo: getEmailRedirectUrl(email) }
         });
         if (error) throw error;
         if (data.session) {
           applySession(data.session);
-          void recordActivity("sign_in", null, data.session.user.id);
+          setVerificationStage("invite");
         } else {
-          setAuthMessage("Account created. Check your email to confirm it, then sign in.");
+          setVerificationStage("email");
+          setAuthMessage(`A unique confirmation code was sent to ${email}. Open the link in the email to return here, then enter that code.`);
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -404,6 +422,64 @@ export default function App() {
       setAuthMessage(/email not confirmed/i.test(message)
         ? "Email not confirmed. Use the resend option below, then check your inbox and spam folder."
         : message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleEmailOtpSubmit(event) {
+    event.preventDefault();
+    if (!supabase) return;
+
+    setAuthBusy(true);
+    setAuthMessage("");
+    setAuthError(false);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: authEmail.trim(),
+        token: emailOtp.trim(),
+        type: "signup"
+      });
+      if (error) throw error;
+      if (!data.session) throw new Error("Email confirmation succeeded, but no sign-in session was created. Try signing in.");
+      applySession(data.session);
+      setEmailOtp("");
+      setVerificationStage("invite");
+      setAuthMessage("Email verified. Enter the shared invite code to continue.");
+    } catch (error) {
+      const message = error.message || "Could not verify your email code.";
+      setResendCooldown(getRateLimitSeconds(message));
+      setAuthError(true);
+      setAuthMessage(message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleInviteCodeSubmit(event) {
+    event.preventDefault();
+    if (!supabase || !userId) return;
+
+    setAuthBusy(true);
+    setAuthMessage("");
+    setAuthError(false);
+    try {
+      const { data, error } = await supabase.rpc("verify_invite_code", {
+        submitted_code: inviteCode
+      });
+      if (error) throw error;
+      if (data !== true) throw new Error("That invite code is not correct.");
+
+      setProfile((current) => current ? { ...current, invite_code_verified: true } : current);
+      setInviteCode("");
+      setVerificationStage(null);
+      setAuthMessage("");
+      const libraryUrl = new URL(import.meta.env.BASE_URL, window.location.origin);
+      window.history.replaceState({}, "", libraryUrl.href);
+      void recordActivity("sign_in", null, userId);
+    } catch (error) {
+      setAuthError(true);
+      setAuthMessage(error.message || "Could not verify the invite code.");
     } finally {
       setAuthBusy(false);
     }
@@ -425,7 +501,7 @@ export default function App() {
       const { error } = await supabase.auth.resend({
         type: "signup",
         email,
-        options: { emailRedirectTo: window.location.origin }
+        options: { emailRedirectTo: getEmailRedirectUrl(email) }
       });
       if (error) throw error;
       setAuthMessage("If this account needs confirmation, Supabase sent a new email. Check your inbox and spam folder.");
@@ -634,6 +710,62 @@ export default function App() {
   const selectedCategory = categories.find((category) => category.id === categoryFilterId);
 
   const progressPercent = Math.round((progressCount / videos.length) * 100);
+  const needsInviteVerification = Boolean(
+    supabase && session && profile && profile.invite_code_verified !== true
+  );
+
+  if (verificationStage || needsInviteVerification) {
+    const verifyEmail = verificationStage === "email" && !session;
+    return (
+      <main className="login-page">
+        <div className="login-topline">
+          <div className="brand"><span className="brand-mark" aria-hidden="true" />Evangadi Learning</div>
+          {session
+            ? <button className="text-button" type="button" onClick={handleSignOut}>Sign out</button>
+            : <button className="text-button" type="button" onClick={() => {
+              setVerificationStage(null);
+              setShowAuthPanel(true);
+            }}>Back to sign in</button>}
+        </div>
+        <div className="login-layout">
+          <section className="login-intro">
+            <div className="login-kicker">Evangadi Resources</div>
+            <h1>{verifyEmail ? "Verify your email." : "One last step."}</h1>
+            <p>{verifyEmail
+              ? "Open the confirmation email, then enter its unique code here."
+              : "Enter the shared invite code to finish setting up your account."}</p>
+            <div className="login-course-count"><strong>{videos.length}</strong><span>courses, in your order</span></div>
+          </section>
+          <section className="login-card" aria-labelledby="verification-title">
+            <div className="resource-kind"><span className="kind-dot" aria-hidden="true" />Account verification</div>
+            <h2 id="verification-title">{verifyEmail ? "Confirm your email" : "Enter invite code"}</h2>
+            <p className="auth-copy">{verifyEmail
+              ? `Enter the one-time code sent to ${authEmail || "your email address"}.`
+              : `Email confirmed for ${session?.user?.email || authEmail}. Enter the invite code to continue.`}</p>
+            <form className="auth-form" onSubmit={verifyEmail ? handleEmailOtpSubmit : handleInviteCodeSubmit}>
+              {verifyEmail ? (
+                <>
+                  <label>Email address<input name="verification-email" type="email" autoComplete="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} required /></label>
+                  <label>Email confirmation code<input name="email-code" type="text" inputMode="numeric" autoComplete="one-time-code" value={emailOtp} onChange={(event) => setEmailOtp(event.target.value)} maxLength="12" required /></label>
+                </>
+              ) : (
+                <label>Invite code<input name="invite-code" type="password" autoComplete="one-time-code" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} required /></label>
+              )}
+              <button className="primary-button login-submit" type="submit" disabled={authBusy}>
+                {authBusy ? "Please wait..." : verifyEmail ? "Verify email" : "Verify invite code"}
+              </button>
+              {verifyEmail && (
+                <button className="text-button resend-button" type="button" onClick={handleResendConfirmation} disabled={resendBusy || authBusy || resendCooldown > 0}>
+                  {resendBusy ? "Sending..." : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend confirmation code"}
+                </button>
+              )}
+              {authMessage && <p className={`message ${authError ? "error" : ""}`} role="status">{authMessage}</p>}
+            </form>
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (showAuthPanel && !session) {
     return (
@@ -647,7 +779,7 @@ export default function App() {
             <div className="login-kicker">Evangadi Resources</div>
             <h1>{authMode === "signup" ? "Start learning." : "Welcome back."}</h1>
             <p>{authMode === "signup" ? "Create an account to save course progress and pick up where you left off." : "Sign in to continue your courses and keep your progress in sync."}</p>
-            <div className="login-course-count"><strong>48</strong><span>courses, in your order</span></div>
+            <div className="login-course-count"><strong>{videos.length}</strong><span>courses, in your order</span></div>
           </section>
           <section className="login-card" aria-labelledby="auth-title">
             <div className="resource-kind"><span className="kind-dot" aria-hidden="true" />Learner account</div>
@@ -658,7 +790,7 @@ export default function App() {
                   ? `Your account is stored only in this browser. ${ADMIN_EMAIL} is the only local admin; other accounts are learners.`
                   : "Sign in to the account stored in this browser."
                 : authMode === "signup"
-                  ? "Use your email and a password with at least 6 characters."
+                  ? "Any valid email can register. Confirm it with the unique code sent to your inbox, then enter the shared invite code."
                   : "Enter your email and password to continue."}
             </p>
             <form className="auth-form" onSubmit={handleAuthSubmit}>

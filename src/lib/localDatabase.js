@@ -214,7 +214,9 @@ export function signOut() {
 export function getProfile(userId) {
   const user = readDatabase().users.find((account) => account.id === userId);
   if (!user) throw new Error("Your local account could not be found. Sign in again.");
-  return { id: user.id, role: user.role, access_granted: user.access_granted };
+  // In local mode there is no email-OTP / invite-code step, so all accounts are
+  // considered verified. The admin's access is gated by ADMIN_EMAIL instead.
+  return { id: user.id, role: user.role, access_granted: user.access_granted, invite_code_verified: true };
 }
 
 export function getProgress(userId) {

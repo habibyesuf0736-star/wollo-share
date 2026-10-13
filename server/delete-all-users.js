@@ -9,7 +9,7 @@ if (!supabaseUrl || !secretKey) {
 }
 
 const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
-const supabaseAdmin = createAdminClient();
+const supabaseAdmin = createAdminClient({ supabaseUrl, serviceRoleKey: secretKey });
 const perPage = 1000;
 const users = [];
 

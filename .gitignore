@@ -1,5 +1,10 @@
 node_modules/
+build/
 dist/
-.env
-.env.local
-.env.*.local
+coverage/
+.vercel/
+data/
+.DS_Store
+*.log
+.env*
+!.env.example

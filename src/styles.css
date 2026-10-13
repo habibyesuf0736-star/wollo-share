@@ -122,6 +122,7 @@ progress { width: min(36%, 280px); height: 10px; accent-color: var(--green); }
 .complete-control { display: flex; align-items: center; gap: 8px; margin-top: 13px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; }
 .complete-control input { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
 .complete-control input:disabled { cursor: wait; }
+.access-pending-note { display: block; margin-top: 13px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .empty { padding: 48px 16px; border: 1px dashed var(--line); color: var(--muted); text-align: center; }
 
 .admin-panel { margin-top: 20px; }
