@@ -26,7 +26,3 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-        env:
-          VITE_DATA_MODE: supabase
-          VITE_SUPABASE_URL: https://ci-placeholder.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-key
