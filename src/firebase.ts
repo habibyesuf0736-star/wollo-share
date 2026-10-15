@@ -92,20 +92,18 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult> {
     const name = fbUser.displayName || 'Google Student';
     const photoURL = fbUser.photoURL || '';
     const uid = fbUser.uid;
-
-    const isHabib = email === 'habibyesuf81@gmail.com';
-    const role = isHabib ? 'admin' : 'user';
+    const idToken = await fbUser.getIdToken();
 
     const userProfile = {
       id: uid,
       uid,
       name,
       email,
-      role,
+      role: 'user',
       department: 'General Studies & Science',
-      accountPlan: isHabib ? 'paid_lifetime' : 'free',
-      paymentStatus: isHabib ? 'paid' : 'unpaid',
-      category: isHabib ? 'Super Admin · Lifetime VIP Access' : 'Google Verified Student',
+      accountPlan: 'free',
+      paymentStatus: 'unpaid',
+      category: 'Google Verified Student',
       photoURL,
       lastActiveAt: new Date().toISOString()
     };
@@ -117,39 +115,25 @@ export async function signInWithGoogle(): Promise<GoogleAuthResult> {
       console.warn('Could not write profile to Firestore:', fsErr);
     }
 
-    // Sync with backend API if available
-    try {
-      const response = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid,
-          email,
-          name,
-          photoURL
-        })
-      });
-      const data = await response.json();
-      if (response.ok && data.ok) {
-        return {
-          ok: true,
-          user: data.user || userProfile,
-          session: data.session
-        };
-      }
-    } catch (syncErr) {
-      console.warn('Backend sync failed, using client session:', syncErr);
+    const response = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid,
+        email,
+        name,
+        photoURL,
+        idToken
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || 'Google sign-in could not be verified by the application.');
     }
-
     return {
       ok: true,
-      user: userProfile,
-      session: {
-        id: uid,
-        name,
-        email,
-        role
-      }
+      user: data.user || userProfile,
+      session: data.session
     };
   } catch (error: any) {
     console.error('Google Sign-In Error:', error);

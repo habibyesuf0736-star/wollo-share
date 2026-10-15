@@ -3460,7 +3460,7 @@
               <span>or create with email</span>
             </div>
 
-            <form class="auth-form" onsubmit="handleRegisterAccountSubmit(event)">
+            <form id="registerAccountForm" class="auth-form" onsubmit="handleRegisterAccountSubmit(event)">
               <label for="regNameInput">
                 Full Name
                 <div class="auth-input-wrapper">
@@ -3547,6 +3547,37 @@
                 </button>
               </div>
             </form>
+
+            <div id="registerVerifyPanel" class="view-hidden">
+              <p class="auth-copy">
+                Enter the 6-digit code sent to <strong id="registerVerifyEmail"></strong>. The code expires in 10 minutes.
+              </p>
+              <form class="auth-form" onsubmit="handleRegisterVerifySubmit(event)">
+                <label for="registerVerifyCodeInput">
+                  Email verification code
+                  <input
+                    type="text"
+                    id="registerVerifyCodeInput"
+                    class="otp-code-input"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    maxlength="6"
+                    pattern="[0-9]{6}"
+                    placeholder="000000"
+                    required
+                  />
+                </label>
+                <p id="registerVerifyError" class="auth-error-box"></p>
+                <button type="submit" id="registerVerifySubmitBtn" class="login-submit">
+                  <span>Verify Email &amp; Create Account</span>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </button>
+                <div style="display:flex; justify-content:center; gap:16px; flex-wrap:wrap;">
+                  <button type="button" class="auth-link" onclick="resendRegistrationCode()">Resend code</button>
+                  <button type="button" class="auth-link" onclick="returnToRegistrationForm()">Change details</button>
+                </div>
+              </form>
+            </div>
           </div>
 
           <!-- 3. FORGOT PASSWORD RECOVERY PANEL -->
@@ -5390,18 +5421,11 @@
       function verifySignedSessionToken(sessionObj) {
         if (!sessionObj || typeof sessionObj !== "object" || !sessionObj.authToken) return false;
         const parts = String(sessionObj.authToken).split(".");
-        if (parts.length !== 3 || parts[0] !== "wstok") return false;
-        const [, payloadHex, sig] = parts;
-        const expectedSig = sha256Hex(`${SESSION_HMAC_SECRET}::SESSION::${payloadHex}`).slice(0, 32);
-        if (sig !== expectedSig) return false;
-        const decoded = bytesToUtf8(hexToBytes(payloadHex));
-        const [id, email, role, , expiresAtStr] = decoded.split("|");
-        const expiresAt = Number(expiresAtStr) || 0;
-        if (expiresAt && Date.now() > expiresAt) return false;
-        if (id !== String(sessionObj.id) || email !== String(sessionObj.email) || role !== String(sessionObj.role)) {
-          return false;
-        }
-        return true;
+        const expiresAt = Number(sessionObj.expiresAt) || 0;
+        return parts.length === 3 &&
+          parts[0] === "wstok" &&
+          Boolean(sessionObj.id && sessionObj.email && sessionObj.role) &&
+          expiresAt > Date.now();
       }
 
       return {
@@ -5886,6 +5910,7 @@
     let appearanceSettings = {};
     let userRatings = {};
     let currentSession = null; // { id, name, email, role: 'admin' | 'user' }
+    let pendingRegistrationEmail = "";
     let isStudentPreview = false;
 
     let currentWorkspaceView = "library"; // "library" | "sublist" | "admin" | "login"
@@ -6306,26 +6331,38 @@
     }
 
     function syncStateToBackend() {
+      if (!canAdminEdit()) return;
       fetch("/api/state", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          "x-user-role": canAdminEdit() ? "admin" : currentSession?.role || "visitor"
+          ...(currentSession?.authToken ? { Authorization: `Bearer ${currentSession.authToken}` } : {})
         },
         body: JSON.stringify({
           coursesData,
           usersData,
           pageTexts,
           appearanceSettings,
-          userRatings,
-          customAdminPassword
+          userRatings
         })
-      }).catch(() => {});
+      }).then((res) => {
+        if (!res.ok) console.warn("State sync rejected by the server.", { status: res.status });
+      }).catch((err) => {
+        console.warn("Unable to synchronize state with the server.", err);
+      });
     }
 
     async function loadStateFromBackend() {
       try {
-        const res = await fetch("/api/state");
+        const res = await fetch("/api/state", {
+          headers: currentSession?.authToken ? { Authorization: `Bearer ${currentSession.authToken}` } : {}
+        });
+        if (res.status === 401) {
+          currentSession = null;
+          sessionStorage.removeItem(STORAGE_KEYS.CURRENT_SESSION);
+          updateSessionAndAdminUI();
+          return;
+        }
         if (!res.ok || hasLocalMutationSinceBoot) return;
         const data = await res.json();
         if (hasLocalMutationSinceBoot) return;
@@ -6343,9 +6380,6 @@
         }
         if (data.userRatings && typeof data.userRatings === "object") {
           userRatings = { ...userRatings, ...data.userRatings };
-        }
-        if (typeof data.customAdminPassword === "string" && data.customAdminPassword) {
-          customAdminPassword = data.customAdminPassword;
         }
         try {
           localStorage.setItem(STORAGE_KEYS.COURSES, JSON.stringify(coursesData));
@@ -6675,6 +6709,16 @@
           body: JSON.stringify({ name, email, department, password, accountPlan: plan })
         });
         const data = await resp.json();
+        if (resp.ok && data.ok && data.verificationRequired) {
+          pendingRegistrationEmail = data.email;
+          document.getElementById("registerAccountForm")?.classList.add("view-hidden");
+          document.getElementById("registerVerifyPanel")?.classList.remove("view-hidden");
+          const emailEl = document.getElementById("registerVerifyEmail");
+          if (emailEl) emailEl.textContent = pendingRegistrationEmail;
+          document.getElementById("registerVerifyCodeInput")?.focus();
+          showToast(`Verification code sent to ${pendingRegistrationEmail}`);
+          return;
+        }
         if (resp.ok && data.ok) {
           if (data.session) {
             currentSession = data.session;
@@ -6696,31 +6740,12 @@
           }
         }
       } catch (err) {
-        const isHabib = email === "habibyesuf81@gmail.com";
-        const newUser = secureUserAccount({
-          id: "user-" + Date.now(),
-          name,
-          email,
-          password,
-          role: isHabib ? "admin" : "user",
-          department,
-          accountPlan: plan,
-          paymentStatus: plan === "paid_lifetime" ? "paid" : "unpaid",
-          downloadOnlyAccount: false,
-          amountPaidBirr: plan === "paid_lifetime" ? 100 : 0,
-          category: isHabib ? "Super Admin · Lifetime VIP Access" : (plan === "paid_lifetime" ? "Paid 100 Birr · Lifetime VIP" : "Unpaid · Pending 2 Uploads"),
-          sharedMaterialsCount: 0,
-          downloadsCount: 0,
-          lastActiveAt: "Active now",
-          allowedCourseIds: ["course-evangadi", "course-se-capstone"],
-          activityLog: [{ id: "act-" + Date.now(), type: "Account Created", detail: `Registered ${email}`, timestamp: "Just now" }]
-        });
-        usersData.unshift(newUser);
-        persistAllToStorage();
-        currentSession = WolloCrypto.createSignedSessionToken({ id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role });
-        saveCurrentSession();
-        showToast(`Account created for ${name}!`);
-        switchWorkspaceView(newUser.role === "admin" ? "admin" : "library");
+        if (errEl) {
+          errEl.textContent = err instanceof Error
+            ? err.message
+            : "Unable to reach the account service. Please try again.";
+          errEl.style.display = "block";
+        }
       } finally {
         if (btn) {
           btn.disabled = false;
@@ -6729,76 +6754,84 @@
       }
     }
 
-    function toggleLiveSmtpConfigBox() {
-      const box = document.getElementById("liveSmtpConfigBox");
-      const txt = document.getElementById("smtpToggleBtnText");
-      if (!box) return;
-      const isOpen = box.style.display !== "none";
-      box.style.display = isOpen ? "none" : "block";
-      if (txt) txt.textContent = isOpen ? "Configure SMTP Login ▼" : "Hide Server Settings ▲";
-    }
-
-    async function handleLiveSmtpSubmit() {
-      const user = (document.getElementById("liveSmtpUserInput")?.value || "").trim();
-      const pass = (document.getElementById("liveSmtpPassInput")?.value || "").trim();
-      const statusEl = document.getElementById("liveSmtpStatusText");
-      const btn = document.getElementById("liveSmtpSubmitBtn");
-      const rcpt = passwordResetState.recipientLabel || "habibyesuf81@gmail.com";
-      const code = String(Math.floor(100000 + Math.random() * 900000));
-
-      if (!pass) {
-        if (statusEl) {
-          statusEl.textContent = "Please enter your Brevo SMTP key or Gmail password.";
-          statusEl.style.color = "#b91c1c";
-          statusEl.style.display = "block";
+    async function handleRegisterVerifySubmit(e) {
+      e.preventDefault();
+      const codeInput = document.getElementById("registerVerifyCodeInput");
+      const errorEl = document.getElementById("registerVerifyError");
+      const button = document.getElementById("registerVerifySubmitBtn");
+      const code = (codeInput?.value || "").trim();
+      if (errorEl) errorEl.style.display = "none";
+      if (!pendingRegistrationEmail || !/^\d{6}$/.test(code)) {
+        if (errorEl) {
+          errorEl.textContent = "Enter the 6-digit code sent to your email.";
+          errorEl.style.display = "block";
         }
         return;
       }
-
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Connecting to SMTP server & sending...";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Verifying...";
       }
-      if (statusEl) statusEl.style.display = "none";
-
       try {
-        const resp = await fetch("/api/settings/smtp", {
+        const response = await fetch("/api/auth/register/verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            smtpUser: user,
-            smtpPass: pass,
-            testRecipient: rcpt,
-            testCode: code
-          })
+          body: JSON.stringify({ email: pendingRegistrationEmail, code })
         });
-        const data = await resp.json();
-        if (resp.ok && data.ok) {
-          if (statusEl) {
-            statusEl.textContent = `✓ SUCCESS! Verification code ${code} was sent directly to ${rcpt}! Check your inbox.`;
-            statusEl.style.color = "#15803d";
-            statusEl.style.display = "block";
-          }
-          showToast(`Code sent directly to ${rcpt}!`);
-        } else {
-          if (statusEl) {
-            statusEl.textContent = `⚠ ${data.error || "Authentication failed. Please verify your Brevo Login."}`;
-            statusEl.style.color = "#b91c1c";
-            statusEl.style.display = "block";
-          }
+        const data = await response.json();
+        if (!response.ok || !data.ok || !data.session) {
+          throw new Error(data.error || "Unable to verify the email address.");
         }
-      } catch (err) {
-        if (statusEl) {
-          statusEl.textContent = "⚠ Network error connecting to mail server.";
-          statusEl.style.color = "#b91c1c";
-          statusEl.style.display = "block";
+        currentSession = data.session;
+        saveCurrentSession();
+        if (data.user) {
+          usersData = usersData.filter((user) => user.email.toLowerCase() !== pendingRegistrationEmail);
+          usersData.unshift(data.user);
+          persistAllToStorage();
+        }
+        pendingRegistrationEmail = "";
+        showToast("Email verified. Your account is ready.");
+        switchWorkspaceView("library");
+      } catch (error) {
+        if (errorEl) {
+          errorEl.textContent = error instanceof Error
+            ? error.message
+            : "Unable to verify the email address. Please try again.";
+          errorEl.style.display = "block";
         }
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = "Send Verification Code to My Email Now";
+        if (button) {
+          button.disabled = false;
+          button.innerHTML = `<span>Verify Email &amp; Create Account</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`;
         }
       }
+    }
+
+    async function resendRegistrationCode() {
+      const errorEl = document.getElementById("registerVerifyError");
+      if (errorEl) errorEl.style.display = "none";
+      try {
+        const response = await fetch("/api/auth/register/resend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: pendingRegistrationEmail })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Unable to resend the code.");
+        showToast("A new verification code was sent.");
+      } catch (error) {
+        if (errorEl) {
+          errorEl.textContent = error instanceof Error ? error.message : "Unable to resend the code.";
+          errorEl.style.display = "block";
+        }
+      }
+    }
+
+    function returnToRegistrationForm() {
+      pendingRegistrationEmail = "";
+      document.getElementById("registerVerifyCodeInput").value = "";
+      document.getElementById("registerVerifyPanel")?.classList.add("view-hidden");
+      document.getElementById("registerAccountForm")?.classList.remove("view-hidden");
     }
 
     function closeForgotPasswordFlow() {
@@ -6978,17 +7011,7 @@
         if (!resp.ok || !data.ok) {
           throw new Error(data.error || "Unable to reset the password.");
         }
-        if (data.updatedType === "admin" && data.customAdminPassword) {
-          customAdminPassword = data.customAdminPassword;
-          try {
-            localStorage.setItem("wollo_lib_admin_custom_pw_v1", customAdminPassword);
-          } catch {}
-        } else if (Array.isArray(data.usersData)) {
-          usersData = data.usersData;
-          if (data.updatedIdentifier) {
-            passwordResetState.identifier = data.updatedIdentifier;
-          }
-        }
+        if (data.updatedIdentifier) passwordResetState.identifier = data.updatedIdentifier;
       } catch (error) {
         if (err2) {
           err2.textContent = error instanceof Error ? error.message : "Unable to reset the password.";
@@ -7022,7 +7045,7 @@
       }
     }
 
-    function handleUnifiedLoginSubmit(e) {
+    async function handleUnifiedLoginSubmit(e) {
       e.preventDefault();
       const errEl = document.getElementById("loginErrorText");
       const submitBtn = document.getElementById("loginSubmitBtn");
@@ -7038,7 +7061,6 @@
 
       const identifier = (document.getElementById("loginIdentifierInput").value || "").trim();
       const password = document.getElementById("loginPasswordInput").value || "";
-      const lowerId = identifier.toLowerCase();
 
       if (!identifier || !password) {
         if (errEl) {
@@ -7048,89 +7070,47 @@
         return;
       }
 
-      // 1. Check registered users in usersData first when username/email matches
-      const matchedUser = usersData.find(
-        (u) =>
-          (u.email.toLowerCase() === lowerId || u.name.toLowerCase() === lowerId) &&
-          verifyUserAccountPassword(password, u)
-      );
-
-      if (matchedUser) {
-        loginAttemptTracker.failedCount = 0;
-        loginAttemptTracker.lockedUntil = 0;
-        currentSession = WolloCrypto.createSignedSessionToken({
-          id: matchedUser.id,
-          name: matchedUser.name,
-          email: matchedUser.email,
-          role: matchedUser.role || "user"
-        });
-        isStudentPreview = false;
-        saveCurrentSession();
-        logStudentActivity("Signed In", `Logged in as ${matchedUser.name} (${matchedUser.category || matchedUser.accountPlan || "Student"})`, matchedUser);
-        document.getElementById("loginPasswordInput").value = "";
-        const pwInput = document.getElementById("loginPasswordInput");
-        if (pwInput) pwInput.type = "password";
-        const pwBtn = document.getElementById("loginPasswordToggleBtn");
-        if (pwBtn) pwBtn.textContent = "Show";
-        showToast(`Welcome back, ${matchedUser.name}`);
-        switchWorkspaceView(matchedUser.role === "admin" ? "admin" : "library");
-        return;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Signing In...";
       }
-
-      // 2. Check if logging in with primary/backup/reset Admin credentials (requires matching admin identifier)
-      const isAdminIdentifier =
-        lowerId === ADMIN_USERNAME.toLowerCase() || lowerId === ADMIN_EMAIL.toLowerCase();
-      if (isAdminIdentifier && verifyAdminAccountPassword(password)) {
-        loginAttemptTracker.failedCount = 0;
-        loginAttemptTracker.lockedUntil = 0;
-        currentSession = WolloCrypto.createSignedSessionToken({
-          id: "admin-owner",
-          name: "Administrator",
-          email: ADMIN_EMAIL,
-          role: "admin"
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier, password })
         });
-        isStudentPreview = false;
-        saveCurrentSession();
-        document.getElementById("loginPasswordInput").value = "";
-        const pwInput = document.getElementById("loginPasswordInput");
-        if (pwInput) pwInput.type = "password";
-        const pwBtn = document.getElementById("loginPasswordToggleBtn");
-        if (pwBtn) pwBtn.textContent = "Show";
-        showToast("Logged in as Administrator");
-        switchWorkspaceView("admin");
-        return;
-      }
-
-      loginAttemptTracker.failedCount += 1;
-      if (loginAttemptTracker.failedCount >= 5) {
-        loginAttemptTracker.lockedUntil = Date.now() + 30 * 1000;
-        if (submitBtn) submitBtn.disabled = true;
-        if (loginAttemptTracker.timerId) clearInterval(loginAttemptTracker.timerId);
-        loginAttemptTracker.timerId = setInterval(() => {
-          const rem = Math.ceil((loginAttemptTracker.lockedUntil - Date.now()) / 1000);
-          if (rem <= 0) {
-            clearInterval(loginAttemptTracker.timerId);
-            loginAttemptTracker.timerId = null;
-            loginAttemptTracker.failedCount = 0;
-            loginAttemptTracker.lockedUntil = 0;
-            if (submitBtn) submitBtn.disabled = false;
-            if (errEl) errEl.style.display = "none";
-          } else if (errEl) {
-            errEl.textContent = `Too many failed login attempts. Locked for ${rem}s.`;
+        const data = await response.json();
+        if (!response.ok || !data.ok || !data.session) {
+          if (errEl) {
+            errEl.textContent = data.error || "Unable to sign in. Please check your credentials.";
             errEl.style.display = "block";
           }
-        }, 1000);
+          return;
+        }
+
+        loginAttemptTracker.failedCount = 0;
+        loginAttemptTracker.lockedUntil = 0;
+        currentSession = data.session;
+        isStudentPreview = false;
+        saveCurrentSession();
+        document.getElementById("loginPasswordInput").value = "";
+        const pwInput = document.getElementById("loginPasswordInput");
+        if (pwInput) pwInput.type = "password";
+        const pwBtn = document.getElementById("loginPasswordToggleBtn");
+        if (pwBtn) pwBtn.textContent = "Show";
+        showToast(`Welcome back, ${data.session.name || data.session.email}`);
+        switchWorkspaceView(data.session.role === "admin" ? "admin" : "library");
+      } catch {
         if (errEl) {
-          errEl.textContent = "Too many failed login attempts. Locked for 30s.";
+          errEl.textContent = "Unable to contact the account service. Please try again.";
           errEl.style.display = "block";
         }
-        return;
-      }
-
-      const attemptsLeft = Math.max(1, 5 - loginAttemptTracker.failedCount);
-      if (errEl) {
-        errEl.textContent = `Invalid username/email or password (${attemptsLeft} attempt${attemptsLeft === 1 ? "" : "s"} remaining).`;
-        errEl.style.display = "block";
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In to Portal";
+        }
       }
     }
 
@@ -7138,6 +7118,7 @@
       try {
         if (currentSession) {
           sessionStorage.setItem(STORAGE_KEYS.CURRENT_SESSION, JSON.stringify(currentSession));
+          void loadStateFromBackend();
         } else {
           sessionStorage.removeItem(STORAGE_KEYS.CURRENT_SESSION);
         }
@@ -8467,13 +8448,17 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-id": userKey
+          ...(currentSession?.authToken ? { Authorization: `Bearer ${currentSession.authToken}` } : {})
         },
         body: JSON.stringify({
           userKey,
           stars: numericStars
         })
-      }).catch(() => {});
+      }).then((res) => {
+        if (!res.ok) console.warn("Material rating was not accepted by the server.", { status: res.status });
+      }).catch((err) => {
+        console.warn("Unable to save material rating to the server.", err);
+      });
 
       persistAllToStorage();
       if (currentWorkspaceView === "sublist" && activeCourseId) {
@@ -11046,7 +11031,12 @@
           localStorage.removeItem(STORAGE_KEYS.APPEARANCE);
           localStorage.removeItem(STORAGE_KEYS.VISITOR_SHARED_COUNT);
           localStorage.removeItem(STORAGE_KEYS.VISITOR_PER_DOWNLOAD_PROGRESS);
-          fetch("/api/reset", { method: "POST" }).catch(() => {});
+          fetch("/api/reset", {
+            method: "POST",
+            headers: currentSession?.authToken ? { Authorization: `Bearer ${currentSession.authToken}` } : {}
+          }).then((res) => {
+            if (!res.ok) showToast("Server reset was rejected. Please sign in again as an administrator.");
+          }).catch(() => showToast("Unable to reset server data. Please try again."));
           loadStateFromStorage();
           applyAppearanceSettings();
           applyPageTexts();

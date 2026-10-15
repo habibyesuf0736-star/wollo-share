@@ -9,9 +9,12 @@ import { createServer as createViteServer } from "vite";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const FIREBASE_CONFIG = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8")
+) as { apiKey?: string; projectId?: string };
 
-const PORT = 3000;
-const DATA_DIR = path.join(__dirname, "data");
+const PORT = Number(process.env.PORT || 3000);
+const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "wollo-db.json");
 
 const ADMIN_USERNAME = "admin";
@@ -20,7 +23,10 @@ const ADMIN_EMAIL = "habibyesuf81@gmail.com";
 // Salted multi-round SHA-256 hashes of primary & secondary admin passwords (never stored in plaintext)
 const PEPPER = "WOLLO_SHARE_SECURITY_PEPPER_2026_V1";
 const VAULT_MASTER_KEY = "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
-const SESSION_HMAC_SECRET = "WOLLO_SHARE_SESSION_HMAC_SECRET_2026_V1";
+const SESSION_HMAC_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET must be configured in production.");
+}
 const ADMIN_PASSWORD_HASH =
   "enc$sha256$61646d696e2d6f776e6572$5d9572e8202a29b89081c4b507b69a8beca0238059f44f45871c9005897913a1";
 const SECONDARY_ADMIN_PASSWORD_HASH =
@@ -113,13 +119,52 @@ function createSignedSessionToken(session: { id: string; name: string; email: st
   const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
   const payloadStr = `${session.id}|${session.email}|${session.role}|${issuedAt}|${expiresAt}`;
   const payloadHex = utf8ToHex(payloadStr);
-  const sig = sha256Hex(`${SESSION_HMAC_SECRET}::SESSION::${payloadHex}`).slice(0, 32);
+  const sig = crypto.createHmac("sha256", SESSION_HMAC_SECRET).update(payloadHex).digest("hex").slice(0, 32);
   return {
     ...session,
     issuedAt,
     expiresAt,
     authToken: `wstok.${payloadHex}.${sig}`
   };
+}
+
+function verifyRequestSession(req: express.Request) {
+  const token = (req.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== "wstok" || !/^[a-f\d]+$/i.test(parts[1])) return null;
+  const [, payloadHex, signature] = parts;
+  const expectedSignature = crypto
+    .createHmac("sha256", SESSION_HMAC_SECRET)
+    .update(payloadHex)
+    .digest("hex")
+    .slice(0, 32);
+  if (!/^[a-f\d]{32}$/i.test(signature)) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expectedSignature, "hex"))) return null;
+
+  const [id, email, role, issuedAtValue, expiresAtValue] = Buffer.from(payloadHex, "hex").toString("utf8").split("|");
+  const issuedAt = Number(issuedAtValue);
+  const expiresAt = Number(expiresAtValue);
+  if (!id || !email || !role || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return null;
+  if (issuedAt > Date.now() + 60_000 || expiresAt <= Date.now() || expiresAt - issuedAt > 24 * 60 * 60 * 1000) return null;
+
+  if (id === "admin-owner") {
+    return email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && role === "admin"
+      ? { id, email, role }
+      : null;
+  }
+  const user = dbState.usersData.find((account) => account.id === id && account.email.toLowerCase() === email.toLowerCase());
+  if (!user || role !== (user.role || "user")) return null;
+  return { id, email, role };
+}
+
+function safeUserAccount(user: UserAccount) {
+  const {
+    password: _password,
+    passwordHash: _passwordHash,
+    passwordVault: _passwordVault,
+    ...safeUser
+  } = user;
+  return safeUser;
 }
 
 function secureUserAccount(u: any): UserAccount {
@@ -611,13 +656,6 @@ interface DatabaseSchema {
   appearanceSettings: Record<string, string>;
   userRatings: Record<string, number>;
   customAdminPassword: string;
-  emailSettings?: {
-    smtpUser: string;
-    smtpPass: string;
-    smtpHost: string;
-    smtpPort: number;
-    smtpFrom: string;
-  };
 }
 
 function buildDefaultDatabase(): DatabaseSchema {
@@ -754,8 +792,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     pageTexts: { ...DEFAULT_TEXTS, ...(raw.pageTexts || {}) },
     appearanceSettings: { ...DEFAULT_APPEARANCE, ...(raw.appearanceSettings || {}) },
     userRatings: raw.userRatings && typeof raw.userRatings === "object" ? raw.userRatings : {},
-    customAdminPassword,
-    emailSettings: raw.emailSettings
+    customAdminPassword
   };
 }
 
@@ -798,6 +835,10 @@ let dbState: DatabaseSchema = loadDatabase();
 
 // In-memory hashed verification codes for password reset flow with TTL and attempt tracking
 const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+const pendingSignupRecords = new Map<
+  string,
+  { user: UserAccount; codeHash: string; generatedAt: number; attempts: number }
+>();
 const activeResetCodes = new Map<
   string,
   {
@@ -810,6 +851,7 @@ const activeResetCodes = new Map<
     attempts: number;
   }
 >();
+const resetRequestRateLimitMap = new Map<string, { windowStartedAt: number; count: number }>();
 
 async function sendVerificationCodeEmail(
   recipientEmail: string,
@@ -822,29 +864,60 @@ async function sendVerificationCodeEmail(
   error?: string;
 }> {
   const cleanRecipient = String(recipientEmail || "").trim();
+  const smtpHost = (process.env.SMTP_HOST || "").trim();
+  const smtpPort = Number(process.env.SMTP_PORT || "");
+  const smtpUser = (process.env.SMTP_USER || "").trim();
+  const smtpPass = (process.env.SMTP_PASS || "").trim();
+  const smtpFrom = (process.env.SMTP_FROM || "").trim();
+  const missingSettings = [
+    ["SMTP_HOST", smtpHost],
+    ["SMTP_PORT", Number.isInteger(smtpPort) && smtpPort > 0 ? String(smtpPort) : ""],
+    ["SMTP_USER", smtpUser],
+    ["SMTP_PASS", smtpPass],
+    ["SMTP_FROM", smtpFrom]
+  ].filter(([, value]) => !value).map(([name]) => name);
+
+  if (missingSettings.length) {
+    return {
+      sent: false,
+      provider: "not-configured",
+      error: `Email delivery is not configured. Set ${missingSettings.join(", ")} in the server environment.`
+    };
+  }
+
   const subject = `Wollo Share — Your Verification Code is ${code}`;
   const textBody = [
     `Wollo Share Account Security`,
     ``,
     `Hello,`,
-    `We received a request to verify or reset the password for your Wollo Share account (${accountIdentifier}).`,
+    `We received a request to verify your email address or reset the password for your Wollo Share account (${accountIdentifier}).`,
     ``,
     `Your 6-digit verification code is: ${code}`,
     ``,
-    `Enter this 6-digit code on the Wollo Share password recovery screen to set your new password.`,
+    `Enter this 6-digit code on the Wollo Share screen where you requested it.`,
     `This code expires in 10 minutes.`
   ].join("\n");
 
+  const escapeHtml = (value: string) =>
+    value.replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[char] || char);
+  const safeAccountIdentifier = escapeHtml(accountIdentifier);
+  const safeRecipient = escapeHtml(cleanRecipient);
   const htmlBody = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 28px 24px; border: 1px solid #d9d6ca; border-radius: 10px; background: #ffffff; color: #172b27;">
       <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #1d624f; margin-bottom: 6px;">
         Wollo Share · Account Security
       </div>
       <h2 style="margin: 0 0 12px; font-size: 20px; color: #172b27;">
-        Password Reset Verification Code
+        Account Verification Code
       </h2>
       <p style="margin: 0 0 16px; font-size: 14px; line-height: 1.55; color: #4f605b;">
-        A verification code was requested for account <strong style="color: #172b27;">${accountIdentifier}</strong> (sent to <strong style="color: #172b27;">${cleanRecipient}</strong>).
+        A verification code was requested for account <strong style="color: #172b27;">${safeAccountIdentifier}</strong> (sent to <strong style="color: #172b27;">${safeRecipient}</strong>).
       </p>
       <div style="padding: 18px; border-radius: 8px; background: #e1f0ea; border: 1.5px solid #1d624f; text-align: center; margin-bottom: 18px;">
         <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #1d624f; margin-bottom: 6px;">
@@ -855,147 +928,45 @@ async function sendVerificationCodeEmail(
         </div>
       </div>
       <p style="margin: 0; font-size: 12.5px; color: #5b6864; line-height: 1.5;">
-        Enter this code on the Wollo Share login page to complete your password reset. This verification code is valid for 10 minutes.
+        Enter this code on the Wollo Share page where you requested it. This verification code is valid for 10 minutes.
       </p>
     </div>
   `;
 
-  let providerConfigured = false;
-  let lastError = "Email is not configured. Set BREVO_API_KEY in wolloshare/.env.local, then restart the server. A verified BREVO_FROM sender is also required.";
-
-  const configuredEmailSettings = dbState.emailSettings;
-  const rawEnvHost = (process.env.SMTP_HOST || "").trim();
-  const smtpUser = (
-    configuredEmailSettings?.smtpUser ||
-    process.env.SMTP_USER ||
-    process.env.GMAIL_USER ||
-    (rawEnvHost.includes("@") ? rawEnvHost : "")
-  ).trim();
-  const smtpPass = (
-    configuredEmailSettings?.smtpPass ||
-    process.env.SMTP_PASS ||
-    process.env.GMAIL_APP_PASSWORD ||
-    ""
-  ).trim();
-  const smtpHost = (
-    configuredEmailSettings?.smtpHost ||
-    (rawEnvHost && !rawEnvHost.includes("@") ? rawEnvHost : "smtp.gmail.com")
-  ).trim();
-  const smtpPort =
-    configuredEmailSettings?.smtpPort ||
-    Number(process.env.SMTP_PORT || (smtpHost === "smtp-relay.brevo.com" ? 587 : 465));
-  const senderEmail = smtpUser.includes("@") ? smtpUser : "";
-  const smtpFrom = (
-    configuredEmailSettings?.smtpFrom ||
-    process.env.SMTP_FROM ||
-    (senderEmail ? `"Wollo Share Security" <${senderEmail}>` : "")
-  ).trim();
-
-  if (smtpUser && smtpPass && smtpFrom) {
-    providerConfigured = true;
-    try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: { user: smtpUser, pass: smtpPass }
-      });
-      const info = await transporter.sendMail({
-        from: smtpFrom,
-        to: cleanRecipient,
-        subject,
-        text: textBody,
-        html: htmlBody
-      });
-      return { sent: true, provider: "smtp", messageId: info.messageId };
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : "SMTP delivery failed.";
-      console.error("SMTP verification-code delivery failed:", lastError);
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: smtpUser, pass: smtpPass }
+    });
+    const info = await transporter.sendMail({
+      from: smtpFrom,
+      to: cleanRecipient,
+      subject,
+      text: textBody,
+      html: htmlBody
+    });
+    const acceptedRecipients = info.accepted.map((accepted) => accepted.toLowerCase());
+    if (!acceptedRecipients.includes(cleanRecipient.toLowerCase())) {
+      return {
+        sent: false,
+        provider: "delivery-failed",
+        error: "The SMTP server did not accept the verification email recipient."
+      };
     }
+    return { sent: true, provider: "smtp", messageId: info.messageId };
+  } catch (err) {
+    const errorCode = typeof err === "object" && err !== null && "code" in err
+      ? String(err.code)
+      : "unknown";
+    console.error("SMTP verification-code delivery failed.", { errorCode });
+    return {
+      sent: false,
+      provider: "delivery-failed",
+      error: "Email delivery failed. Check the SMTP settings and verified sender address."
+    };
   }
-
-  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
-  const brevoFrom = (
-    process.env.BREVO_FROM ||
-    process.env.SMTP_FROM ||
-    dbState.emailSettings?.smtpFrom ||
-    ""
-  ).trim();
-  if (brevoApiKey && brevoFrom) {
-    providerConfigured = true;
-    try {
-      const formattedSender = brevoFrom.match(/^(.*?)\s*<([^<>]+)>$/);
-      const sender = formattedSender
-        ? {
-            email: formattedSender[2].trim(),
-            name: formattedSender[1].trim().replace(/^["']|["']$/g, "")
-          }
-        : { email: brevoFrom };
-      const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "api-key": brevoApiKey,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sender,
-          to: [{ email: cleanRecipient }],
-          subject,
-          htmlContent: htmlBody,
-          textContent: textBody
-        })
-      });
-      if (resp.ok) {
-        const data = (await resp.json()) as { messageId?: string };
-        return {
-          sent: true,
-          provider: "brevo-api",
-          messageId: data.messageId
-        };
-      }
-      console.warn("Brevo verification-code delivery failed:", resp.status, await resp.text());
-    } catch (err) {
-      console.error("Brevo verification-code delivery failed:", err);
-    }
-  }
-
-  const resendKey = (process.env.RESEND_API_KEY || "").trim();
-  if (resendKey && smtpFrom) {
-    providerConfigured = true;
-    try {
-      const resp = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: smtpFrom,
-          to: [cleanRecipient],
-          subject,
-          html: htmlBody,
-          text: textBody
-        })
-      });
-      if (resp.ok) {
-        const data = (await resp.json()) as { id?: string };
-        return { sent: true, provider: "resend-api", messageId: data.id };
-      }
-      lastError = `Resend rejected the message (${resp.status}).`;
-      console.error("Resend verification-code delivery failed:", lastError);
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : "Resend delivery failed.";
-      console.error("Resend verification-code delivery failed:", lastError);
-    }
-  }
-
-  return {
-    sent: false,
-    provider: providerConfigured ? "delivery-failed" : "not-configured",
-    error: providerConfigured
-      ? "Email delivery failed. Check the provider credentials and verified sender address."
-      : lastError
-  };
 }
 
 // Brute-force login attempt rate-limiter
@@ -1050,109 +1021,76 @@ async function startServer() {
   });
 
   app.get("/api/state", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const authorization = _req.get("authorization");
+    const session = verifyRequestSession(_req);
+    if (authorization && !session) {
+      res.status(401).json({ ok: false, error: "Your session is invalid or expired. Please sign in again." });
+      return;
+    }
+    const visibleUsers = session
+      ? session.role === "admin"
+        ? dbState.usersData.map(safeUserAccount)
+        : dbState.usersData.filter((user) => user.id === session.id).map(safeUserAccount)
+      : [];
     res.json({
       coursesData: dbState.coursesData,
-      usersData: dbState.usersData,
+      usersData: visibleUsers,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
-      userRatings: dbState.userRatings,
-      customAdminPassword: dbState.customAdminPassword
+      userRatings: dbState.userRatings
     });
   });
 
   app.put("/api/state", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
     const incoming = req.body || {};
+    const incomingUsers: Partial<UserAccount>[] = Array.isArray(incoming.usersData) ? incoming.usersData : [];
+    const mergedUsers: UserAccount[] = incomingUsers.flatMap((incomingUser): UserAccount[] => {
+      const existing = dbState.usersData.find(
+        (user) => user.id === incomingUser.id || user.email.toLowerCase() === String(incomingUser.email || "").toLowerCase()
+      );
+      if (!existing) return [];
+      const { password: _password, passwordHash: _passwordHash, passwordVault: _passwordVault, ...safeUpdates } =
+        incomingUser as UserAccount;
+      return [{
+        ...existing,
+        ...safeUpdates,
+        role: existing.role,
+        password: existing.password,
+        passwordHash: existing.passwordHash,
+        passwordVault: existing.passwordVault
+      }];
+    });
     dbState = normalizeDatabase({
       coursesData: Array.isArray(incoming.coursesData) ? incoming.coursesData : dbState.coursesData,
-      usersData: Array.isArray(incoming.usersData) ? incoming.usersData : dbState.usersData,
+      usersData: [...mergedUsers, ...dbState.usersData.filter((user) => !mergedUsers.some((updated) => updated.id === user.id))],
       pageTexts: incoming.pageTexts || dbState.pageTexts,
       appearanceSettings: incoming.appearanceSettings || dbState.appearanceSettings,
       userRatings: incoming.userRatings || dbState.userRatings,
-      customAdminPassword:
-        typeof incoming.customAdminPassword === "string" && incoming.customAdminPassword
-          ? incoming.customAdminPassword
-          : dbState.customAdminPassword
+      customAdminPassword: dbState.customAdminPassword
     });
     saveDatabase(dbState);
-    res.json({ ok: true, state: dbState });
+    res.json({ ok: true });
   });
 
   app.post("/api/reset", (_req, res) => {
-    dbState = buildDefaultDatabase();
-    saveDatabase(dbState);
-    res.json({ ok: true, state: dbState });
-  });
-
-  // 2. Email & SMTP Configuration Endpoints
-  app.post("/api/settings/smtp", async (req, res) => {
-    res.setHeader("Cache-Control", "no-store");
-    const user = String(req.body?.smtpUser || "").trim();
-    const pass = String(req.body?.smtpPass || "").trim();
-    const host =
-      String(req.body?.smtpHost || "").trim() ||
-      (pass.startsWith("xsmtpsib-") ? "smtp-relay.brevo.com" : "smtp.gmail.com");
-    const port = Number(req.body?.smtpPort || (host === "smtp-relay.brevo.com" ? 587 : 465));
-    const testRecipient = String(req.body?.testRecipient || "habibyesuf81@gmail.com").trim();
-    const testCode = String(req.body?.testCode || "414895").trim();
-
-    if (!pass) {
-      res.status(400).json({ ok: false, error: "Please enter your SMTP password or key." });
+    const session = verifyRequestSession(_req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
       return;
     }
-
-    try {
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-        tls: { rejectUnauthorized: false }
-      });
-      await transporter.verify();
-
-      const senderAddr = user.includes("@") ? user : "habibyesuf81@gmail.com";
-      const info = await transporter.sendMail({
-        from: `"Wollo Share Security" <${senderAddr}>`,
-        to: testRecipient,
-        subject: `Wollo Share — Your Verification Code is ${testCode}`,
-        text: `Hello,\n\nYour 6-digit verification code is: ${testCode}\n\nEnter this code on the screen to complete your verification.\nThis code expires in 10 minutes.\n\nBest regards,\nWollo Share Security`,
-        html: `
-          <div style="font-family:sans-serif;padding:24px;border:1.5px solid #1d624f;border-radius:10px;max-width:480px;background:#ffffff;">
-            <div style="font-size:11px;font-weight:800;color:#1d624f;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Wollo Share Security</div>
-            <h2 style="margin:0 0 12px;color:#172b27;font-size:20px;">Your Verification Code</h2>
-            <p style="margin:0 0 16px;color:#4f605b;font-size:14px;">Here is the 6-digit verification code requested for your account:</p>
-            <div style="padding:16px;border-radius:8px;background:#e1f0ea;text-align:center;border:1px solid #1d624f;margin-bottom:16px;">
-              <span style="font-family:monospace;font-size:32px;font-weight:900;letter-spacing:0.2em;color:#172b27;">${testCode}</span>
-            </div>
-            <p style="margin:0;font-size:12px;color:#718096;">Enter this code on the Wollo Share verification page to complete your action.</p>
-          </div>
-        `
-      });
-
-      dbState.emailSettings = {
-        smtpUser: user,
-        smtpPass: pass,
-        smtpHost: host,
-        smtpPort: port,
-        smtpFrom: `"Wollo Share" <${senderAddr}>`
-      };
-      saveDatabase(dbState);
-
-      res.json({
-        ok: true,
-        messageId: info.messageId,
-        message: `Verification code ${testCode} was successfully sent directly to ${testRecipient}!`
-      });
-    } catch (err: any) {
-      res.status(400).json({
-        ok: false,
-        error: `SMTP authentication error: ${err?.message || "Failed to connect to SMTP server."}`
-      });
-    }
+    dbState = buildDefaultDatabase();
+    saveDatabase(dbState);
+    res.json({ ok: true });
   });
 
   // 3. Encrypted Authentication & Password Recovery Endpoints
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const name = String(req.body?.name || "").trim() || "Student Learner";
     const email = String(req.body?.email || "").trim().toLowerCase();
@@ -1169,44 +1107,49 @@ async function startServer() {
       return;
     }
 
+    const requester = req.ip || req.socket.remoteAddress || "unknown";
+    const rateKey = `signup:${requester}`;
+    const now = Date.now();
+    const rateLimit = resetRequestRateLimitMap.get(rateKey);
+    if (rateLimit && now - rateLimit.windowStartedAt < 15 * 60 * 1000 && rateLimit.count >= 5) {
+      res.status(429).json({ ok: false, error: "Too many registration code requests. Please try again in 15 minutes." });
+      return;
+    }
+    if (!rateLimit || now - rateLimit.windowStartedAt >= 15 * 60 * 1000) {
+      resetRequestRateLimitMap.set(rateKey, { windowStartedAt: now, count: 1 });
+    } else {
+      rateLimit.count += 1;
+    }
+
     const existing = dbState.usersData.find((u) => u.email.toLowerCase() === email);
     if (existing) {
-      existing.name = name || existing.name;
-      existing.department = department || existing.department;
-      existing.password = password;
-      delete existing.passwordHash;
-      delete existing.passwordVault;
-      secureUserAccount(existing);
-      saveDatabase(dbState);
-      const session = createSignedSessionToken({
-        id: existing.id,
-        name: existing.name,
-        email: existing.email,
-        role: existing.role || "user"
+      res.status(409).json({ ok: false, error: "An account already exists for this email. Sign in or reset its password." });
+      return;
+    }
+    if (pendingSignupRecords.has(email)) {
+      res.status(409).json({
+        ok: false,
+        error: "Email verification is already pending for this address. Use the verification code or request a new one."
       });
-      res.json({ ok: true, user: existing, session, message: "Account updated and signed in successfully!" });
       return;
     }
 
-    const isHabib = email === "habibyesuf81@gmail.com" || email === ADMIN_EMAIL.toLowerCase();
-    const newUser = secureUserAccount({
-      id: "user-" + (isHabib ? "habib" : Date.now()),
-      name: isHabib ? "Habib Yesuf" : name,
+    const pendingUser = secureUserAccount({
+      id: "user-" + Date.now(),
+      name,
       email,
       password,
-      role: isHabib ? "admin" : "user",
+      role: "user",
       department,
-      accountPlan: isHabib ? "paid_lifetime" : plan,
-      paymentStatus: isHabib ? "paid" : (plan === "paid_lifetime" ? "paid" : "unpaid"),
+      accountPlan: plan,
+      paymentStatus: plan === "paid_lifetime" ? "paid" : "unpaid",
       downloadOnlyAccount: false,
-      amountPaidBirr: isHabib || plan === "paid_lifetime" ? 100 : 0,
-      category: isHabib
-        ? "Super Admin · Lifetime VIP Access"
-        : plan === "paid_lifetime"
+      amountPaidBirr: plan === "paid_lifetime" ? 100 : 0,
+      category: plan === "paid_lifetime"
         ? "Paid 100 Birr · Lifetime VIP"
         : "Unpaid · Pending 2 Uploads",
-      sharedMaterialsCount: isHabib ? 8 : 0,
-      downloadsCount: isHabib ? 42 : 0,
+      sharedMaterialsCount: 0,
+      downloadsCount: 0,
       lastActiveAt: "Active now",
       allowedCourseIds: ["course-evangadi", "course-se-capstone", "course-clinical-research", "course-calc-uni"],
       evangadiSynced: true,
@@ -1222,37 +1165,149 @@ async function startServer() {
       ]
     });
 
-    dbState.usersData.unshift(newUser);
-    saveDatabase(dbState);
-
-    const session = createSignedSessionToken({
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role
+    const code = String(crypto.randomInt(100000, 1000000));
+    const delivery = await sendVerificationCodeEmail(email, code, email);
+    if (!delivery.sent) {
+      res.status(503).json({
+        ok: false,
+        error: delivery.error || "Unable to send the verification code. Please try again later."
+      });
+      return;
+    }
+    pendingSignupRecords.set(email, {
+      user: pendingUser,
+      codeHash: hashPassword(code, `signup-otp::${email}`),
+      generatedAt: Date.now(),
+      attempts: 0
     });
-
-    res.json({ ok: true, user: newUser, session, message: "Account created successfully!" });
+    res.json({ ok: true, verificationRequired: true, email, message: "Verification code sent." });
   });
 
-  app.post("/api/auth/google", (req, res) => {
+  app.post("/api/auth/register/resend", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const requester = req.ip || req.socket.remoteAddress || "unknown";
+    const rateKey = `signup:${requester}`;
+    const now = Date.now();
+    const rateLimit = resetRequestRateLimitMap.get(rateKey);
+    if (rateLimit && now - rateLimit.windowStartedAt < 15 * 60 * 1000 && rateLimit.count >= 5) {
+      res.status(429).json({ ok: false, error: "Too many code requests. Please try again in 15 minutes." });
+      return;
+    }
+    if (!rateLimit || now - rateLimit.windowStartedAt >= 15 * 60 * 1000) {
+      resetRequestRateLimitMap.set(rateKey, { windowStartedAt: now, count: 1 });
+    } else {
+      rateLimit.count += 1;
+    }
+
+    const pending = pendingSignupRecords.get(email);
+    if (!pending || Date.now() - pending.generatedAt > RESET_CODE_TTL_MS) {
+      pendingSignupRecords.delete(email);
+      res.status(400).json({ ok: false, error: "Registration verification expired. Please register again." });
+      return;
+    }
+    const code = String(crypto.randomInt(100000, 1000000));
+    const delivery = await sendVerificationCodeEmail(email, code, email);
+    if (!delivery.sent) {
+      res.status(503).json({
+        ok: false,
+        error: delivery.error || "Unable to send the verification code. Please try again later."
+      });
+      return;
+    }
+    pending.codeHash = hashPassword(code, `signup-otp::${email}`);
+    pending.generatedAt = Date.now();
+    pending.attempts = 0;
+    res.json({ ok: true, message: "A new verification code was sent." });
+  });
+
+  app.post("/api/auth/register/verify", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").trim();
+    const pending = pendingSignupRecords.get(email);
+    if (!pending || Date.now() - pending.generatedAt > RESET_CODE_TTL_MS) {
+      pendingSignupRecords.delete(email);
+      res.status(400).json({ ok: false, error: "Registration verification expired. Please register again." });
+      return;
+    }
+    pending.attempts += 1;
+    if (pending.attempts > 5) {
+      pendingSignupRecords.delete(email);
+      res.status(429).json({ ok: false, error: "Too many invalid attempts. Please register again." });
+      return;
+    }
+    if (!verifyPasswordHash(code, pending.codeHash, `signup-otp::${email}`)) {
+      res.status(400).json({ ok: false, error: "Invalid 6-digit verification code." });
+      return;
+    }
+    if (dbState.usersData.some((user) => user.email.toLowerCase() === email)) {
+      pendingSignupRecords.delete(email);
+      res.status(409).json({ ok: false, error: "An account already exists for this email." });
+      return;
+    }
+
+    const user = pending.user;
+    pendingSignupRecords.delete(email);
+    dbState.usersData.unshift(user);
+    saveDatabase(dbState);
+    const session = createSignedSessionToken({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role
+    });
+    res.json({ ok: true, user: safeUserAccount(user), session, message: "Email verified and account created." });
+  });
+
+  app.post("/api/auth/google", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const uid = String(req.body?.uid || "").trim();
     const email = String(req.body?.email || "").trim().toLowerCase();
     const name = String(req.body?.name || "").trim() || "Google Student";
     const photoURL = String(req.body?.photoURL || "").trim();
+    const idToken = String(req.body?.idToken || "").trim();
 
-    if (!email || !uid) {
-      res.status(400).json({ ok: false, error: "Missing email or UID for Google Auth." });
+    if (!email || !uid || !idToken || !FIREBASE_CONFIG.apiKey) {
+      res.status(400).json({ ok: false, error: "A valid Firebase sign-in token is required." });
       return;
     }
 
-    const isHabib = email === "habibyesuf81@gmail.com" || email === ADMIN_EMAIL.toLowerCase();
+    let verifiedAccount: { localId: string; email: string; emailVerified: boolean } | undefined;
+    try {
+      const verificationResponse = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken })
+        }
+      );
+      if (verificationResponse.ok) {
+        const verificationData = await verificationResponse.json() as {
+          users?: Array<{ localId: string; email: string; emailVerified: boolean }>;
+        };
+        verifiedAccount = verificationData.users?.[0];
+      }
+    } catch {
+      res.status(503).json({ ok: false, error: "Unable to verify Google sign-in right now. Please try again." });
+      return;
+    }
+
+    if (
+      !verifiedAccount ||
+      verifiedAccount.localId !== uid ||
+      verifiedAccount.email.toLowerCase() !== email ||
+      !verifiedAccount.emailVerified
+    ) {
+      res.status(401).json({ ok: false, error: "Google sign-in could not be verified." });
+      return;
+    }
+
     const existing = dbState.usersData.find((u) => u.email.toLowerCase() === email || u.id === uid);
 
     if (existing) {
       existing.name = name || existing.name;
-      if (isHabib) existing.role = "admin";
       saveDatabase(dbState);
       const session = createSignedSessionToken({
         id: existing.id,
@@ -1260,7 +1315,7 @@ async function startServer() {
         email: existing.email,
         role: existing.role
       });
-      res.json({ ok: true, user: existing, session, message: "Signed in with Google successfully!" });
+      res.json({ ok: true, user: safeUserAccount(existing), session, message: "Signed in with Google successfully!" });
       return;
     }
 
@@ -1269,13 +1324,13 @@ async function startServer() {
       name,
       email,
       password: "google_oauth_protected_" + uid.slice(0, 8),
-      role: isHabib ? "admin" : "user",
+      role: "user",
       department: "General Studies & Science",
-      accountPlan: isHabib ? "paid_lifetime" : "free",
-      paymentStatus: isHabib ? "paid" : "unpaid",
+      accountPlan: "free",
+      paymentStatus: "unpaid",
       downloadOnlyAccount: false,
-      amountPaidBirr: isHabib ? 100 : 0,
-      category: isHabib ? "Super Admin · Lifetime VIP Access" : "Google Verified Student",
+      amountPaidBirr: 0,
+      category: "Google Verified Student",
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: new Date().toISOString().slice(0, 16).replace("T", " "),
@@ -1303,7 +1358,7 @@ async function startServer() {
       role: newUser.role
     });
 
-    res.json({ ok: true, user: newUser, session, message: "Google onboarding completed successfully!" });
+    res.json({ ok: true, user: safeUserAccount(newUser), session, message: "Google onboarding completed successfully!" });
   });
 
   app.post("/api/auth/login", (req, res) => {
@@ -1377,6 +1432,19 @@ async function startServer() {
     if (!rawId && !rawEmail) {
       res.status(400).json({ ok: false, error: "Please enter your email address." });
       return;
+    }
+
+    const requester = req.ip || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    const rateLimit = resetRequestRateLimitMap.get(requester);
+    if (rateLimit && now - rateLimit.windowStartedAt < 15 * 60 * 1000 && rateLimit.count >= 5) {
+      res.status(429).json({ ok: false, error: "Too many code requests. Please try again in 15 minutes." });
+      return;
+    }
+    if (!rateLimit || now - rateLimit.windowStartedAt >= 15 * 60 * 1000) {
+      resetRequestRateLimitMap.set(requester, { windowStartedAt: now, count: 1 });
+    } else {
+      rateLimit.count += 1;
     }
 
     const code = String(crypto.randomInt(100000, 1000000));
@@ -1499,49 +1567,10 @@ async function startServer() {
       return;
     }
 
-    // If user entered any valid email address directly, send the 6-digit verification code to that email address!
-    if (enteredEmail) {
-      const lowerEmail = enteredEmail.toLowerCase();
-      const codeHash = hashPassword(code, `reset-otp::${lowerEmail}`);
-      const record = {
-        targetType: "user" as const,
-        targetUserId: `email-user::${lowerEmail}`,
-        identifier: enteredEmail,
-        recipientLabel: enteredEmail,
-        codeHash,
-        generatedAt: Date.now(),
-        attempts: 0
-      };
-
-      const delivery = await sendVerificationCodeEmail(enteredEmail, code, enteredEmail);
-      if (!delivery.sent) {
-        res.status(503).json({
-          ok: false,
-          error: `Unable to send the verification code to ${enteredEmail}. ${delivery.error || "Please try again later."}`
-        });
-        return;
-      }
-
-      activeResetCodes.set(lowerEmail, record);
-      if (lowerId) activeResetCodes.set(lowerId, record);
-      res.json({
-        ok: true,
-        resetState: {
-          targetType: record.targetType,
-          targetUserId: record.targetUserId,
-          identifier: enteredEmail,
-          recipientLabel: enteredEmail,
-          generatedAt: record.generatedAt,
-          emailSent: true
-        }
-      });
-      return;
-    }
-
     res.status(404).json({
       ok: false,
       needsEmail: !rawId.includes("@"),
-      error: `Please enter a valid email address so we can send the verification code directly to your email.`
+      error: "No account was found for that email or username. Check the address or create an account."
     });
   });
 
@@ -1605,51 +1634,17 @@ async function startServer() {
       saveDatabase(dbState);
       activeResetCodes.delete(lowerId);
       if (lowerEmail) activeResetCodes.delete(lowerEmail);
-      res.json({ ok: true, updatedType: "admin", customAdminPassword: dbState.customAdminPassword });
+      res.json({ ok: true, updatedType: "admin" });
       return;
     }
 
-    let matchedUser = dbState.usersData.find(
+    const matchedUser = dbState.usersData.find(
       (u) =>
         u.email.toLowerCase() === lowerId ||
         u.name.toLowerCase() === lowerId ||
         (lowerEmail && u.email.toLowerCase() === lowerEmail) ||
-        (record?.targetUserId && u.id === record.targetUserId)
+        u.id === record.targetUserId
     );
-
-    if (!matchedUser && (lowerEmail.includes("@") || lowerId.includes("@"))) {
-      const acctEmail = lowerEmail.includes("@") ? email : identifier;
-      const newUser = secureUserAccount({
-        id: "user-" + Date.now(),
-        name: acctEmail.split("@")[0],
-        email: acctEmail,
-        password: newPassword,
-        role: "user",
-        department: "General",
-        accountPlan: "unpaid",
-        paymentStatus: "unpaid",
-        downloadOnlyAccount: false,
-        amountPaidBirr: 0,
-        category: "Unpaid · Pending 2 Uploads",
-        sharedMaterialsCount: 0,
-        unpaidCurrentUploadProgress: 0,
-        downloadsCount: 0,
-        lastActiveAt: "Just now",
-        allowedCourseIds: ["course-evangadi"],
-        unpaidMigrationV3: true,
-        unpaidPerDownloadMigrationV4: true,
-        activityLog: [
-          {
-            id: "act-" + Date.now(),
-            type: "Email Verified & Password Set",
-            detail: `Verified email ${acctEmail} via 6-digit code`,
-            timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
-          }
-        ]
-      });
-      dbState.usersData.unshift(newUser);
-      matchedUser = newUser;
-    }
 
     if (matchedUser) {
       matchedUser.password = newPassword;
@@ -1659,17 +1654,19 @@ async function startServer() {
       saveDatabase(dbState);
       activeResetCodes.delete(lowerId);
       if (lowerEmail) activeResetCodes.delete(lowerEmail);
-      res.json({ ok: true, updatedType: "user", usersData: dbState.usersData, updatedIdentifier: matchedUser.email });
+      res.json({ ok: true, updatedType: "user", updatedIdentifier: matchedUser.email });
       return;
     }
 
+    activeResetCodes.delete(lowerId);
+    if (lowerEmail) activeResetCodes.delete(lowerEmail);
     res.status(404).json({ ok: false, error: "Account not found." });
   });
 
   // 3. Dedicated Course, Material & Side-Material REST Endpoints (Admin-protected)
   app.post("/api/courses/:courseId/materials/:materialId/side-materials", (req, res) => {
-    const role = req.headers["x-user-role"];
-    if (role !== "admin") {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
       res.status(403).json({ ok: false, error: "Only the Administrator can add or edit side materials." });
       return;
     }
@@ -1717,8 +1714,8 @@ async function startServer() {
   });
 
   app.delete("/api/courses/:courseId/materials/:materialId/side-materials/:sideMatId", (req, res) => {
-    const role = req.headers["x-user-role"];
-    if (role !== "admin") {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
       res.status(403).json({ ok: false, error: "Only the Administrator can delete side materials." });
       return;
     }
@@ -1742,14 +1739,14 @@ async function startServer() {
 
   // 4. Logged-In Student 5-Star Material Rating Endpoint
   app.post("/api/courses/:courseId/materials/:materialId/rate", (req, res) => {
-    const { courseId, materialId } = req.params;
-    const rawUserKey = String(req.body?.userKey || req.headers["x-user-id"] || "").trim().toLowerCase();
-    const numericStars = Math.max(1, Math.min(5, Math.round(Number(req.body?.stars) || 0)));
-
-    if (!rawUserKey) {
+    const session = verifyRequestSession(req);
+    if (!session) {
       res.status(401).json({ ok: false, error: "Please sign in as a student to rate study materials." });
       return;
     }
+    const { courseId, materialId } = req.params;
+    const rawUserKey = session.id.toLowerCase();
+    const numericStars = Math.max(1, Math.min(5, Math.round(Number(req.body?.stars) || 0)));
 
     const course = dbState.coursesData.find((c) => c.id === courseId);
     if (!course) {
