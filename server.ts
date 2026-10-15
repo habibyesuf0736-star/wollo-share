@@ -860,7 +860,8 @@ async function sendVerificationCodeEmail(
     </div>
   `;
 
-  let lastError = "Email delivery is not configured. Configure SMTP credentials or a Resend API key.";
+  let providerConfigured = false;
+  let lastError = "Email is not configured. Set BREVO_API_KEY in wolloshare/.env.local, then restart the server. A verified BREVO_FROM sender is also required.";
 
   const configuredEmailSettings = dbState.emailSettings;
   const rawEnvHost = (process.env.SMTP_HOST || "").trim();
@@ -891,6 +892,7 @@ async function sendVerificationCodeEmail(
   ).trim();
 
   if (smtpUser && smtpPass && smtpFrom) {
+    providerConfigured = true;
     try {
       const transporter = nodemailer.createTransport({
         host: smtpHost,
@@ -912,8 +914,54 @@ async function sendVerificationCodeEmail(
     }
   }
 
+  const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+  const brevoFrom = (
+    process.env.BREVO_FROM ||
+    process.env.SMTP_FROM ||
+    dbState.emailSettings?.smtpFrom ||
+    ""
+  ).trim();
+  if (brevoApiKey && brevoFrom) {
+    providerConfigured = true;
+    try {
+      const formattedSender = brevoFrom.match(/^(.*?)\s*<([^<>]+)>$/);
+      const sender = formattedSender
+        ? {
+            email: formattedSender[2].trim(),
+            name: formattedSender[1].trim().replace(/^["']|["']$/g, "")
+          }
+        : { email: brevoFrom };
+      const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": brevoApiKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sender,
+          to: [{ email: cleanRecipient }],
+          subject,
+          htmlContent: htmlBody,
+          textContent: textBody
+        })
+      });
+      if (resp.ok) {
+        const data = (await resp.json()) as { messageId?: string };
+        return {
+          sent: true,
+          provider: "brevo-api",
+          messageId: data.messageId
+        };
+      }
+      console.warn("Brevo verification-code delivery failed:", resp.status, await resp.text());
+    } catch (err) {
+      console.error("Brevo verification-code delivery failed:", err);
+    }
+  }
+
   const resendKey = (process.env.RESEND_API_KEY || "").trim();
   if (resendKey && smtpFrom) {
+    providerConfigured = true;
     try {
       const resp = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -943,8 +991,10 @@ async function sendVerificationCodeEmail(
 
   return {
     sent: false,
-    provider: "none",
-    error: lastError
+    provider: providerConfigured ? "delivery-failed" : "not-configured",
+    error: providerConfigured
+      ? "Email delivery failed. Check the provider credentials and verified sender address."
+      : lastError
   };
 }
 
@@ -1369,7 +1419,7 @@ async function startServer() {
       if (!delivery.sent) {
         res.status(503).json({
           ok: false,
-          error: `Unable to send the verification code to ${recipientEmail}. ${delivery.error || "Please try again later."}`
+          error: delivery.error || "Unable to send the verification code. Please try again later."
         });
         return;
       }
@@ -1421,7 +1471,7 @@ async function startServer() {
       if (!delivery.sent) {
         res.status(503).json({
           ok: false,
-          error: `Unable to send the verification code to ${recipientEmail}. ${delivery.error || "Please try again later."}`
+          error: delivery.error || "Unable to send the verification code. Please try again later."
         });
         return;
       }
@@ -1776,4 +1826,3 @@ async function startServer() {
 }
 
 startServer();
-

@@ -3109,6 +3109,7 @@
       box-shadow: 0 0 0 1px rgba(23, 43, 39, 0.25);
     }
   </style>
+  <link rel="stylesheet" href="/src/design-overrides.css" />
 </head>
 <body>
 
@@ -8012,7 +8013,7 @@
       const sideMats = Array.isArray(mat.sideMaterials) ? mat.sideMaterials : [];
       const isVideo = isYouTubeOrVideoMaterial(mat);
 
-      if (!isVideo && sideMats.length === 0 && !canEdit) {
+      if (sideMats.length === 0 && !canEdit) {
         return "";
       }
 
@@ -10134,6 +10135,20 @@
       if (!container) return;
       const canEdit = canAdminEdit();
       const sideMats = Array.isArray(mat.sideMaterials) ? mat.sideMaterials : [];
+      const sidePanel = document.getElementById("videoModalSidePanel");
+      const playerLayout = sidePanel?.closest(".video-player-layout");
+
+      if (playerLayout) {
+        playerLayout.classList.toggle("has-side-materials", sideMats.length > 0 || canEdit);
+      }
+      if (sidePanel) {
+        sidePanel.style.display = sideMats.length > 0 || canEdit ? "flex" : "none";
+      }
+
+      if (sideMats.length === 0 && !canEdit) {
+        container.replaceChildren();
+        return;
+      }
 
       const modalKey = getSideMaterialsPanelSearchKey(course.id, mat.id, true);
       const savedQueryRaw = sideMaterialsSearchQueries[modalKey] || "";
@@ -10143,7 +10158,6 @@
       if (searchInput && searchInput.value !== savedQueryRaw) {
         searchInput.value = savedQueryRaw;
       }
-      const sidePanel = document.getElementById("videoModalSidePanel");
       const clearBtn = sidePanel?.querySelector(".side-mat-local-search-clear");
       if (clearBtn) {
         clearBtn.style.display = savedQueryRaw.length > 0 ? "inline-flex" : "none";

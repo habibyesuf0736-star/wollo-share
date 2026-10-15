@@ -14,10 +14,21 @@ import {
   getDoc, 
   getDocFromServer 
 } from 'firebase/firestore';
+import { getAnalytics, isSupported } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase App
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+if (typeof window !== 'undefined') {
+  void isSupported()
+    .then((supported) => {
+      if (supported) getAnalytics(app);
+    })
+    .catch((error) => {
+      console.error('Firebase Analytics initialization failed:', error);
+    });
+}
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
