@@ -1,9 +1,9 @@
 export const DEFAULT_TELEGRAM_LINK = 'https://t.me/+GlchgXPze01lN2I0';
 
 export const DEFAULT_ADMIN_CREDENTIALS = {
-  name: 'Habib Yesuf (Chief Platform Administrator)',
-  email: 'habibyesuf81@gmail.com',
-  password: 'Admin@Wollo2026',
+  name: 'Platform Administrator',
+  email: '',
+  password: '',
   role: 'Super Admin',
 };
 

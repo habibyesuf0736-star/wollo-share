@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+data/wollo-db.json
+/wollo-share-main/
