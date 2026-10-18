@@ -1876,5 +1876,6 @@
     "m-math-5": 4,
     "m-math-4": 4
   },
-  "customAdminPassword": "enc$sha256$61646d696e2d6f776e6572$144c551288821e2ffa721d383e3f4cb69d9c96e8d95f9169b40fd261e6423bbb"
+  "customAdminPassword": "enc$sha256$61646d696e2d6f776e6572$144c551288821e2ffa721d383e3f4cb69d9c96e8d95f9169b40fd261e6423bbb",
+  "passwordRecoveryRequests": []
 }
