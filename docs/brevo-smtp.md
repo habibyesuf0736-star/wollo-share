@@ -1,6 +1,14 @@
 # Brevo SMTP setup
 
-The Express backend sends password-reset verification codes through Nodemailer and Brevo SMTP. It reads these server-only environment variables:
+The Express backend sends password-reset verification codes through Nodemailer and Brevo SMTP.
+
+**Fastest path:** in **Admin → Students & accounts → Email delivery** pick *Provider: SMTP*, enter
+`smtp-relay.brevo.com`, port `587`, the Brevo SMTP login, its SMTP key and the verified sender, then press **Save settings**.
+Codes start sending immediately — no `.env` edit and no server restart. The key is stored vault-encrypted in
+`data/wollo-db.json` and is never returned to the browser.
+
+The same card can instead be filled from these server-only environment variables, which act as the fallback for any field the
+saved settings leave empty:
 
 ```text
 SMTP_HOST=smtp-relay.brevo.com

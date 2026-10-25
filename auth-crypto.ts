@@ -1,7 +1,8 @@
 import crypto from "crypto";
 
-const PEPPER = "WOLLO_SHARE_SECURITY_PEPPER_2026_V1";
-const VAULT_MASTER_KEY = "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
+// Override with env vars in production so the source never carries the live secrets.
+const PEPPER = process.env.WOLLO_SECURITY_PEPPER || "WOLLO_SHARE_SECURITY_PEPPER_2026_V1";
+const VAULT_MASTER_KEY = process.env.WOLLO_VAULT_MASTER_KEY || "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
 
 function sha256Hex(input: string): string {
   return crypto.createHash("sha256").update(String(input ?? ""), "utf8").digest("hex");

@@ -1,9 +1,10 @@
 import "dotenv/config";
 import { encryptVaultSecret, hashPassword } from "./auth-crypto.ts";
+import { configureMail, mailStatus, sendMail, activeMailProvider, effectiveMailConfig, normalizeMailSecret, type MailConfig } from "./mail.ts";
+import { recoveryCodeEmail, recoveryRequestNoticeEmail, testEmailMessage } from "./emailTemplates.ts";
 import crypto from "crypto";
 import express from "express";
 import fs from "fs";
-import nodemailer from "nodemailer";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
@@ -20,16 +21,10 @@ const DB_FILE = path.join(DATA_DIR, "wollo-db.json");
 
 const ADMIN_USERNAME = "admin";
 const ADMIN_EMAIL = "habibyesuf81@gmail.com";
-const SMTP_HOST = process.env.SMTP_HOST || "";
-const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
-const SMTP_SECURE = process.env.SMTP_SECURE === "true" || SMTP_PORT === 465;
-const SMTP_USER = process.env.SMTP_USER || "";
-const SMTP_PASS = process.env.SMTP_PASS || "";
-const SMTP_FROM = process.env.SMTP_FROM || "";
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || ADMIN_EMAIL;
 
 // Salted multi-round SHA-256 hashes of primary & secondary admin passwords (never stored in plaintext)
-const VAULT_MASTER_KEY = "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
+const VAULT_MASTER_KEY = process.env.WOLLO_VAULT_MASTER_KEY || "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
 const SESSION_HMAC_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be configured in production.");
@@ -277,144 +272,171 @@ function buildEvangadiCourseObject() {
   };
 }
 
+// ==========================================================================
+// Wollo University Colleges / Institutes / Schools — official program list.
+// Each program expands into Year 1..N with First & Second Semester per year.
+// ==========================================================================
+const WOLLO_COLLEGES: { name: string; programs: [string, number][] }[] = [
+  { name: "College of Informatics", programs: [["Computer Science", 4], ["Information Systems", 4], ["Information Technology", 4], ["Software Engineering", 5]] },
+  { name: "College of Engineering", programs: [["Fashion Design", 4], ["Garment Engineering", 5], ["Textile Engineering", 5], ["Leather Engineering", 5], ["Mechanical Engineering", 5], ["Chemical Engineering", 5], ["Food Engineering", 5], ["Mechatronics Engineering", 5], ["Industrial Engineering", 5], ["Architecture", 5], ["Water Resource & Irrigation Engineering", 5], ["Hydraulic and Water Resource Engineering", 5], ["Civil Engineering", 5], ["Construction Technology and Management", 5], ["Electrical and Computer Engineering", 5], ["Biomedical Engineering", 5]] },
+  { name: "College of Natural Science", programs: [["Biology", 4], ["Biotechnology", 4], ["Chemistry", 4], ["Geology", 4], ["Mathematics", 4], ["Physics", 4], ["Sport Science", 4], ["Statistics", 4]] },
+  { name: "College of Medicine and Health Sciences", programs: [["Anesthesia", 5], ["Emergency and Critical Care Nursing", 4], ["Psychiatry Nursing", 4], ["Environmental Health Science", 4], ["Surgical Nursing", 4], ["Medicine", 6], ["Pharmacy", 5], ["Occupational Health and Safety", 4], ["Health Informatics", 4], ["Medical Laboratory Sciences", 4], ["Midwifery", 4], ["Comprehensive Nursing", 4], ["Pediatrics and Child Health Nursing", 4], ["Public Health", 4]] },
+  { name: "College of Agriculture", programs: [["Agricultural Economics", 4], ["Agri-business and Value Chain Management", 4], ["Animal Science", 4], ["Forestry", 4], ["Natural Resources Management", 4], ["Plant Science", 4], ["Rural Development and Agricultural Extension", 4], ["Crop Science Extension", 4], ["Animal Production Extension", 4], ["Natural Resources Management Extension", 4]] },
+  { name: "School of Veterinary Medicine", programs: [["Veterinary Laboratory Technology", 4], ["Veterinary Medicine", 6]] },
+  { name: "College of Business and Economics", programs: [["Accounting and Finance", 4], ["Economics", 4], ["Management", 4], ["Cooperative Business Management & Accounting and Auditing", 4], ["Marketing Management", 4]] },
+  { name: "College of Social Science and Humanities", programs: [["Ethiopian Language(s) & Literature - Amharic", 4], ["Arabic Language & Literature", 4], ["Geez Language and Literature", 4], ["English Language and Literature", 4], ["Afaan Oromoo and Literature", 4], ["Journalism and Communication", 4], ["Geography and Environmental Studies", 4], ["Tourism and Hotel Management", 4], ["Sociology", 4], ["Social Work", 4], ["History and Heritage Management", 4], ["Social Anthropology", 4], ["Civic and Ethical Studies", 4], ["Peace and Development Studies", 4], ["Political Science and International Relations", 4]] },
+  { name: "School of Arts", programs: [["Theatre Arts", 4], ["Music", 4]] },
+  { name: "Institute of Teachers' Education and Behavioral Science", programs: [["Early Childhood Care and Education", 4], ["Educational Planning and Management", 4], ["Psychology", 4], ["Special Needs and Inclusive Education", 4]] },
+  { name: "School of Law", programs: [["Law", 4]] }
+];
+
+function slugifyProgramName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function buildProgramSemesterLabels(durationYears: number): string[] {
+  const labels: string[] = [];
+  for (let y = 1; y <= durationYears; y++) {
+    labels.push(`Year ${y} · First Semester`);
+    labels.push(`Year ${y} · Second Semester`);
+  }
+  return labels;
+}
+
+function buildProgramCourses(): any[] {
+  const courses: any[] = [];
+  WOLLO_COLLEGES.forEach((college) => {
+    college.programs.forEach(([programName, durationYears]) => {
+      const years: string[] = [];
+      for (let y = 1; y <= durationYears; y++) years.push(`Year ${y}`);
+      courses.push({
+        id: "prog-" + slugifyProgramName(programName),
+        name: programName,
+        college: college.name,
+        durationYears,
+        years,
+        semesters: buildProgramSemesterLabels(durationYears),
+        description: `${programName} · ${college.name} — ${durationYears} years · ${durationYears * 2} semesters.`,
+        icon: programName.split(/[\s&()\u2019-]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 6).toUpperCase(),
+        color: "#1d624f",
+        restricted: false,
+        allowStudentSideMaterials: false,
+        defaultYear: "Year 1",
+        subcategories: [...DEFAULT_SUBCATEGORIES],
+        materials: []
+      });
+    });
+  });
+  return courses;
+}
+
+const REGULAR_FRESHMAN_COURSES: Array<[string, string, number]> = [
+  ["Mathematics for Natural Sciences", "Math1011", 1],
+  ["Communicative English Language Skills I", "FLEn1011", 1],
+  ["Geography of Ethiopia and the Horn", "GeES1011", 1],
+  ["General Physics", "Phys1011", 1],
+  ["General Psychology", "Psych1011", 1],
+  ["Critical Thinking", "LoCT1011", 1],
+  ["Physical Fitness", "SpSc1011", 1],
+  ["Introduction to Emerging Technologies", "EmE1012", 2],
+  ["Communicative English Language Skills II", "FLEn1012", 2],
+  ["History of Ethiopia and the Horn", "HLst1012", 2],
+  ["Computer Programming", "Ifec1052", 2],
+  ["Applied Mathematics I", "Math1012", 2],
+  ["Moral and Civic Education", "MCIE1012", 2],
+  ["Social Anthropology", "Anth1012", 2]
+];
+
+function buildRegularFreshmanCourses(): any[] {
+  return REGULAR_FRESHMAN_COURSES.map(([name, code, sem]) => ({
+    id: "fresh-reg-" + String(code).toLowerCase(),
+    name: `${name} (${code})`,
+    description: `Year I Semester ${sem === 1 ? "I" : "II"} · Regular Program.`,
+    icon: String(code).toUpperCase(),
+    color: "#1d624f",
+    restricted: false,
+    allowStudentSideMaterials: false,
+    defaultYear: "Year 1",
+    college: "Common Freshman Courses",
+    durationYears: 1,
+    years: ["Year 1"],
+    semesters: [`Year 1 · Semester ${sem === 1 ? "I" : "II"}`],
+    subcategories: [...DEFAULT_SUBCATEGORIES],
+    materials: []
+  }));
+}
+
+const IT_CURRICULUM_COURSES: Array<[string, string, number, number]> = [
+  ["Global Trends", "GlIn2015", 2, 1],
+  ["Inclusiveness", "InCl2011", 2, 1],
+  ["Introduction to Economics", "Econ2013", 2, 1],
+  ["Computer Programming II", "ITec2041", 2, 1],
+  ["Fundamentals of Database Systems", "ITec2071", 2, 1],
+  ["Computer Organization and Architecture", "ITec2021", 2, 1],
+  ["Fundamentals of Electricity and Electronics Device", "Ene2161", 2, 1],
+  ["Operating Systems", "ITec2022", 2, 2],
+  ["Introduction to Statistics", "Stat2171", 2, 2],
+  ["Data Communication and Computer Networks", "ITec2102", 2, 2],
+  ["Data Structure and Algorithms", "ITec2052", 2, 2],
+  ["Discrete Mathematics and Combinatory", "Math2182", 2, 2],
+  ["Internet Programming I", "ITec2092", 2, 2],
+  ["System Analysis and Design", "ITec3061", 3, 1],
+  ["Multimedia Systems", "ITec3121", 3, 1],
+  ["Object Oriented Programming in Java", "ITec3051", 3, 1],
+  ["Internet Programming II", "ITec3093", 3, 1],
+  ["Advanced Database Systems", "ITec3071", 3, 1],
+  ["Computer Maintenance and Technical Support", "ITec3031", 3, 1],
+  ["Introduction to Distributed Systems", "ITec3102", 3, 2],
+  ["Information Technology Project Management", "ITec3062", 3, 2],
+  ["Event-Driven Programming", "ITec3054", 3, 2],
+  ["Information Storage and Retrieval", "ITec3082", 3, 2],
+  ["Advanced Programming", "ITec3058", 3, 2],
+  ["Mobile Application Development", "ITec3056", 3, 2],
+  ["Artificial Intelligence", "", 4, 1],
+  ["Internship", "", 4, 1],
+  ["Information Assurance and Security", "", 4, 1],
+  ["Final Year Project I", "", 4, 1],
+  ["GIS and Remote Sensing", "", 4, 1],
+  ["Basic Research Method in IT", "", 4, 1],
+  ["Network Design", "", 4, 1],
+  ["Seminar on Current Trends in IT", "", 4, 1],
+  ["Final Year Project II", "", 4, 2],
+  ["System and Network Administration", "", 4, 2],
+  ["Social and Professional Ethics in IT", "", 4, 2],
+  ["Network Device and Configuration", "", 4, 2],
+  ["Entrepreneurship and Business Development", "", 4, 2],
+  ["Elective", "", 4, 2],
+  ["Wireless Networking and Telecom Technologies", "", 4, 2]
+];
+
+function buildITCurriculumCourses(): any[] {
+  return IT_CURRICULUM_COURSES.map(([title, code, year, sem]) => {
+    const roman = sem === 1 ? "I" : "II";
+    const slug = String(title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    return {
+      id: "itc-" + (code ? String(code).toLowerCase() : slug),
+      name: code ? `${title} (${code})` : title,
+      description: `Information Technology · Year ${year} Semester ${roman}.`,
+      icon: code ? String(code).toUpperCase() : slug.slice(0, 8).toUpperCase(),
+      color: "#1d624f",
+      restricted: false,
+      allowStudentSideMaterials: false,
+      defaultYear: `Year ${year}`,
+      college: "Information Technology",
+      durationYears: 4,
+      years: [`Year ${year}`],
+      semesters: [`Year ${year} · Semester ${roman}`],
+      subcategories: [...DEFAULT_SUBCATEGORIES],
+      materials: []
+    };
+  });
+}
+
 const DEFAULT_COURSES = [
   buildEvangadiCourseObject(),
-  {
-    id: "course-math",
-    name: "Mathematics",
-    description: "Applied Calculus I & II, Linear Algebra, and Differential Equations.",
-    icon: "MATH",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 1",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-math-1", name: "Calculus_I_Limits_and_Derivatives_Complete_Notes.pdf", type: "PDF", size: "3.4 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 28, sideMaterials: [] },
-      { id: "m-math-2", name: "Linear_Algebra_Matrix_Operations_Lecture_Slides.pptx", type: "PPT", size: "5.1 MB", url: "#sample-ppt", year: "Year 1", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.7, ratingCount: 19, sideMaterials: [] },
-      { id: "m-math-3", name: "Differential_Equations_Practice_Problem_Set.docx", type: "DOC", size: "1.2 MB", url: "#sample-doc", year: "Year 2", subcategory: "Assignments & Projects", hidden: false, ratingAvg: 4.8, ratingCount: 15, sideMaterials: [] },
-      { id: "m-math-4", name: "Numerical_Methods_Formula_Lookup_Sheet.xlsx", type: "XLS", size: "840 KB", url: "#sample-xls", year: "Year 2", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.6, ratingCount: 12, sideMaterials: [] },
-      { id: "m-math-5", name: "Multivariable_Integration_Solved_Final_Exams.pdf", type: "PDF", size: "4.0 MB", url: "#sample-pdf", year: "Year 2", subcategory: "Past Exams & Quizzes", hidden: false, ratingAvg: 4.9, ratingCount: 22, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-phys",
-    name: "Physics",
-    description: "Classical Mechanics, Electromagnetism, Thermodynamics, and Wave Optics.",
-    icon: "PHYS",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 1",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-phys-1", name: "University_Physics_Mechanics_and_Kinematics.pdf", type: "PDF", size: "4.8 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.8, ratingCount: 31, sideMaterials: [] },
-      { id: "m-phys-2", name: "Electromagnetism_Maxwells_Equations_Slides.pptx", type: "PPT", size: "6.2 MB", url: "#sample-ppt", year: "Year 2", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.7, ratingCount: 16, sideMaterials: [] },
-      { id: "m-phys-3", name: "Physics_Lab_Report_Template_and_Error_Analysis.docx", type: "DOC", size: "960 KB", url: "#sample-doc", year: "Year 1", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.9, ratingCount: 24, sideMaterials: [] },
-      { id: "m-phys-4", name: "Harmonic_Oscillations_and_Wave_Motion_Video_Lecture.mp4", type: "Video", size: "18.5 MB", url: "#sample-video", year: "Year 2", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.8, ratingCount: 20, sideMaterials: [] },
-      { id: "m-phys-5", name: "Thermodynamics_Solved_Past_Exam_Questions.pdf", type: "PDF", size: "2.9 MB", url: "#sample-pdf", year: "Year 2", subcategory: "Past Exams & Quizzes", hidden: false, ratingAvg: 4.9, ratingCount: 27, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-cs",
-    name: "Computer Science",
-    description: "Data Structures, Algorithms, Object-Oriented Programming, and Databases.",
-    icon: "CS",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 2",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-cs-1", name: "Data_Structures_and_Algorithms_in_C++_and_Python.pdf", type: "PDF", size: "5.6 MB", url: "#sample-pdf", year: "Year 2", subcategory: "Lecture Notes", hidden: false, ratingAvg: 5.0, ratingCount: 42, sideMaterials: [] },
-      { id: "m-cs-2", name: "Relational_Database_Design_and_SQL_Mastery.pptx", type: "PPT", size: "4.3 MB", url: "#sample-ppt", year: "Year 2", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.8, ratingCount: 25, sideMaterials: [] },
-      { id: "m-cs-3", name: "Software_Engineering_SRS_Project_Specification.docx", type: "DOC", size: "1.5 MB", url: "#sample-doc", year: "Year 3", subcategory: "Assignments & Projects", hidden: false, ratingAvg: 4.7, ratingCount: 18, sideMaterials: [] },
-      { id: "m-cs-4", name: "Operating_Systems_Process_Scheduling_Simulations.zip", type: "Other", size: "3.1 MB", url: "#sample-other", year: "Year 3", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.6, ratingCount: 14, sideMaterials: [] },
-      { id: "m-cs-5", name: "Full_Stack_Web_Development_Crash_Course_Recording.mp4", type: "Video", size: "24.0 MB", url: "#sample-video", year: "Year 3", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 35, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-eng",
-    name: "English",
-    description: "Academic Research Writing, Communicative Grammar, and Presentation Skills.",
-    icon: "ENG",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 1",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-eng-1", name: "Communicative_English_Grammar_and_Academic_Style.pdf", type: "PDF", size: "2.7 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.8, ratingCount: 29, sideMaterials: [] },
-      { id: "m-eng-2", name: "Public_Speaking_and_Research_Defense_Slides.pptx", type: "PPT", size: "3.8 MB", url: "#sample-ppt", year: "Year 1", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.7, ratingCount: 17, sideMaterials: [] },
-      { id: "m-eng-3", name: "APA_7th_Edition_Thesis_and_Essay_Template.docx", type: "DOC", size: "1.1 MB", url: "#sample-doc", year: "Year 2", subcategory: "Assignments & Projects", hidden: false, ratingAvg: 4.9, ratingCount: 33, sideMaterials: [] },
-      { id: "m-eng-4", name: "Freshman_English_Final_Exam_Compilation.pdf", type: "PDF", size: "1.9 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Past Exams & Quizzes", hidden: false, ratingAvg: 4.8, ratingCount: 21, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-chem",
-    name: "Chemistry",
-    description: "General & Physical Chemistry, Organic Mechanisms, and Chemical Equilibrium.",
-    icon: "CHEM",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 1",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-chem-1", name: "Organic_Chemistry_Functional_Groups_and_Mechanisms.pdf", type: "PDF", size: "4.5 MB", url: "#sample-pdf", year: "Year 2", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 26, sideMaterials: [] },
-      { id: "m-chem-2", name: "Chemical_Kinetics_and_Electrochemistry_Slides.pptx", type: "PPT", size: "5.0 MB", url: "#sample-ppt", year: "Year 2", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.7, ratingCount: 15, sideMaterials: [] },
-      { id: "m-chem-3", name: "Quantitative_Titration_Lab_Safety_and_Procedure.docx", type: "DOC", size: "890 KB", url: "#sample-doc", year: "Year 1", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.8, ratingCount: 19, sideMaterials: [] },
-      { id: "m-chem-4", name: "Periodic_Table_Thermodynamic_Constants_Dataset.xlsx", type: "XLS", size: "720 KB", url: "#sample-xls", year: "Year 1", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.8, ratingCount: 14, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-bio",
-    name: "Biology",
-    description: "Cell & Molecular Biology, Human Physiology, Genetics, and Plant Ecology.",
-    icon: "BIO",
-    color: "#1d624f",
-    restricted: false,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 1",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-bio-1", name: "Cell_Structure_DNA_Replication_and_Genetics.pdf", type: "PDF", size: "6.1 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 30, sideMaterials: [] },
-      { id: "m-bio-2", name: "Human_Anatomy_and_Physiology_Visual_Atlas.pptx", type: "PPT", size: "7.4 MB", url: "#sample-ppt", year: "Year 2", subcategory: "Slides & Presentations", hidden: false, ratingAvg: 4.8, ratingCount: 22, sideMaterials: [] },
-      { id: "m-bio-3", name: "Microbiology_Staining_and_Culture_Lab_Guide.docx", type: "DOC", size: "1.3 MB", url: "#sample-doc", year: "Year 2", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.7, ratingCount: 16, sideMaterials: [] },
-      { id: "m-bio-4", name: "Plant_Vascular_Transport_and_Photosynthesis_Notes.pdf", type: "PDF", size: "3.7 MB", url: "#sample-pdf", year: "Year 1", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 25, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-se-capstone",
-    name: "Software Engineering & System Architecture",
-    description: "Distributed Systems, Cloud Deployment, Microservices, and Exit Exam Prep.",
-    icon: "SE-400",
-    color: "#1d624f",
-    restricted: true,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 4",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-se-1", name: "Distributed_Systems_and_Microservices_Architecture.pdf", type: "PDF", size: "6.4 MB", url: "#sample-pdf", year: "Year 4", subcategory: "Lecture Notes", hidden: false, ratingAvg: 5.0, ratingCount: 19, sideMaterials: [] },
-      { id: "m-se-2", name: "Final_Year_Capstone_Defense_Rubric_and_Guide.docx", type: "DOC", size: "1.4 MB", url: "#sample-doc", year: "Year 4", subcategory: "Assignments & Projects", hidden: false, ratingAvg: 4.9, ratingCount: 14, sideMaterials: [] },
-      { id: "m-se-3", name: "System_Design_Past_Exit_Exam_Questions_With_Answers.pdf", type: "PDF", size: "3.8 MB", url: "#sample-pdf", year: "Year 4", subcategory: "Past Exams & Quizzes", hidden: false, ratingAvg: 5.0, ratingCount: 23, sideMaterials: [] }
-    ]
-  },
-  {
-    id: "course-clinical-research",
-    name: "Clinical & Biomedical Research Seminar",
-    description: "Biostatistics, Epidemiology, Clinical Trials, and Research Thesis Defense.",
-    icon: "MED-400",
-    color: "#1d624f",
-    restricted: true,
-    allowStudentSideMaterials: false,
-    defaultYear: "Year 4",
-    subcategories: [...DEFAULT_SUBCATEGORIES],
-    materials: [
-      { id: "m-clin-1", name: "Biostatistics_and_Epidemiology_Complete_Handbook.pdf", type: "PDF", size: "5.2 MB", url: "#sample-pdf", year: "Year 3", subcategory: "Lecture Notes", hidden: false, ratingAvg: 4.9, ratingCount: 17, sideMaterials: [] },
-      { id: "m-clin-2", name: "Clinical_Research_Protocol_SPSS_Dataset.xlsx", type: "XLS", size: "1.9 MB", url: "#sample-xls", year: "Year 4", subcategory: "Lab Manuals", hidden: false, ratingAvg: 4.8, ratingCount: 11, sideMaterials: [] }
-    ]
-  }
+  ...buildProgramCourses(),
+  ...buildRegularFreshmanCourses(),
+  ...buildITCurriculumCourses()
 ];
 
 const DEFAULT_USERS = [
@@ -542,7 +564,7 @@ const DEFAULT_TEXTS = {
   siteSubtitle: "Course Library",
   telegramBtnLabel: "Telegram",
   welcomeTitle: "Course Materials Library",
-  welcomeDesc: "University lecture notes, past exams, lab manuals, and video courses.",
+  welcomeDesc: "Course notes, slides, past exams and lab manuals — by college, year & semester.",
   coursesHeading: "Courses & Study Materials",
   footerText: "Wollo Share · University Course Materials Library"
 };
@@ -590,6 +612,10 @@ interface Course {
   color: string;
   restricted: boolean;
   allowStudentSideMaterials?: boolean;
+  college?: string;
+  durationYears?: number;
+  years?: string[];
+  semesters?: string[];
   defaultYear: string;
   subcategories: string[];
   materials: CourseMaterial[];
@@ -621,6 +647,7 @@ interface UserAccount {
   category?: string;
   sharedMaterialsCount?: number;
   unpaidCurrentUploadProgress?: number;
+  downloadCredits?: number;
   downloadsCount?: number;
   lastActiveAt?: string;
   allowedCourseIds: string[];
@@ -636,6 +663,29 @@ interface DatabaseSchema {
   userRatings: Record<string, number>;
   customAdminPassword: string;
   passwordRecoveryRequests: PasswordRecoveryRequest[];
+  materialSubmissions: MaterialSubmission[];
+  mailSettings?: MailSettings;
+  updatedAt?: number;
+}
+
+// relayApiKeyVault / smtpPassVault / brevoApiKeyVault / mailtrapTokenVault hold
+// vault-encrypted secrets; plaintext never reaches the database.
+interface MailSettings {
+  preference?: "auto" | "relay" | "smtp" | "brevo" | "mailtrap" | "none";
+  relayUrl?: string;
+  relayFrom?: string;
+  relayApiKeyVault?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpFrom?: string;
+  smtpPassVault?: string;
+  brevoFrom?: string;
+  brevoApiKeyVault?: string;
+  mailtrapFrom?: string;
+  mailtrapTokenVault?: string;
+  mailtrapTemplateUuid?: string;
 }
 
 interface PasswordRecoveryRequest {
@@ -649,6 +699,49 @@ interface PasswordRecoveryRequest {
   codeExpiresAt?: string;
   failedAttempts: number;
   notificationSent?: boolean;
+  codeSentAt?: string;
+}
+
+// A student contribution waiting in the admin review queue. Approving two of them
+// earns the contributor one premium download (see UPLOADS_PER_CREDIT).
+interface MaterialSubmission {
+  id: string;
+  userId: string;
+  userEmail: string;
+  contributorName: string;
+  courseId: string;
+  courseName: string;
+  name: string;
+  type: string;
+  size: string;
+  url: string;
+  year: string;
+  semester: string;
+  subcategory: string;
+  department: string;
+  fingerprint: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  reason?: string;
+  duplicateOf?: string;
+  materialId?: string;
+}
+
+const UPLOADS_PER_CREDIT = 2;
+const SUBMISSION_COOLDOWN_MS = 45_000;
+const MAX_PENDING_PER_STUDENT = 3;
+
+const PLAN_PRICE_BIRR: Record<string, number> = {
+  premium_monthly: 100,
+  premium_annual: 250,
+  paid_lifetime: 500,
+  paid_download_only: 500
+};
+
+function planPriceBirr(plan: string): number {
+  return PLAN_PRICE_BIRR[plan] || 0;
 }
 
 function buildDefaultDatabase(): DatabaseSchema {
@@ -659,7 +752,9 @@ function buildDefaultDatabase(): DatabaseSchema {
     appearanceSettings: { ...DEFAULT_APPEARANCE },
     userRatings: {},
     customAdminPassword: "",
-    passwordRecoveryRequests: []
+    passwordRecoveryRequests: [],
+    materialSubmissions: [],
+    mailSettings: {}
   };
 }
 
@@ -669,30 +764,31 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     ? raw.coursesData
     : defaults.coursesData;
 
-  const existingEvangadi = coursesData.find(
-    (c) => c.id === "course-evangadi" || (c.name && c.name.toLowerCase() === "evangadi")
-  );
-  if (!existingEvangadi) {
-    coursesData.unshift(buildEvangadiCourseObject());
-  } else {
-    existingEvangadi.id = "course-evangadi";
-    existingEvangadi.restricted = typeof existingEvangadi.restricted === "boolean" ? existingEvangadi.restricted : true;
-    existingEvangadi.allowStudentSideMaterials = false;
-    const existingMats = Array.isArray(existingEvangadi.materials) ? existingEvangadi.materials : [];
-    if (existingMats.length < 48) {
-      const defaultEvgMats = buildEvangadiCourseObject().materials;
-      defaultEvgMats.forEach((defMat) => {
-        const found = existingMats.find((m) => m.id === defMat.id || m.url === defMat.url);
-        if (!found) {
-          existingMats.push(defMat);
-        }
-      });
-      existingEvangadi.materials = existingMats;
-    }
-  }
-
   coursesData.forEach((course) => {
     course.allowStudentSideMaterials = false;
+    if (!course.college) {
+      const matchCollege = WOLLO_COLLEGES.find((col) => col.programs.some((p) => p[0] === course.name));
+      course.college = matchCollege ? matchCollege.name : "Common Courses";
+    }
+    if (!Number(course.durationYears)) {
+      course.durationYears = course.years && course.years.length ? course.years.length : 4;
+    }
+    if (!Array.isArray(course.years) || course.years.length === 0) {
+      course.years = [];
+      for (let y = 1; y <= Number(course.durationYears); y++) course.years.push(`Year ${y}`);
+    }
+    if (!Array.isArray(course.semesters) || course.semesters.length === 0) {
+      course.semesters = buildProgramSemesterLabels(Number(course.durationYears));
+    }
+    // Freshman college: Natural stream = Natural First Semester + Programming (2nd sem); Social stream = Social First Semester
+    if ((course as any).stream === "Natural" || (course as any).stream === "Social") {
+      course.college = "Common Freshman Courses";
+      course.durationYears = 1;
+      course.years = ["Year 1"];
+      course.semesters = (course as any).stream === "Social"
+        ? ["Year 1 · Social First Semester"]
+        : ["Year 1 · Natural First Semester", "Year 1 · Programming"];
+    }
     if (!Array.isArray(course.subcategories) || course.subcategories.length === 0) {
       course.subcategories = [...DEFAULT_SUBCATEGORIES];
     }
@@ -764,13 +860,19 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     }
     u.paymentStatus = u.accountPlan === "unpaid" ? "unpaid" : "paid";
     u.downloadOnlyAccount = u.accountPlan === "paid_download_only";
-    u.amountPaidBirr = u.paymentStatus === "paid" ? 100 : 0;
+    u.amountPaidBirr = planPriceBirr(u.accountPlan);
+    if (u.category === "Paid 100 Birr · Lifetime VIP") u.category = "Paid 500 Birr · Lifetime VIP";
+    else if (u.category === "Paid 100 Birr · Download-Only") u.category = "Paid 500 Birr · Download-Only";
     if (!u.category) {
       u.category =
         u.accountPlan === "paid_download_only"
-          ? "Paid 100 Birr · Download-Only"
+          ? "Paid 500 Birr · Download-Only"
           : u.accountPlan === "paid_lifetime"
-          ? "Paid 100 Birr · Lifetime VIP"
+          ? "Paid 500 Birr · Lifetime VIP"
+          : u.accountPlan === "premium_annual"
+          ? "Premium Annual · 250 Birr · 1 Year"
+          : u.accountPlan === "premium_monthly"
+          ? "Premium Monthly · 100 Birr"
           : "Unpaid · Pending 2 Uploads";
     }
     if (typeof u.sharedMaterialsCount !== "number") u.sharedMaterialsCount = 0;
@@ -779,6 +881,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
       u.unpaidPerDownloadMigrationV4 = true;
     }
     if (typeof u.unpaidCurrentUploadProgress !== "number") u.unpaidCurrentUploadProgress = 0;
+    if (typeof u.downloadCredits !== "number") u.downloadCredits = 0;
     if (typeof u.downloadsCount !== "number") u.downloadsCount = 0;
     if (!Array.isArray(u.activityLog)) u.activityLog = [];
     if (!u.lastActiveAt) u.lastActiveAt = "Recently";
@@ -805,7 +908,39 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
           ...request,
           failedAttempts: Number.isInteger(request.failedAttempts) ? request.failedAttempts : 0
         }))
-      : []
+      : [],
+    materialSubmissions: Array.isArray(raw.materialSubmissions)
+      ? raw.materialSubmissions.filter((s): s is MaterialSubmission =>
+          Boolean(s && typeof s.id === "string" && typeof s.courseId === "string" && typeof s.name === "string")
+        )
+      : [],
+    mailSettings: normalizeMailSettings(raw.mailSettings)
+  };
+}
+
+function normalizeMailSettings(raw: unknown): MailSettings {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const port = Number(source.smtpPort);
+  const preference = String(source.preference || "auto");
+  const allowedPreferences = ["auto", "relay", "smtp", "brevo", "mailtrap", "none"];
+  return {
+    preference: allowedPreferences.includes(preference)
+      ? (preference as MailSettings["preference"])
+      : "auto",
+    relayUrl: typeof source.relayUrl === "string" ? source.relayUrl.trim() : "",
+    relayFrom: typeof source.relayFrom === "string" ? source.relayFrom.trim() : "",
+    relayApiKeyVault: typeof source.relayApiKeyVault === "string" ? source.relayApiKeyVault : "",
+    smtpHost: typeof source.smtpHost === "string" ? source.smtpHost.trim() : "",
+    smtpPort: Number.isInteger(port) && port > 0 ? port : 0,
+    smtpSecure: typeof source.smtpSecure === "boolean" ? source.smtpSecure : false,
+    smtpUser: typeof source.smtpUser === "string" ? source.smtpUser.trim() : "",
+    smtpFrom: typeof source.smtpFrom === "string" ? source.smtpFrom.trim() : "",
+    smtpPassVault: typeof source.smtpPassVault === "string" ? source.smtpPassVault : "",
+    brevoFrom: typeof source.brevoFrom === "string" ? source.brevoFrom.trim() : "",
+    brevoApiKeyVault: typeof source.brevoApiKeyVault === "string" ? source.brevoApiKeyVault : "",
+    mailtrapFrom: typeof source.mailtrapFrom === "string" ? source.mailtrapFrom.trim() : "",
+    mailtrapTokenVault: typeof source.mailtrapTokenVault === "string" ? source.mailtrapTokenVault : "",
+    mailtrapTemplateUuid: typeof source.mailtrapTemplateUuid === "string" ? source.mailtrapTemplateUuid.trim() : ""
   };
 }
 
@@ -838,6 +973,7 @@ function saveDatabase(db: DatabaseSchema): void {
     if (db.customAdminPassword) {
       db.customAdminPassword = hashPassword(db.customAdminPassword, "admin-owner");
     }
+    db.updatedAt = Date.now();
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
   } catch (err) {
     console.error("Failed to save database file:", err);
@@ -846,39 +982,132 @@ function saveDatabase(db: DatabaseSchema): void {
 
 let dbState: DatabaseSchema = loadDatabase();
 
+const MAIL_VAULT_CONTEXT = "wollo-mail-settings";
+
+function applyMailSettings(): void {
+  const settings = normalizeMailSettings(dbState.mailSettings);
+  const rawSecure = (dbState.mailSettings as Record<string, unknown> | undefined)?.smtpSecure;
+  const relay: Partial<MailConfig["relay"]> = {};
+  if (settings.relayUrl) relay.url = settings.relayUrl;
+  if (settings.relayFrom) relay.from = settings.relayFrom;
+  if (settings.relayApiKeyVault) relay.apiKey = decryptVaultSecret(settings.relayApiKeyVault, MAIL_VAULT_CONTEXT);
+
+  const smtp: Partial<MailConfig["smtp"]> = {};
+  if (settings.smtpHost) smtp.host = settings.smtpHost;
+  if (settings.smtpPort) smtp.port = settings.smtpPort;
+  if (typeof rawSecure === "boolean") smtp.secure = rawSecure;
+  else if (settings.smtpPort) smtp.secure = settings.smtpPort === 465;
+  if (settings.smtpUser) smtp.user = settings.smtpUser;
+  if (settings.smtpFrom) smtp.from = settings.smtpFrom;
+  if (settings.smtpPassVault) smtp.pass = decryptVaultSecret(settings.smtpPassVault, MAIL_VAULT_CONTEXT);
+
+  const brevo: Partial<MailConfig["brevo"]> = {};
+  if (settings.brevoApiKeyVault) brevo.apiKey = decryptVaultSecret(settings.brevoApiKeyVault, MAIL_VAULT_CONTEXT);
+  // The Brevo API needs a verified sender; it defaults to the SMTP "from" when not set separately.
+  const brevoFrom = settings.brevoFrom || settings.smtpFrom;
+  if (brevoFrom) brevo.from = brevoFrom;
+
+  const mailtrap: Partial<MailConfig["mailtrap"]> = {};
+  if (settings.mailtrapTokenVault) mailtrap.apiToken = decryptVaultSecret(settings.mailtrapTokenVault, MAIL_VAULT_CONTEXT);
+  const mailtrapFrom = settings.mailtrapFrom || settings.smtpFrom;
+  if (mailtrapFrom) mailtrap.from = mailtrapFrom;
+  if (settings.mailtrapTemplateUuid) mailtrap.templateUuid = settings.mailtrapTemplateUuid;
+
+  configureMail({ preference: settings.preference || "auto", relay, smtp, brevo, mailtrap });
+}
+
+applyMailSettings();
+
 // Brute-force login attempt rate-limiter
 const loginRateLimitMap = new Map<string, { failedCount: number; lockedUntil: number }>();
 const recoveryRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 
-function hasSmtpConfiguration(): boolean {
-  return Boolean(SMTP_HOST && Number.isInteger(SMTP_PORT) && SMTP_PORT > 0 && SMTP_USER && SMTP_PASS && SMTP_FROM);
+const RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
+
+const MAIL_PROVIDER_LABEL: Record<string, string> = {
+  relay: "Hyvor Relay",
+  brevo: "Brevo HTTPS API",
+  mailtrap: "Mailtrap HTTPS API",
+  smtp: "SMTP",
+  none: "Not configured"
+};
+
+function activeSenderAddress(): string {
+  const config = effectiveMailConfig();
+  switch (activeMailProvider()) {
+    case "relay":
+      return config.relay.from;
+    case "brevo":
+      return config.brevo.from;
+    case "mailtrap":
+      return config.mailtrap.from;
+    case "smtp":
+      return config.smtp.from;
+    default:
+      return "";
+  }
+}
+
+function buildRecoveryCodeMessage(code: string, request: PasswordRecoveryRequest) {
+  const minutesLeft = Math.max(1, Math.round((Date.parse(request.codeExpiresAt || "") - Date.now()) / 60000));
+  const rendered = recoveryCodeEmail({
+    name: request.name,
+    email: request.email,
+    code,
+    minutesLeft
+  });
+  // A template hosted on Mailtrap replaces the local HTML when one is configured.
+  const templateUuid = effectiveMailConfig().mailtrap.templateUuid;
+  if (!templateUuid || activeMailProvider() !== "mailtrap") return { to: request.email, ...rendered };
+  return {
+    to: request.email,
+    ...rendered,
+    template: {
+      uuid: templateUuid,
+      variables: {
+        name: request.name,
+        email: request.email,
+        code,
+        minutes: String(minutesLeft)
+      }
+    }
+  };
 }
 
 async function notifyAdminOfRecoveryRequest(request: PasswordRecoveryRequest): Promise<boolean> {
-  if (!hasSmtpConfiguration()) return false;
-  try {
-    const transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_SECURE,
-      auth: { user: SMTP_USER, pass: SMTP_PASS }
-    });
-    await transporter.sendMail({
-      from: SMTP_FROM,
-      to: ADMIN_NOTIFICATION_EMAIL,
-      subject: "Wollo Share password recovery request",
-      text: [
-        "A password recovery request was submitted.",
-        `Account: ${request.name} (${request.email})`,
-        `Request ID: ${request.id}`,
-        "Review and issue a reset code from the administrator dashboard."
-      ].join("\n")
-    });
-    return true;
-  } catch (error) {
-    console.error("Password recovery notification email failed.", error);
-    return false;
+  const delivery = await sendMail({
+    to: ADMIN_NOTIFICATION_EMAIL,
+    ...recoveryRequestNoticeEmail({
+      name: request.name,
+      email: request.email,
+      requestId: request.id,
+      codeSent: Boolean(request.codeSentAt)
+    })
+  });
+  if (!delivery.ok && delivery.error) console.error("Admin recovery notification failed:", delivery.error);
+  return delivery.ok;
+}
+
+async function issueRecoveryCode(request: PasswordRecoveryRequest) {
+  const code = String(crypto.randomInt(10_000_000, 100_000_000));
+  request.status = "code-issued";
+  request.codeHash = hashPassword(code, `password-recovery:${request.id}`);
+  request.codeExpiresAt = new Date(Date.now() + RECOVERY_CODE_TTL_MS).toISOString();
+  request.failedAttempts = 0;
+  const delivery = await sendMail(buildRecoveryCodeMessage(code, request));
+  if (delivery.ok) {
+    request.codeSentAt = new Date().toISOString();
+  } else {
+    // The code only exists in the recipient's inbox. If the mail did not leave,
+    // drop it rather than leaving a live code nobody can receive or see.
+    request.status = "pending";
+    delete request.codeHash;
+    delete request.codeExpiresAt;
+    delete request.codeSentAt;
+    console.error("Recovery code email failed:", delivery.error);
   }
+  saveDatabase(dbState);
+  return { ok: delivery.ok, provider: delivery.provider, error: delivery.error };
 }
 
 async function startServer() {
@@ -947,7 +1176,8 @@ async function startServer() {
       usersData: visibleUsers,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
-      userRatings: dbState.userRatings
+      userRatings: dbState.userRatings,
+      updatedAt: dbState.updatedAt || 0
     });
   });
 
@@ -982,10 +1212,30 @@ async function startServer() {
       appearanceSettings: incoming.appearanceSettings || dbState.appearanceSettings,
       userRatings: incoming.userRatings || dbState.userRatings,
       customAdminPassword: dbState.customAdminPassword,
-      passwordRecoveryRequests: dbState.passwordRecoveryRequests
+      passwordRecoveryRequests: dbState.passwordRecoveryRequests,
+      materialSubmissions: dbState.materialSubmissions,
+      mailSettings: dbState.mailSettings
     });
     saveDatabase(dbState);
     res.json({ ok: true });
+  });
+
+  // Admin-only account removal: PUT /api/state intentionally never deletes
+  // accounts, so the workspace needs an explicit endpoint for it.
+  app.delete("/api/users/:userId", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const userId = String(req.params.userId || "");
+    const before = dbState.usersData.length;
+    dbState = normalizeDatabase({
+      ...dbState,
+      usersData: dbState.usersData.filter((user) => user.id !== userId)
+    });
+    saveDatabase(dbState);
+    res.json({ ok: true, removed: before - dbState.usersData.length });
   });
 
   app.post("/api/reset", (_req, res) => {
@@ -1007,8 +1257,8 @@ async function startServer() {
     const rate = recoveryRequestRateLimitMap.get(clientKey);
     if (!rate || now - rate.windowStartedAt >= 15 * 60 * 1000) {
       recoveryRequestRateLimitMap.set(clientKey, { count: 1, windowStartedAt: now });
-    } else if (rate.count >= 5) {
-      res.json({ ok: true, message: "If this account exists, the administrator has been notified." });
+    } else if (rate.count >= 30) {
+      res.status(429).json({ ok: false, error: "Too many recovery requests from this network. Please try again in a few minutes." });
       return;
     } else {
       rate.count++;
@@ -1043,15 +1293,31 @@ async function startServer() {
         dbState.passwordRecoveryRequests.push(recoveryRequest);
         recoveryRequest.notificationSent = false;
         saveDatabase(dbState);
-        setImmediate(() => {
-          void notifyAdminOfRecoveryRequest(recoveryRequest).then((sent) => {
-            recoveryRequest.notificationSent = sent;
+        setImmediate(async () => {
+          await issueRecoveryCode(recoveryRequest);
+          const sent = await notifyAdminOfRecoveryRequest(recoveryRequest);
+          recoveryRequest.notificationSent = sent;
+          saveDatabase(dbState);
+        });
+      } else {
+        // Asking again must actually dispatch mail: reuse the open request, but replace the code
+        // (and email it) unless a code went out less than a minute ago.
+        const lastSent = existing.codeSentAt ? Date.parse(existing.codeSentAt) : 0;
+        if (now - lastSent > 60 * 1000) {
+          setImmediate(async () => {
+            await issueRecoveryCode(existing);
             saveDatabase(dbState);
           });
-        });
+        }
       }
     }
-    res.json({ ok: true, message: "If this account exists, the administrator has been notified." });
+    res.json({
+      ok: true,
+      message:
+        mailStatus().provider === "none"
+          ? "If this account exists, the administrator has been notified."
+          : "If this account exists, a recovery code was emailed to it. The code expires in 30 minutes."
+    });
   });
 
   app.post("/api/auth/password-recovery/complete", (req, res) => {
@@ -1065,20 +1331,29 @@ async function startServer() {
     }
     const account = dbState.usersData.find((user) => user.email.toLowerCase() === identifier);
     const targetId = identifier === ADMIN_EMAIL.toLowerCase() ? "admin-owner" : account?.id || "";
-    const recoveryRequest = dbState.passwordRecoveryRequests.find(
+    // A second recovery request must not be shadowed by an older, already-expired code.
+    const openRequests = dbState.passwordRecoveryRequests.filter(
       (request) => request.userId === targetId && request.status === "code-issued"
     );
-    if (!recoveryRequest || !recoveryRequest.codeHash || !recoveryRequest.codeExpiresAt ||
-      Date.parse(recoveryRequest.codeExpiresAt) <= Date.now()) {
-      if (recoveryRequest) {
-        recoveryRequest.status = "closed";
-        delete recoveryRequest.codeHash;
-        saveDatabase(dbState);
+    let expiredAny = false;
+    openRequests.forEach((request) => {
+      if (!request.codeHash || !request.codeExpiresAt || Date.parse(request.codeExpiresAt) <= Date.now()) {
+        request.status = "closed";
+        delete request.codeHash;
+        expiredAny = true;
       }
+    });
+    const candidate = openRequests
+      .filter((request) => request.status === "code-issued")
+      .sort((a, b) => Date.parse(String(b.codeExpiresAt)) - Date.parse(String(a.codeExpiresAt)))[0];
+    if (!candidate || !candidate.codeHash || !candidate.codeExpiresAt) {
+      if (expiredAny) saveDatabase(dbState);
       res.status(400).json({ ok: false, error: "The recovery code is invalid or expired. Request a new one from the administrator." });
       return;
     }
-    if (!verifyPasswordHash(code, recoveryRequest.codeHash, `password-recovery:${recoveryRequest.id}`)) {
+    const recoveryRequest = candidate;
+    const activeCodeHash = String(recoveryRequest.codeHash);
+    if (!verifyPasswordHash(code, activeCodeHash, `password-recovery:${recoveryRequest.id}`)) {
       recoveryRequest.failedAttempts++;
       if (recoveryRequest.failedAttempts >= 5) {
         recoveryRequest.status = "closed";
@@ -1116,9 +1391,11 @@ async function startServer() {
       return;
     }
     res.setHeader("Cache-Control", "no-store");
+    const mail = mailStatus();
     res.json({
       ok: true,
-      smtpConfigured: hasSmtpConfiguration(),
+      mailProvider: mail.provider,
+      smtpConfigured: mail.provider !== "none",
       requests: dbState.passwordRecoveryRequests
         .slice()
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -1126,7 +1403,7 @@ async function startServer() {
     });
   });
 
-  app.post("/api/admin/password-recovery-requests/:requestId/code", (req, res) => {
+  app.post("/api/admin/password-recovery-requests/:requestId/code", async (req, res) => {
     const session = verifyRequestSession(req);
     if (!session || session.role !== "admin") {
       res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
@@ -1140,13 +1417,14 @@ async function startServer() {
       res.status(404).json({ ok: false, error: "This recovery request is no longer active." });
       return;
     }
-    const code = String(crypto.randomInt(10_000_000, 100_000_000));
-    recoveryRequest.status = "code-issued";
-    recoveryRequest.codeHash = hashPassword(code, `password-recovery:${recoveryRequest.id}`);
-    recoveryRequest.codeExpiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-    recoveryRequest.failedAttempts = 0;
-    saveDatabase(dbState);
-    res.json({ ok: true, code, expiresAt: recoveryRequest.codeExpiresAt });
+    const delivery = await issueRecoveryCode(recoveryRequest);
+    res.json({
+      ok: true,
+      sent: delivery.ok,
+      provider: delivery.provider,
+      expiresAt: recoveryRequest.codeSentAt ? recoveryRequest.codeExpiresAt : undefined,
+      error: delivery.ok ? undefined : delivery.error
+    });
   });
 
   app.post("/api/admin/password-recovery-requests/:requestId/close", (req, res) => {
@@ -1163,8 +1441,146 @@ async function startServer() {
     recoveryRequest.status = "closed";
     delete recoveryRequest.codeHash;
     delete recoveryRequest.codeExpiresAt;
+    delete recoveryRequest.codeSentAt;
     saveDatabase(dbState);
     res.json({ ok: true });
+  });
+
+  app.get("/api/admin/mail-status", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    res.json({ ok: true, ...mailStatus() });
+  });
+
+  app.get("/api/admin/mail-settings", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const settings = normalizeMailSettings(dbState.mailSettings);
+    res.json({
+      ok: true,
+      settings: {
+        preference: settings.preference,
+        relayUrl: settings.relayUrl,
+        relayFrom: settings.relayFrom,
+        hasRelayKey: Boolean(settings.relayApiKeyVault),
+        smtpHost: settings.smtpHost,
+        smtpPort: settings.smtpPort,
+        smtpSecure: settings.smtpSecure,
+        smtpUser: settings.smtpUser,
+        smtpFrom: settings.smtpFrom,
+        hasSmtpPass: Boolean(settings.smtpPassVault),
+        brevoFrom: settings.brevoFrom,
+        hasBrevoKey: Boolean(settings.brevoApiKeyVault),
+        mailtrapFrom: settings.mailtrapFrom,
+        hasMailtrapToken: Boolean(settings.mailtrapTokenVault),
+        mailtrapTemplateUuid: settings.mailtrapTemplateUuid
+      },
+      ...mailStatus()
+    });
+  });
+
+  app.put("/api/admin/mail-settings", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const body = req.body || {};
+    const current = normalizeMailSettings(dbState.mailSettings);
+    const next: MailSettings = { ...current };
+
+    const readText = (value: unknown) => (typeof value === "string" ? value.trim() : undefined);
+    const preference = readText(body.preference);
+    if (preference && ["auto", "relay", "smtp", "brevo", "mailtrap", "none"].includes(preference)) next.preference = preference as MailSettings["preference"];
+
+    const relayUrl = readText(body.relayUrl);
+    if (relayUrl !== undefined) next.relayUrl = relayUrl.replace(/\/+$/, "");
+    const relayFrom = readText(body.relayFrom);
+    if (relayFrom !== undefined) next.relayFrom = relayFrom;
+    if (body.clearRelayKey === true) next.relayApiKeyVault = "";
+    const relayApiKey = readText(body.relayApiKey);
+    // A blank field means "keep the stored key"; only a real value replaces it.
+    if (relayApiKey) next.relayApiKeyVault = encryptVaultSecret(normalizeMailSecret(relayApiKey), MAIL_VAULT_CONTEXT);
+
+    const smtpHost = readText(body.smtpHost);
+    if (smtpHost !== undefined) next.smtpHost = smtpHost;
+    const smtpPort = Number(body.smtpPort);
+    if (Number.isInteger(smtpPort) && smtpPort > 0) next.smtpPort = smtpPort;
+    if (typeof body.smtpSecure === "boolean") next.smtpSecure = body.smtpSecure;
+    const smtpUser = readText(body.smtpUser);
+    if (smtpUser !== undefined) next.smtpUser = smtpUser;
+    const smtpFrom = readText(body.smtpFrom);
+    if (smtpFrom !== undefined) next.smtpFrom = smtpFrom;
+    if (body.clearSmtpPass === true) next.smtpPassVault = "";
+    const smtpPass = readText(body.smtpPass);
+    if (smtpPass) next.smtpPassVault = encryptVaultSecret(smtpPass, MAIL_VAULT_CONTEXT);
+
+    const brevoFrom = readText(body.brevoFrom);
+    if (brevoFrom !== undefined) next.brevoFrom = brevoFrom;
+    if (body.clearBrevoKey === true) next.brevoApiKeyVault = "";
+    const brevoApiKey = readText(body.brevoApiKey);
+    if (brevoApiKey) next.brevoApiKeyVault = encryptVaultSecret(normalizeMailSecret(brevoApiKey), MAIL_VAULT_CONTEXT);
+
+    const mailtrapFrom = readText(body.mailtrapFrom);
+    if (mailtrapFrom !== undefined) next.mailtrapFrom = mailtrapFrom;
+    if (body.clearMailtrapToken === true) next.mailtrapTokenVault = "";
+    const mailtrapToken = readText(body.mailtrapToken);
+    if (mailtrapToken) next.mailtrapTokenVault = encryptVaultSecret(normalizeMailSecret(mailtrapToken), MAIL_VAULT_CONTEXT);
+    const mailtrapTemplateUuid = readText(body.mailtrapTemplateUuid);
+    if (mailtrapTemplateUuid !== undefined) next.mailtrapTemplateUuid = mailtrapTemplateUuid;
+
+    dbState.mailSettings = next;
+    saveDatabase(dbState);
+    applyMailSettings();
+
+    const status = mailStatus();
+    res.json({
+      ok: true,
+      settings: {
+        preference: next.preference || "auto",
+        relayUrl: next.relayUrl || "",
+        relayFrom: next.relayFrom || "",
+        hasRelayKey: Boolean(next.relayApiKeyVault),
+        smtpHost: next.smtpHost || "",
+        smtpPort: next.smtpPort || 0,
+        smtpSecure: Boolean(next.smtpSecure),
+        smtpUser: next.smtpUser || "",
+        smtpFrom: next.smtpFrom || "",
+        hasSmtpPass: Boolean(next.smtpPassVault),
+        brevoFrom: next.brevoFrom || "",
+        hasBrevoKey: Boolean(next.brevoApiKeyVault),
+        mailtrapFrom: next.mailtrapFrom || "",
+        hasMailtrapToken: Boolean(next.mailtrapTokenVault),
+        mailtrapTemplateUuid: next.mailtrapTemplateUuid || ""
+      },
+      ...status
+    });
+  });
+
+  app.post("/api/admin/mail/test", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const to = String(req.body?.to || "").trim() || session.email;
+    const provider = activeMailProvider();
+    const delivery = await sendMail({
+      to,
+      ...testEmailMessage({
+        providerLabel: MAIL_PROVIDER_LABEL[provider] || provider,
+        sender: activeSenderAddress() || "not configured",
+        recipient: to,
+        sentAt: new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC"
+      })
+    });
+    res.json({ ok: delivery.ok, provider: delivery.provider, to, error: delivery.error });
   });
 
   app.post("/api/auth/register", (req, res) => {
@@ -1199,12 +1615,17 @@ async function startServer() {
       department,
       phone: phone || undefined,
       accountPlan: plan,
-      paymentStatus: plan === "paid_lifetime" ? "paid" : "unpaid",
+      paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
       downloadOnlyAccount: false,
-      amountPaidBirr: plan === "paid_lifetime" ? 100 : 0,
-      category: plan === "paid_lifetime"
-        ? "Paid 100 Birr · Lifetime VIP"
-        : "Unpaid · Pending 2 Uploads",
+      amountPaidBirr: planPriceBirr(plan),
+      category:
+        plan === "paid_lifetime"
+          ? "Paid 500 Birr · Lifetime VIP"
+          : plan === "premium_annual"
+          ? "Premium Annual · 250 Birr · 1 Year"
+          : plan === "premium_monthly"
+          ? "Premium Monthly · 100 Birr"
+          : "Unpaid · Pending 2 Uploads",
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: "Active now",
@@ -1530,6 +1951,341 @@ async function startServer() {
       ratingCount: mat.ratingCount,
       myRating: numericStars
     });
+  });
+
+  // ============================================================================
+  // STUDENT CONTRIBUTIONS → ADMIN REVIEW QUEUE → EARNED DOWNLOADS
+  // ============================================================================
+
+  function slugifyMaterialName(value: string): string {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/\.[a-z0-9]{1,5}$/i, "")
+      .replace(/[^a-z0-9\u0800-\u08ff]+/g, " ")
+      .trim();
+  }
+
+  function submissionFingerprint(courseId: string, year: string, semester: string, name: string): string {
+    return sha256Hex([courseId, year, semester, slugifyMaterialName(name)].join("::"));
+  }
+
+  // A contribution only counts toward a credit if it is genuinely new: the same
+  // student may not re-submit a document that is already queued or published, and
+  // neither may two students queue the exact same file.
+  function findSubmissionConflict(
+    userId: string,
+    courseId: string,
+    year: string,
+    semester: string,
+    name: string
+  ): { code: number; error: string; duplicateOf?: string } | null {
+    const fingerprint = submissionFingerprint(courseId, year, semester, name);
+    const clash = dbState.materialSubmissions.find((s) => s.fingerprint === fingerprint && s.status !== "rejected");
+    if (clash) {
+      return {
+        code: 409,
+        error:
+          clash.userId === userId
+            ? `You already sent “${clash.name}” for this course, year and semester — it is still ${clash.status === "pending" ? "awaiting review" : "published"}. Duplicate uploads do not earn download credits.`
+            : `“${clash.name}” was already shared by another student and is ${clash.status === "pending" ? "in the review queue" : "in the library"}. Pick a different document.`,
+        duplicateOf: clash.id
+      };
+    }
+
+    const course = dbState.coursesData.find((c) => c.id === courseId);
+    const slug = slugifyMaterialName(name);
+    const inLibrary = course
+      ? (course.materials || []).find((m) => slugifyMaterialName(m.name) === slug && (m.year || "") === year)
+      : null;
+    if (inLibrary) {
+      return {
+        code: 409,
+        error: `“${inLibrary.name}” is already published in ${course?.name || "this course"}. Send a different document to earn a credit.`,
+        duplicateOf: inLibrary.id
+      };
+    }
+    return null;
+  }
+
+  function submissionCreditState(user: UserAccount) {
+    return {
+      sharedMaterialsCount: Number(user.sharedMaterialsCount) || 0,
+      unpaidCurrentUploadProgress: Number(user.unpaidCurrentUploadProgress) || 0,
+      downloadCredits: Number(user.downloadCredits) || 0,
+      uploadsPerCredit: UPLOADS_PER_CREDIT
+    };
+  }
+
+  function findSubmissionUser(userId: string): UserAccount {
+    return dbState.usersData.find((account) => account.id === userId) || ({ sharedMaterialsCount: 0 } as UserAccount);
+  }
+
+  app.post("/api/materials/submissions", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in with a student account to share a material." });
+      return;
+    }
+    const user = dbState.usersData.find((account) => account.id === session.id);
+    if (!user) {
+      res.status(401).json({ ok: false, error: "Your account could not be found. Please sign in again." });
+      return;
+    }
+
+    const body = req.body || {};
+    const name = String(body.name || "").trim().slice(0, 180);
+    const courseId = String(body.courseId || "").trim();
+    const course = dbState.coursesData.find((c) => c.id === courseId);
+    if (!course) {
+      res.status(400).json({ ok: false, error: "Choose the course this document belongs to." });
+      return;
+    }
+    if (!name) {
+      res.status(400).json({ ok: false, error: "Give the document a title." });
+      return;
+    }
+
+    const year = String(body.year || course.defaultYear || "Year 1").trim();
+    const semester = String(body.semester || "First Semester").trim();
+
+    const mine = dbState.materialSubmissions.filter((s) => s.userId === user.id);
+    const conflict = findSubmissionConflict(user.id, courseId, year, semester, name);
+    if (conflict) {
+      dbState.materialSubmissions.push({
+        id: "sub-blk-" + Date.now() + "-" + crypto.randomInt(100, 999),
+        userId: user.id,
+        userEmail: user.email,
+        contributorName: String(body.contributorName || user.name || "Student"),
+        courseId,
+        courseName: course.name,
+        name,
+        type: String(body.type || "PDF"),
+        size: String(body.size || "1.0 MB"),
+        url: "",
+        year,
+        semester,
+        subcategory: String(body.subcategory || "Lecture Notes"),
+        department: String(body.department || user.department || course.name),
+        fingerprint: submissionFingerprint(courseId, year, semester, name),
+        status: "rejected",
+        createdAt: new Date().toISOString(),
+        decidedAt: new Date().toISOString(),
+        decidedBy: "automatic-duplicate-guard",
+        reason: conflict.error,
+        duplicateOf: conflict.duplicateOf
+      });
+      saveDatabase(dbState);
+      res.status(conflict.code).json({ ok: false, error: conflict.error, duplicateOf: conflict.duplicateOf });
+      return;
+    }
+
+    const pending = mine.filter((s) => s.status === "pending");
+    if (pending.length >= MAX_PENDING_PER_STUDENT) {
+      res.status(429).json({
+        ok: false,
+        error: `You already have ${pending.length} documents waiting for review. Wait for the administrator to decide on them first.`
+      });
+      return;
+    }
+    const last = mine.map((s) => Date.parse(s.createdAt || "") || 0).sort((a, b) => b - a)[0];
+    if (last && Date.now() - last < SUBMISSION_COOLDOWN_MS) {
+      const wait = Math.ceil((SUBMISSION_COOLDOWN_MS - (Date.now() - last)) / 1000);
+      res.status(429).json({ ok: false, error: `Please wait ${wait}s before sending another document.` });
+      return;
+    }
+
+    const submission: MaterialSubmission = {
+      id: "sub-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      userId: user.id,
+      userEmail: user.email,
+      contributorName: String(body.contributorName || user.name || "Student"),
+      courseId,
+      courseName: course.name,
+      name,
+      type: String(body.type || "PDF"),
+      size: String(body.size || "1.0 MB"),
+      url: String(body.url || "#sample-file"),
+      year,
+      semester,
+      subcategory: String(body.subcategory || "Lecture Notes"),
+      department: String(body.department || user.department || course.name),
+      fingerprint: submissionFingerprint(courseId, year, semester, name),
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+    dbState.materialSubmissions.push(submission);
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Submitted Material", detail: `Sent “${name}” for admin review`, timestamp: new Date().toISOString() },
+      ...(user.activityLog || [])
+    ].slice(0, 60);
+    saveDatabase(dbState);
+    res.json({ ok: true, submission, notified: false, ...submissionCreditState(user) });
+  });
+
+  app.get("/api/materials/submissions/mine", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see your submissions." });
+      return;
+    }
+    const user = dbState.usersData.find((account) => account.id === session.id);
+    res.json({
+      ok: true,
+      submissions: dbState.materialSubmissions.filter((s) => s.userId === session.id).reverse(),
+      ...(user ? submissionCreditState(user) : {})
+    });
+  });
+
+  app.get("/api/admin/material-submissions", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    res.json({ ok: true, submissions: [...dbState.materialSubmissions].reverse() });
+  });
+
+  app.patch("/api/admin/material-submissions/:submissionId", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
+    if (!submission) {
+      res.status(404).json({ ok: false, error: "Submission not found." });
+      return;
+    }
+    const body = req.body || {};
+    if (typeof body.name === "string" && body.name.trim()) submission.name = body.name.trim().slice(0, 180);
+    if (typeof body.year === "string" && body.year.trim()) submission.year = body.year.trim();
+    if (typeof body.semester === "string" && body.semester.trim()) submission.semester = body.semester.trim();
+    if (typeof body.subcategory === "string" && body.subcategory.trim()) submission.subcategory = body.subcategory.trim();
+    if (typeof body.type === "string" && body.type.trim()) submission.type = body.type.trim();
+    if (typeof body.size === "string" && body.size.trim()) submission.size = body.size.trim();
+    if (typeof body.url === "string" && body.url.trim()) submission.url = body.url.trim();
+    if (typeof body.courseId === "string" && dbState.coursesData.some((c) => c.id === body.courseId)) {
+      submission.courseId = body.courseId;
+      submission.courseName = dbState.coursesData.find((c) => c.id === body.courseId)!.name;
+    }
+    submission.fingerprint = submissionFingerprint(submission.courseId, submission.year, submission.semester, submission.name);
+    saveDatabase(dbState);
+    res.json({ ok: true, submission });
+  });
+
+  app.post("/api/admin/material-submissions/:submissionId/approve", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
+    if (!submission) {
+      res.status(404).json({ ok: false, error: "Submission not found." });
+      return;
+    }
+    if (submission.status === "approved") {
+      res.json({ ok: true, alreadyApproved: true, ...submissionCreditState(findSubmissionUser(submission.userId)) });
+      return;
+    }
+    const course = dbState.coursesData.find((c) => c.id === submission.courseId);
+    if (!course) {
+      res.status(400).json({ ok: false, error: "The course this was submitted to no longer exists." });
+      return;
+    }
+
+    const material: CourseMaterial = {
+      id: "mat-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      name: submission.name,
+      type: submission.type || "PDF",
+      size: submission.size || "1.0 MB",
+      url: submission.url || "#sample-file",
+      year: submission.year,
+      semester: submission.semester,
+      department: submission.department,
+      subcategory: submission.subcategory,
+      sharedBy: submission.contributorName,
+      hidden: false,
+      ratingAvg: 0,
+      ratingCount: 0,
+      sideMaterials: []
+    };
+    course.materials = [...(course.materials || []), material];
+
+    let credited = false;
+    const user = dbState.usersData.find((account) => account.id === submission.userId);
+    if (user) {
+      user.sharedMaterialsCount = (Number(user.sharedMaterialsCount) || 0) + 1;
+      user.unpaidCurrentUploadProgress = (Number(user.unpaidCurrentUploadProgress) || 0) + 1;
+      if (user.unpaidCurrentUploadProgress >= UPLOADS_PER_CREDIT) {
+        user.unpaidCurrentUploadProgress -= UPLOADS_PER_CREDIT;
+        user.downloadCredits = (Number(user.downloadCredits) || 0) + 1;
+        credited = true;
+      }
+      user.activityLog = [
+        {
+          id: "act-" + Date.now(),
+          type: "Material Approved",
+          detail: credited
+            ? `“${submission.name}” published — you earned a free premium download`
+            : `“${submission.name}” published (${user.unpaidCurrentUploadProgress}/${UPLOADS_PER_CREDIT} toward your next download)`,
+          timestamp: new Date().toISOString()
+        },
+        ...(user.activityLog || [])
+      ].slice(0, 60);
+    }
+
+    submission.status = "approved";
+    submission.decidedAt = new Date().toISOString();
+    submission.decidedBy = session.email;
+    submission.materialId = material.id;
+    submission.reason = "";
+    saveDatabase(dbState);
+    res.json({ ok: true, material, credited, ...submissionCreditState(user || ({} as UserAccount)) });
+  });
+
+  app.post("/api/admin/material-submissions/:submissionId/reject", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
+    if (!submission) {
+      res.status(404).json({ ok: false, error: "Submission not found." });
+      return;
+    }
+    submission.status = "rejected";
+    submission.decidedAt = new Date().toISOString();
+    submission.decidedBy = session.email;
+    submission.reason = String(req.body?.reason || "The administrator could not verify this document.").slice(0, 300);
+    saveDatabase(dbState);
+    res.json({ ok: true, submission });
+  });
+
+  // Spend one earned credit right before the student's download starts, so a
+  // refresh can never hand out the same credit twice.
+  app.post("/api/downloads/consume-credit", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to download this material." });
+      return;
+    }
+    const user = dbState.usersData.find((account) => account.id === session.id);
+    if (!user) {
+      res.status(401).json({ ok: false, error: "Your account could not be found." });
+      return;
+    }
+    if (Number(user.downloadCredits) > 0) {
+      user.downloadCredits = Number(user.downloadCredits) - 1;
+      user.downloadsCount = (Number(user.downloadsCount) || 0) + 1;
+      saveDatabase(dbState);
+      res.json({ ok: true, spent: true, ...submissionCreditState(user) });
+      return;
+    }
+    user.downloadsCount = (Number(user.downloadsCount) || 0) + 1;
+    saveDatabase(dbState);
+    res.json({ ok: true, spent: false, ...submissionCreditState(user) });
   });
 
   // ============================================================================
