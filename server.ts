@@ -654,6 +654,7 @@ interface UserAccount {
   allowedCourseIds: string[];
   evangadiSynced?: boolean;
   activityLog?: ActivityLogItem[];
+  videoProgress?: Record<string, { seconds: number; duration: number; percent: number; completed: boolean; updatedAt: string }>;
 }
 
 interface DatabaseSchema {
@@ -667,6 +668,9 @@ interface DatabaseSchema {
   materialSubmissions: MaterialSubmission[];
   mailSettings?: MailSettings;
   updatedAt?: number;
+  // Bumped only by admin wholesale state saves. `updatedAt` moves on every student
+  // write too, so it cannot tell a stale admin editor from normal traffic.
+  contentRevision?: number;
 }
 
 // relayApiKeyVault / smtpPassVault / brevoApiKeyVault / mailtrapTokenVault hold
@@ -766,7 +770,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     : defaults.coursesData;
 
   coursesData.forEach((course) => {
-    course.allowStudentSideMaterials = false;
+    course.allowStudentSideMaterials = Boolean(course.allowStudentSideMaterials);
     if (!course.college) {
       const matchCollege = WOLLO_COLLEGES.find((col) => col.programs.some((p) => p[0] === course.name));
       course.college = matchCollege ? matchCollege.name : "Common Courses";
@@ -916,7 +920,8 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
         )
       : [],
     mailSettings: normalizeMailSettings(raw.mailSettings),
-    updatedAt: Number(raw.updatedAt) || 0
+    updatedAt: Number(raw.updatedAt) || 0,
+    contentRevision: Number(raw.contentRevision) || 0
   };
 }
 
@@ -1202,7 +1207,8 @@ export async function createApp() {
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
       userRatings: dbState.userRatings,
-      updatedAt: dbState.updatedAt || 0
+      updatedAt: dbState.updatedAt || 0,
+      contentRevision: dbState.contentRevision || 0
     });
   });
 
@@ -1214,13 +1220,14 @@ export async function createApp() {
     }
     const incoming = req.body || {};
     // One shared store means a tab holding an old copy can overwrite newer work, so a
-    // save is only accepted when it is based on the version the server last handed out.
-    const baseVersion = Number(incoming.updatedAt);
-    if (baseVersion > 0 && baseVersion < Number(dbState.updatedAt || 0)) {
+    // save is only accepted when it is based on the revision the server last handed out.
+    const serverRevision = Number(dbState.contentRevision) || 0;
+    const baseRevision = Number(incoming.contentRevision);
+    if (serverRevision > 0 && !(baseRevision >= serverRevision)) {
       res.status(409).json({
         ok: false,
         error: "Newer changes are already saved on the server. Reload the page before editing again.",
-        updatedAt: dbState.updatedAt
+        contentRevision: serverRevision
       });
       return;
     }
@@ -1250,10 +1257,11 @@ export async function createApp() {
       customAdminPassword: dbState.customAdminPassword,
       passwordRecoveryRequests: dbState.passwordRecoveryRequests,
       materialSubmissions: dbState.materialSubmissions,
-      mailSettings: dbState.mailSettings
+      mailSettings: dbState.mailSettings,
+      contentRevision: serverRevision + 1
     });
     saveDatabase(dbState);
-    res.json({ ok: true, updatedAt: dbState.updatedAt });
+    res.json({ ok: true, updatedAt: dbState.updatedAt, contentRevision: dbState.contentRevision });
   });
 
   // Admin-only account removal: PUT /api/state intentionally never deletes
@@ -2299,6 +2307,38 @@ export async function createApp() {
     submission.reason = String(req.body?.reason || "The administrator could not verify this document.").slice(0, 300);
     saveDatabase(dbState);
     res.json({ ok: true, submission });
+  });
+
+  // Resume markers for lecture videos, stored on the account so they follow the
+  // student to any other device signing in.
+  app.post("/api/progress/video", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to save your watching progress." });
+      return;
+    }
+    const user = dbState.usersData.find((account) => account.id === session.id);
+    const courseId = String(req.body?.courseId || "");
+    const materialId = String(req.body?.materialId || "");
+    if (!user) {
+      res.status(401).json({ ok: false, error: "Your account could not be found." });
+      return;
+    }
+    if (!courseId || !materialId) {
+      res.status(400).json({ ok: false, error: "A course and material id are required." });
+      return;
+    }
+    const duration = Math.max(0, Math.round(Number(req.body?.duration) || 0));
+    const seconds = Math.max(0, Math.round(Number(req.body?.seconds) || 0));
+    const percent = duration > 0
+      ? Math.min(100, Math.round((seconds / duration) * 100))
+      : Math.max(0, Math.min(100, Math.round(Number(req.body?.percent) || 0)));
+    user.videoProgress = {
+      ...(user.videoProgress || {}),
+      [`${courseId}::${materialId}`]: { seconds, duration, percent, completed: percent >= 90, updatedAt: new Date().toISOString() }
+    };
+    saveDatabase(dbState);
+    res.json({ ok: true, progress: user.videoProgress[`${courseId}::${materialId}`] });
   });
 
   // Spend one earned credit right before the student's download starts, so a

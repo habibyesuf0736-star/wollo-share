@@ -115,9 +115,17 @@ Downloaded from Wollo Share Resources.`;
 export function triggerBrowserDownload(href, fileName) {
   const anchor = document.createElement("a");
   anchor.href = href;
-  anchor.download = fileName || "wollo-share-material";
-  anchor.target = href.startsWith("http") ? "_blank" : "_self";
   anchor.rel = "noopener noreferrer";
+  const remote = /^https?:\/\//i.test(href) && !href.startsWith(window.location.origin);
+  const looksLikeFile = /\.(pdf|zip|rar|7z|docx?|pptx?|xlsx?|jpe?g|png|mp4|mkv|webm|txt)(\?|#|$)/i.test(href);
+  if (remote && !looksLikeFile) {
+    // A cross-origin link cannot be forced into a file save, so open it honestly
+    // instead of showing a download that does nothing.
+    anchor.target = "_blank";
+  } else {
+    anchor.download = fileName || "wollo-share-material";
+    anchor.target = remote ? "_blank" : "_self";
+  }
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);

@@ -109,7 +109,7 @@ export function AppProvider({ children }) {
   const [videoTarget, setVideoTarget] = useState(null);
   const pendingDownloadRef = useRef(readJson(STORAGE_KEYS.PENDING_DOWNLOAD, null));
   const hasLocalMutationRef = useRef(false);
-  const baseUpdatedAtRef = useRef(0);
+  const baseRevisionRef = useRef(0);
   const syncTimerRef = useRef(null);
 
   /* ------------------------------------------------------------------ toasts */
@@ -176,7 +176,7 @@ export function AppProvider({ children }) {
   const fetchServerState = useCallback(
     (token) =>
       api.fetchState(token).then((res) => {
-        baseUpdatedAtRef.current = Number(res && res.updatedAt) || baseUpdatedAtRef.current;
+        baseRevisionRef.current = Number(res && res.contentRevision) || baseRevisionRef.current;
         return res;
       }),
     []
@@ -197,7 +197,7 @@ export function AppProvider({ children }) {
           hasLocalMutationRef.current = true;
           toast(res.error || "Could not sync changes to the server.");
         } else {
-          baseUpdatedAtRef.current = Number(res && res.updatedAt) || baseUpdatedAtRef.current;
+          baseRevisionRef.current = Number(res && res.contentRevision) || baseRevisionRef.current;
           removeKey(STORAGE_KEYS.PENDING_ADMIN_STATE);
         }
       },
@@ -210,10 +210,10 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isAdmin || hasLocalMutationRef.current !== true) return;
     pendingSyncRef.current = {
-      payload: { coursesData, usersData, pageTexts, appearanceSettings, userRatings, updatedAt: baseUpdatedAtRef.current },
+      payload: { coursesData, usersData, pageTexts, appearanceSettings, userRatings, contentRevision: baseRevisionRef.current },
       token: session.authToken
     };
-    writeJson(STORAGE_KEYS.PENDING_ADMIN_STATE, { ...pendingSyncRef.current, queuedAt: Date.now() });
+    writeJson(STORAGE_KEYS.PENDING_ADMIN_STATE, pendingSyncRef.current);
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(flushState, 400);
   }, [appearanceSettings, coursesData, flushState, isAdmin, pageTexts, session, userRatings, usersData]);
@@ -285,8 +285,8 @@ export function AppProvider({ children }) {
       const interrupted = readJson(STORAGE_KEYS.PENDING_ADMIN_STATE, null);
       let replayed = false;
       if (interrupted && interrupted.payload && session && session.role === "admin") {
-        const queuedAt = Number(interrupted.queuedAt || 0);
-        const serverMovedOn = !queuedAt || Number(res && res.updatedAt ? res.updatedAt : 0) > queuedAt;
+        const queuedRevision = Number(interrupted.payload.contentRevision) || 0;
+        const serverMovedOn = Number(res && res.contentRevision) > queuedRevision;
         if (serverMovedOn) {
           removeKey(STORAGE_KEYS.PENDING_ADMIN_STATE);
           toast("Unsynced admin edits were skipped to protect newer server data.");

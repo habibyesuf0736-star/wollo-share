@@ -8,3 +8,6 @@ coverage/
 !.env.example
 data/wollo-db.json
 /wollo-share-main/
+
+# Local database snapshots never leave the machine
+data/*.backup-*.json
