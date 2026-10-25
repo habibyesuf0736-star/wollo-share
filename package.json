@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "tsx serveLocal.ts",
     "admin:reset-password": "tsx scripts/reset-admin-password.ts",
+    "db:status": "tsx scripts/supabase-sync.ts status",
+    "db:push": "tsx scripts/supabase-sync.ts push",
+    "db:pull": "tsx scripts/supabase-sync.ts pull",
     "build": "vite build",
     "start": "tsx serveLocal.ts",
     "preview": "vite preview",

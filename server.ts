@@ -915,7 +915,8 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
           Boolean(s && typeof s.id === "string" && typeof s.courseId === "string" && typeof s.name === "string")
         )
       : [],
-    mailSettings: normalizeMailSettings(raw.mailSettings)
+    mailSettings: normalizeMailSettings(raw.mailSettings),
+    updatedAt: Number(raw.updatedAt) || 0
   };
 }
 
@@ -1212,6 +1213,17 @@ export async function createApp() {
       return;
     }
     const incoming = req.body || {};
+    // One shared store means a tab holding an old copy can overwrite newer work, so a
+    // save is only accepted when it is based on the version the server last handed out.
+    const baseVersion = Number(incoming.updatedAt);
+    if (baseVersion > 0 && baseVersion < Number(dbState.updatedAt || 0)) {
+      res.status(409).json({
+        ok: false,
+        error: "Newer changes are already saved on the server. Reload the page before editing again.",
+        updatedAt: dbState.updatedAt
+      });
+      return;
+    }
     const incomingUsers: Partial<UserAccount>[] = Array.isArray(incoming.usersData) ? incoming.usersData : [];
     const mergedUsers: UserAccount[] = incomingUsers.flatMap((incomingUser): UserAccount[] => {
       const existing = dbState.usersData.find(
@@ -1241,7 +1253,7 @@ export async function createApp() {
       mailSettings: dbState.mailSettings
     });
     saveDatabase(dbState);
-    res.json({ ok: true });
+    res.json({ ok: true, updatedAt: dbState.updatedAt });
   });
 
   // Admin-only account removal: PUT /api/state intentionally never deletes

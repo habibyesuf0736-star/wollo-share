@@ -102,6 +102,7 @@ export function AppProvider({ children }) {
   const [videoTarget, setVideoTarget] = useState(null);
   const pendingDownloadRef = useRef(readJson(STORAGE_KEYS.PENDING_DOWNLOAD, null));
   const hasLocalMutationRef = useRef(false);
+  const baseUpdatedAtRef = useRef(0);
   const syncTimerRef = useRef(null);
 
   /* ------------------------------------------------------------------ toasts */
@@ -163,6 +164,17 @@ export function AppProvider({ children }) {
   // mirrored to localStorage so a reload or crash mid-save is replayed on next boot.
   const pendingSyncRef = useRef(null);
 
+  // Each server read records the revision the client is now editing against, so a later
+  // save can be rejected when somebody else wrote in the meantime.
+  const fetchServerState = useCallback(
+    (token) =>
+      api.fetchState(token).then((res) => {
+        baseUpdatedAtRef.current = Number(res && res.updatedAt) || baseUpdatedAtRef.current;
+        return res;
+      }),
+    []
+  );
+
   const flushState = useCallback(() => {
     if (syncTimerRef.current) {
       clearTimeout(syncTimerRef.current);
@@ -178,6 +190,7 @@ export function AppProvider({ children }) {
           hasLocalMutationRef.current = true;
           toast(res.error || "Could not sync changes to the server.");
         } else {
+          baseUpdatedAtRef.current = Number(res && res.updatedAt) || baseUpdatedAtRef.current;
           removeKey(STORAGE_KEYS.PENDING_ADMIN_STATE);
         }
       },
@@ -190,7 +203,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isAdmin || hasLocalMutationRef.current !== true) return;
     pendingSyncRef.current = {
-      payload: { coursesData, usersData, pageTexts, appearanceSettings, userRatings },
+      payload: { coursesData, usersData, pageTexts, appearanceSettings, userRatings, updatedAt: baseUpdatedAtRef.current },
       token: session.authToken
     };
     writeJson(STORAGE_KEYS.PENDING_ADMIN_STATE, { ...pendingSyncRef.current, queuedAt: Date.now() });
@@ -251,11 +264,11 @@ export function AppProvider({ children }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let res = await api.fetchState(session ? session.authToken : null);
+      let res = await fetchServerState(session ? session.authToken : null);
       if (res && res.status === 401) {
         setSession(null);
         removeTabKey(STORAGE_KEYS.CURRENT_SESSION);
-        res = await api.fetchState(null);
+        res = await fetchServerState(null);
       }
       if (cancelled) return;
 
@@ -361,7 +374,7 @@ export function AppProvider({ children }) {
       if (!res || res.ok !== true || !res.session) return { ok: false, error: (res && res.error) || "Sign in failed." };
       const saved = storeSession(res.session);
       hasLocalMutationRef.current = false;
-      const state = await api.fetchState(saved.authToken);
+      const state = await fetchServerState(saved.authToken);
       if (state && state.ok !== false) {
         if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
         if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
@@ -1054,7 +1067,7 @@ export function AppProvider({ children }) {
     const res = await api.resetDatabase(session.authToken);
     if (res && res.ok) {
       hasLocalMutationRef.current = false;
-      const state = await api.fetchState(session.authToken);
+      const state = await fetchServerState(session.authToken);
       if (state && state.coursesData) setCoursesData(state.coursesData);
       if (state && state.usersData) setUsersData(state.usersData);
       toast("Database reset to the seeded Wollo Share catalog.");
@@ -1067,7 +1080,7 @@ export function AppProvider({ children }) {
   // the library afterwards and drops any queued local edit that would overwrite it.
   const reloadLibraryFromServer = useCallback(async () => {
     if (!session) return;
-    const state = await api.fetchState(session.authToken);
+    const state = await fetchServerState(session.authToken);
     if (!state || state.ok === false) return;
     if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
     if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
