@@ -5932,7 +5932,7 @@
       "downloadOnlyAccount": false,
       "amountPaidBirr": 500,
       "category": "Super Admin · Lifetime VIP Access",
-      "sharedMaterialsCount": 8,
+      "sharedMaterialsCount": 0,
       "downloadsCount": 42,
       "lastActiveAt": "Oct 13, 2026, 04:28 PM",
       "allowedCourseIds": [
@@ -6335,5 +6335,5 @@
     "mailtrapTokenVault": "",
     "mailtrapTemplateUuid": ""
   },
-  "updatedAt": 1792935613531
+  "updatedAt": 1792939358023
 }

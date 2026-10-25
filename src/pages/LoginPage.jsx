@@ -233,15 +233,15 @@ export default function LoginPage() {
                     value={signin.password}
                     onChange={(e) => setSignin({ ...signin, password: e.target.value })}
                     placeholder="Enter your account password"
-                    style={{ paddingRight: 88 }}
                   />
                   <button
                     type="button"
-                    className="btn btn-sm btn-outline-secondary position-absolute"
-                    style={{ right: 6, top: "50%", transform: "translateY(-50%)", zIndex: 2 }}
+                    className="btn btn-sm btn-outline-secondary ws-pw-toggle"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-pressed={showPassword}
+                    aria-controls="loginPw"
                   >
-                    {showPassword ? <EyeOff size={14} className="me-1 align-text-bottom" aria-hidden="true" /> : <Eye size={14} className="me-1 align-text-bottom" aria-hidden="true" />}
+                    {showPassword ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>

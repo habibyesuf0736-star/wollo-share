@@ -1964,7 +1964,7 @@ a {
 .ws-field-icon {
   position: relative;
 }
-.ws-field-icon svg {
+.ws-field-icon > svg {
   position: absolute;
   left: 13px;
   top: 50%;
@@ -1975,6 +1975,23 @@ a {
 .ws-field-icon .form-control,
 .ws-field-icon .form-select {
   padding-left: 40px;
+}
+.ws-field-icon:has(.ws-pw-toggle) .form-control {
+  padding-right: 96px;
+}
+.ws-pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 /* ---------- Course detail header ---------- */

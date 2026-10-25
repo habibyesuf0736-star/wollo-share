@@ -7,7 +7,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
+import { remoteEnabled, loadRemoteState, queueRemoteSave } from "./stateStore.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,7 +15,6 @@ const FIREBASE_CONFIG = JSON.parse(
   fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8")
 ) as { apiKey?: string; projectId?: string };
 
-const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "wollo-db.json");
 
@@ -968,14 +967,19 @@ function loadDatabase(): DatabaseSchema {
 
 function saveDatabase(db: DatabaseSchema): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
     db.usersData.forEach((u) => secureUserAccount(u));
     if (db.customAdminPassword) {
       db.customAdminPassword = hashPassword(db.customAdminPassword, "admin-owner");
     }
     db.updatedAt = Date.now();
+    if (remoteEnabled()) {
+      // Snapshot the document now: dbState keeps mutating after this call returns.
+      queueRemoteSave(JSON.stringify(db));
+      return;
+    }
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
   } catch (err) {
     console.error("Failed to save database file:", err);
@@ -983,6 +987,24 @@ function saveDatabase(db: DatabaseSchema): void {
 }
 
 let dbState: DatabaseSchema = loadDatabase();
+
+// With WOLLO_STATE_STORE=supabase the document lives in Postgres, so the file read above
+// is only a starting point and every request must wait for the real state.
+async function hydrateState(): Promise<void> {
+  if (!remoteEnabled()) return;
+  try {
+    const doc = await loadRemoteState();
+    if (doc) {
+      dbState = normalizeDatabase(doc as Record<string, unknown>);
+      console.log("state loaded from Supabase");
+    } else {
+      saveDatabase(dbState);
+      console.log("Supabase state table was empty, seeded it from the local snapshot");
+    }
+  } catch (err) {
+    console.error("Failed to load state from Supabase:", (err as Error).message);
+  }
+}
 
 const MAIL_VAULT_CONTEXT = "wollo-mail-settings";
 
@@ -1112,7 +1134,7 @@ async function issueRecoveryCode(request: PasswordRecoveryRequest) {
   return { ok: delivery.ok, provider: delivery.provider, error: delivery.error };
 }
 
-async function startServer() {
+export async function createApp() {
   const app = express();
   app.use(express.json({ limit: "50mb" }));
 
@@ -2293,25 +2315,9 @@ async function startServer() {
   });
 
   // ============================================================================
-  // VITE DEV MIDDLEWARE / PRODUCTION STATIC ASSETS
+  // STATE BACKEND
   // ============================================================================
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa"
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(__dirname, "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
+  await hydrateState();
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Wollo Share full-stack server running on http://0.0.0.0:${PORT}`);
-  });
+  return app;
 }
-
-startServer();
