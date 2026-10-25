@@ -21,6 +21,8 @@ const DB_FILE = path.join(DATA_DIR, "wollo-db.json");
 
 const ADMIN_USERNAME = "admin";
 const ADMIN_EMAIL = "habibyesuf81@gmail.com";
+// The owner's second address, also accepted as an administrator sign-in name.
+const OWNER_ALT_EMAIL = "habibyesuf0736@gmail.com";
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || ADMIN_EMAIL;
 
 // Salted multi-round SHA-256 hashes of primary & secondary admin passwords (never stored in plaintext)
@@ -1770,7 +1772,27 @@ async function startServer() {
       return;
     }
 
-    // Check registered student/user accounts first when identifier matches
+    // The administrator credential is checked first so an admin identifier that
+    // also belongs to a user account still yields an administrator session.
+    const isAdminId =
+      lowerId === ADMIN_USERNAME.toLowerCase() ||
+      lowerId === ADMIN_EMAIL.toLowerCase() ||
+      lowerId === OWNER_ALT_EMAIL.toLowerCase() ||
+      lowerId === "habib" ||
+      lowerId === "habibyesuf81";
+    if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
+      loginRateLimitMap.delete(lowerId);
+      const signedSession = createSignedSessionToken({
+        id: "admin-owner",
+        name: "Habib Yesuf",
+        email: ADMIN_EMAIL,
+        role: "admin"
+      });
+      res.json({ ok: true, session: signedSession });
+      return;
+    }
+
+    // Check registered student/user accounts next
     const matchedUser = dbState.usersData.find(
       (u) =>
         (u.email.toLowerCase() === lowerId || u.name.toLowerCase() === lowerId) &&
@@ -1784,24 +1806,6 @@ async function startServer() {
         name: matchedUser.name,
         email: matchedUser.email,
         role: matchedUser.role || "user"
-      });
-      res.json({ ok: true, session: signedSession });
-      return;
-    }
-
-    // Check Admin credentials using salted SHA-256 verification (requires matching admin identifier)
-    const isAdminId =
-      lowerId === ADMIN_USERNAME.toLowerCase() ||
-      lowerId === ADMIN_EMAIL.toLowerCase() ||
-      lowerId === "habib" ||
-      lowerId === "habibyesuf81";
-    if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
-      loginRateLimitMap.delete(lowerId);
-      const signedSession = createSignedSessionToken({
-        id: "admin-owner",
-        name: "Habib Yesuf",
-        email: ADMIN_EMAIL,
-        role: "admin"
       });
       res.json({ ok: true, session: signedSession });
       return;
