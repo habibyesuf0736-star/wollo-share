@@ -1294,7 +1294,7 @@ export async function createApp() {
   });
 
   // 3. Authentication Endpoints
-  app.post("/api/auth/password-recovery/request", (req, res) => {
+  app.post("/api/auth/password-recovery/request", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const now = Date.now();
     const clientKey = req.ip || req.socket.remoteAddress || "unknown";
@@ -1337,21 +1337,26 @@ export async function createApp() {
         dbState.passwordRecoveryRequests.push(recoveryRequest);
         recoveryRequest.notificationSent = false;
         saveDatabase(dbState);
-        setImmediate(async () => {
+        // A serverless instance freezes as soon as the response is sent, so the code
+        // has to leave before replying or the email never goes out.
+        try {
           await issueRecoveryCode(recoveryRequest);
-          const sent = await notifyAdminOfRecoveryRequest(recoveryRequest);
-          recoveryRequest.notificationSent = sent;
+          recoveryRequest.notificationSent = await notifyAdminOfRecoveryRequest(recoveryRequest);
           saveDatabase(dbState);
-        });
+        } catch (error) {
+          console.error("Recovery request dispatch failed:", error);
+        }
       } else {
         // Asking again must actually dispatch mail: reuse the open request, but replace the code
         // (and email it) unless a code went out less than a minute ago.
         const lastSent = existing.codeSentAt ? Date.parse(existing.codeSentAt) : 0;
-        if (now - lastSent > 60 * 1000) {
-          setImmediate(async () => {
+        if (now - lastSent > 60_000) {
+          try {
             await issueRecoveryCode(existing);
             saveDatabase(dbState);
-          });
+          } catch (error) {
+            console.error("Recovery code resend failed:", error);
+          }
         }
       }
     }
