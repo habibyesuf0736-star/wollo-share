@@ -2521,19 +2521,18 @@ footer.ws-footer .ws-page {
 }
 @keyframes ws-pop {
   from {
-    opacity: 0;
     transform: translateY(14px) scale(0.985);
   }
 }
 @keyframes ws-slide-up {
   from {
-    opacity: 0;
     transform: translateY(14px);
   }
 }
+/* Transform-only: with fill-mode "both" an opacity 0 start would leave the
+   grid invisible whenever the animation timeline cannot tick (hidden webview). */
 @keyframes ws-rise {
   from {
-    opacity: 0;
     transform: translateY(12px);
   }
 }
