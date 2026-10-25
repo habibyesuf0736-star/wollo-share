@@ -44,10 +44,17 @@ function readStoredSession() {
   return readTabJson(STORAGE_KEYS.CURRENT_SESSION, null);
 }
 
-// "#/admin/materials" opens straight into that workspace section.
-function initialView() {
-  const match = String(window.location.hash).match(/^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics))?/);
+// "#/admin/materials" opens straight into that workspace section, and "#/login" or "/login"
+// opens the sign-in screen so a refresh or a shared link does not drop back into the library.
+function viewFromLocation() {
+  const hash = String(window.location.hash);
+  if (window.location.pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
+  const match = hash.match(/^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics))?/);
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
+}
+
+function initialView() {
+  return viewFromLocation();
 }
 
 function clearAdminHash() {
@@ -338,16 +345,35 @@ export function AppProvider({ children }) {
   }, []);
   const goAdmin = useCallback((tab) => setView({ name: "admin", tab: tab || "" }), []);
 
-  // Editing or pasting a "#/admin/materials" address routes the running app too,
-  // not just a fresh page load.
+  // Editing or pasting an address like "#/admin/materials" or "#/login" routes the running
+  // app too, not just a fresh page load.
   useEffect(() => {
-    const onHashChange = () => {
-      const match = String(window.location.hash).match(/^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics))?/);
-      if (match) setView({ name: "admin", courseId: null, tab: match[1] || "" });
+    const onLocationChange = () => {
+      const next = viewFromLocation();
+      if (next.name === "login") setView({ name: "login" });
+      else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
     };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    window.addEventListener("hashchange", onLocationChange);
+    window.addEventListener("popstate", onLocationChange);
+    return () => {
+      window.removeEventListener("hashchange", onLocationChange);
+      window.removeEventListener("popstate", onLocationChange);
+    };
   }, []);
+
+  // The sign-in screen owns its own address, so reloading or sharing it cannot silently
+  // fall back to the library.
+  useEffect(() => {
+    const onLoginHash = /^#\/login/.test(window.location.hash);
+    const onLoginPath = window.location.pathname === "/login";
+    if (view.name === "login") {
+      if (!onLoginHash && !onLoginPath) {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search + "#/login");
+      }
+    } else if (onLoginHash || onLoginPath) {
+      window.history.replaceState(null, "", onLoginPath ? "/" : window.location.pathname + window.location.search);
+    }
+  }, [view.name]);
   // Previewing as a student always leaves the admin workspace, otherwise the
   // admin-only screens would disappear mid-preview.
   const toggleStudentPreview = useCallback(() => {
