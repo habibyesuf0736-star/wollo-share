@@ -25,8 +25,47 @@
       "enabled": false
     }
   },
-  "updatedAt": 1792979406304,
+  "updatedAt": 1793039547719,
   "usersData": [
+    {
+      "id": "user-1793034538218",
+      "name": "habib yesuf",
+      "role": "user",
+      "email": "habibyesuf086@gmail.com",
+      "phone": "+25127737373",
+      "category": "Unpaid · Pending 2 Uploads",
+      "password": "enc$sha256$757365722d31373933303334353338323138$08f6f14d7f4033e3aaf331594c8e72156c195fd28c6cd778784b71bbbdd7de53",
+      "department": "Information Systems",
+      "accountPlan": "unpaid",
+      "activityLog": [
+        {
+          "id": "act-1793034538218",
+          "type": "Account Created",
+          "detail": "Registered free account — Name: habib yesuf, Email: habibyesuf086@gmail.com, Dept: Information Systems, Phone: +25127737373, Registered: 2026-10-26 17:08",
+          "timestamp": "2026-10-26 17:08"
+        }
+      ],
+      "lastActiveAt": "Active now",
+      "passwordHash": "enc$sha256$757365722d31373933303334353338323138$08f6f14d7f4033e3aaf331594c8e72156c195fd28c6cd778784b71bbbdd7de53",
+      "encryptionAlg": "SHA-256+AES-VAULT",
+      "passwordVault": "enc$vault$5ee9fcea9fc7bd29$99ff1fbeaa350d86c55b7f15e55b8ce13ceb3b7dbb7dc12e$74505cb50956814a35e64bf5",
+      "paymentStatus": "unpaid",
+      "amountPaidBirr": 0,
+      "downloadsCount": 0,
+      "evangadiSynced": true,
+      "downloadCredits": 0,
+      "allowedCourseIds": [
+        "course-evangadi",
+        "course-se-capstone",
+        "course-clinical-research",
+        "course-calc-uni"
+      ],
+      "unpaidMigrationV3": true,
+      "downloadOnlyAccount": false,
+      "sharedMaterialsCount": 0,
+      "unpaidCurrentUploadProgress": 0,
+      "unpaidPerDownloadMigrationV4": true
+    },
     {
       "id": "user-1792926842131",
       "name": "habibyesuf811@gmail.com",
@@ -6355,6 +6394,19 @@
       "createdAt": "2026-10-25T16:03:15.623Z",
       "failedAttempts": 0,
       "notificationSent": false
+    },
+    {
+      "id": "987be7b6-b816-4233-862a-83e686bcbd08",
+      "name": "Brevo Flow Test",
+      "email": "habibyesuf0736@gmail.com",
+      "status": "code-issued",
+      "userId": "user-1792885521916",
+      "codeHash": "enc$sha256$70617373776f72642d7265636f766572793a39383762653762362d623831362d343233332d383632612d383365363836626362643038$7191f53f48f67b6f3fe37c2561bdb269bb0c858494ea7e54137294706d033133",
+      "createdAt": "2026-10-26T17:42:06.382Z",
+      "codeSentAt": "2026-10-26T17:42:07.138Z",
+      "codeExpiresAt": "2026-10-26T18:12:06.388Z",
+      "failedAttempts": 0,
+      "notificationSent": true
     }
   ]
 }

@@ -30,7 +30,7 @@ function describe(label: string, doc: Doc | null) {
     `courses ${(doc.coursesData as unknown[] | undefined)?.length ?? 0}`,
     `users ${(doc.usersData as unknown[] | undefined)?.length ?? 0}`,
     `submissions ${(doc.materialSubmissions as unknown[] | undefined)?.length ?? 0}`,
-    `ratings ${(doc.userRatings as unknown[] | undefined)?.length ?? 0}`,
+    `ratings ${Object.keys((doc.userRatings as Record<string, unknown> | undefined) || {}).length}`,
     `ads ${(doc.pageTexts as Record<string, unknown> | undefined)?.__ads ? "yes" : "no"}`
   ].join(", ");
   console.log(`${label}: updatedAt ${doc.updatedAt ?? 0} · ${counts} · ${JSON.stringify(doc).length} bytes`);
