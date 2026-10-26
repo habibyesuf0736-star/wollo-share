@@ -3,7 +3,7 @@ import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
 import DepartmentSelect from "../../components/DepartmentSelect.jsx";
-import { approveVerification, closeRecoveryRequest, createStudentAccount, getMailSettings, issueRecoveryCode, listRecoveryRequests, listVerifications, saveMailSettings, sendTestEmail } from "../../lib/api.js";
+import { approveVerification, closeRecoveryRequest, createStudentAccount, getMailSettings, issueRecoveryCode, listRecoveryRequests, listVerifications, saveMailSettings, sendTestEmail, shareVerificationCode } from "../../lib/api.js";
 
 const EMPTY_MAIL_FORM = {
   preference: "auto",
@@ -60,6 +60,8 @@ export default function AdminUsers() {
   const [profile, setProfile] = useState(null);
   const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
   const [approving, setApproving] = useState("");
+  const [sharing, setSharing] = useState("");
+  const [sharedCode, setSharedCode] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(EMPTY_STUDENT_FORM);
   const [addError, setAddError] = useState("");
@@ -164,6 +166,26 @@ export default function AdminUsers() {
   useEffect(() => {
     loadVerifications();
   }, [loadVerifications]);
+
+  // A student who signs up while this tab is open should show up without a manual refresh.
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadVerifications();
+    }, 20000);
+    return () => clearInterval(timer);
+  }, [isAdmin, loadVerifications]);
+
+  const showCode = async (entry) => {
+    setSharing(entry.id);
+    const res = await shareVerificationCode(entry.id, session.authToken);
+    setSharing("");
+    if (!res || !res.ok || !res.code) {
+      toast((res && res.error) || "Could not create a code for that account.");
+      return;
+    }
+    setSharedCode({ name: entry.name || entry.email, email: entry.email, code: res.code, expiresAt: res.expiresAt });
+  };
 
   const approveAccount = async (entry) => {
     setApproving(entry.id);
@@ -294,10 +316,15 @@ export default function AdminUsers() {
           </div>
           {!verifications.mailConfigured ? (
             <p className="small text-secondary mb-2">
-              Email delivery is not configured, so new students cannot receive their 6-digit code. Approve each account
-              here to let them sign in.
+              Email delivery is not configured, so new students cannot receive their 6-digit code. Use <strong>Get code</strong> to
+              read a fresh code and pass it on, or approve the account so they can sign in.
             </p>
-          ) : null}
+          ) : (
+            <p className="small text-secondary mb-2">
+              Codes are emailed automatically. If a student says nothing arrived, press <strong>Get code</strong>, send it by
+              phone or WhatsApp, or approve the account.
+            </p>
+          )}
           {verifications.pending.length ? (
             <ul className="list-unstyled mb-0 d-flex flex-column gap-2">
               {verifications.pending.map((entry) => (
@@ -310,6 +337,14 @@ export default function AdminUsers() {
                     {entry.attempts ? ` · ${entry.attempts} wrong attempt${entry.attempts === 1 ? "" : "s"}` : ""}
                   </span>
                   <span className="flex-grow-1" />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary py-0"
+                    disabled={sharing === entry.id}
+                    onClick={() => showCode(entry)}
+                  >
+                    {sharing === entry.id ? "Preparing…" : "Get code"}
+                  </button>
                   <button
                     type="button"
                     className="btn btn-sm btn-soft py-0"
@@ -724,6 +759,54 @@ export default function AdminUsers() {
               </button>
             </div>
           </form>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={Boolean(sharedCode)}
+        onClose={() => setSharedCode(null)}
+        title="Send this code to the student"
+        subtitle={sharedCode ? `${sharedCode.name} · ${sharedCode.email}` : ""}
+        size="narrow"
+      >
+        {sharedCode ? (
+          <div className="d-flex flex-column gap-3">
+            <div className="text-center py-3" style={{ border: "1px dashed var(--line)", borderRadius: 12 }}>
+              <div className="mono" style={{ fontSize: 34, letterSpacing: "0.28em" }}>
+                {sharedCode.code}
+              </div>
+              <div className="small text-secondary mt-1">
+                Works once, expires{" "}
+                {sharedCode.expiresAt ? new Date(sharedCode.expiresAt).toLocaleTimeString() : "in 30 minutes"}
+              </div>
+            </div>
+            <p className="small text-secondary mb-0">
+              {verifications.mailConfigured
+                ? "Send this code by phone or WhatsApp if the student did not get the email."
+                : "Email delivery is not reaching the student, so pass this code on by phone or WhatsApp."}{" "}
+              The student types it on the verification screen that appeared after signing up. If you would rather skip
+              the code, press Approve instead.
+            </p>
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(sharedCode.code);
+                    toast("Code copied.");
+                  } catch {
+                    toast("Copy failed — select the digits and copy them manually.");
+                  }
+                }}
+              >
+                Copy code
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setSharedCode(null)}>
+                Done
+              </button>
+            </div>
+          </div>
         ) : null}
       </Modal>
 

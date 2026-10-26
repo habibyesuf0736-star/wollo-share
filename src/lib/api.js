@@ -77,6 +77,13 @@ export function approveVerification(userId, session) {
   });
 }
 
+export function shareVerificationCode(userId, session) {
+  return request(`/api/admin/verifications/${encodeURIComponent(userId)}/code`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
 export function createStudentAccount(details, session) {
   return request("/api/admin/users", { method: "POST", headers: authHeaders(session), body: JSON.stringify(details) });
 }

@@ -1404,8 +1404,6 @@ export async function createApp() {
       res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
       return;
     }
-    // The code itself never leaves the server: the administrator confirms the
-    // account instead, which is what makes signup work when email cannot send.
     const pending = dbState.usersData
       .filter((user) => !isEmailVerified(user))
       .map((user) => ({
@@ -1420,6 +1418,44 @@ export async function createApp() {
         registeredAt: (user.activityLog || []).find((entry) => entry.type === "Account Created")?.timestamp
       }));
     res.json({ ok: true, pending, mailConfigured: activeMailProvider() !== "none" });
+  });
+
+  // When the mail provider cannot send, the administrator reads the code here and
+  // passes it to the student by phone or WhatsApp; the code still proves the
+  // mailbox only as far as the administrator vouches for it, exactly like Approve.
+  app.post("/api/admin/verifications/:userId/code", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const user = dbState.usersData.find((candidate) => candidate.id === String(req.params.userId || ""));
+    if (!user) {
+      res.status(404).json({ ok: false, error: "That account no longer exists." });
+      return;
+    }
+    if (isEmailVerified(user)) {
+      res.json({ ok: true, alreadyVerified: true, message: "That account is already verified." });
+      return;
+    }
+    const { code } = issueSignupCode(user);
+    delete user.verificationSentAt;
+    user.activityLog = [
+      ...(user.activityLog || []),
+      {
+        id: "act-" + Date.now(),
+        type: "Code Shared",
+        detail: "Administrator opened the signup code to send it to the student.",
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      }
+    ];
+    saveDatabase(dbState);
+    res.json({
+      ok: true,
+      code,
+      expiresAt: user.verificationExpiresAt,
+      message: `Send this code to ${user.email}.`
+    });
   });
 
   app.post("/api/admin/verifications/:userId/approve", (req, res) => {
