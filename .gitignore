@@ -11,3 +11,5 @@ data/wollo-db.json
 
 # Local database snapshots never leave the machine
 data/*.backup-*.json
+
+.vercel

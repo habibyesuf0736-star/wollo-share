@@ -1024,6 +1024,10 @@ async function hydrateState(): Promise<void> {
   const doc = await loadRemoteState();
   if (doc) {
     dbState = normalizeDatabase(doc as Record<string, unknown>);
+    // The vault-encrypted mail credentials live only inside the row, so the module-load
+    // call to applyMailSettings() cannot see them; without this the serverless boot would
+    // send recovery mail with no provider configured.
+    applyMailSettings();
     console.log("state loaded from Supabase");
     return;
   }
