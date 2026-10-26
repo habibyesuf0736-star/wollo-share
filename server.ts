@@ -7,7 +7,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { remoteEnabled, loadRemoteState, queueRemoteSave } from "./stateStore.ts";
+import { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } from "./stateStore.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1032,8 +1032,12 @@ let dbState: DatabaseSchema = loadDatabase();
 
 // With WOLLO_STATE_STORE=supabase the document lives in Postgres, so the file read above
 // is only a starting point and every request must wait for the real state.
+let hydrationLogged = false;
 async function hydrateState(): Promise<void> {
   if (!remoteEnabled()) return;
+  // A write queued by the request before this one may still be in flight; reading now
+  // would hand back the older row and the next save would erase that write.
+  await flushRemoteSaves();
   const doc = await loadRemoteState();
   if (doc) {
     dbState = normalizeDatabase(doc as Record<string, unknown>);
@@ -1041,7 +1045,10 @@ async function hydrateState(): Promise<void> {
     // call to applyMailSettings() cannot see them; without this the serverless boot would
     // send recovery mail with no provider configured.
     applyMailSettings();
-    console.log("state loaded from Supabase");
+    if (!hydrationLogged) {
+      hydrationLogged = true;
+      console.log("state loaded from Supabase");
+    }
     return;
   }
   saveDatabase(dbState);
@@ -1230,6 +1237,19 @@ export async function createApp() {
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
+  });
+
+  // Read the shared document on every request. A serverless instance stays warm for
+  // hours and a local dev server for days, so a copy held in memory goes stale and the
+  // next save would write it over everything other instances wrote since.
+  app.use(async (_req, res, next) => {
+    try {
+      await hydrateState();
+      next();
+    } catch (err) {
+      console.error("state hydrate failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The shared database could not be reached. Please try again in a moment." });
+    }
   });
 
   // ============================================================================
@@ -2930,7 +2950,6 @@ export async function createApp() {
   // ============================================================================
   // STATE BACKEND
   // ============================================================================
-  await hydrateState();
 
   return app;
 }
