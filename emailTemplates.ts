@@ -138,6 +138,46 @@ export function recoveryCodeEmail(input: {
   };
 }
 
+export function signupCodeEmail(input: {
+  name: string;
+  email: string;
+  code: string;
+  minutesLeft: number;
+}): RenderedEmail {
+  const name = input.name || "there";
+  const subject = `${input.code} is your Wollo Share verification code`;
+  const text = [
+    `Hi ${name},`,
+    "",
+    `Your Wollo Share verification code is ${input.code}.`,
+    `Enter it on the sign-in page to activate ${input.email}.`,
+    `It expires in ${input.minutesLeft} minutes.`,
+    "If you did not create this account, ignore this email.",
+    "",
+    "Wollo Share · Wollo University course materials library"
+  ].join("\n");
+
+  const bodyHtml = [
+    `<p style="margin:0 0 16px 0;">Hi ${escapeHtml(name)},</p>`,
+    `<p style="margin:0 0 4px 0;">Enter this code to finish creating the account for <strong style="color:${BRAND.ink};">${escapeHtml(input.email)}</strong>.</p>`,
+    codeBlock(input.code),
+    `<p style="margin:0 0 6px 0;font-size:14px;color:${BRAND.muted};">Expires in ${input.minutesLeft} minutes</p>`,
+    divider(),
+    `<p style="margin:0;font-size:13px;line-height:21px;color:${BRAND.body};">If no verification code arrived, the site administrator can confirm your account from the admin panel.</p>`
+  ].join("");
+
+  return {
+    subject,
+    text,
+    html: layout({
+      preheader: `Your Wollo Share verification code expires in ${input.minutesLeft} minutes.`,
+      title: "Verify your account",
+      bodyHtml,
+      footerNote: "Sent because a new Wollo Share account was created with this address."
+    })
+  };
+}
+
 export function recoveryRequestNoticeEmail(input: {
   name: string;
   email: string;

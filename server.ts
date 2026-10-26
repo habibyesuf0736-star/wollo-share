@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { encryptVaultSecret, hashPassword } from "./auth-crypto.ts";
 import { configureMail, mailStatus, sendMail, activeMailProvider, effectiveMailConfig, normalizeMailSecret, type MailConfig } from "./mail.ts";
-import { recoveryCodeEmail, recoveryRequestNoticeEmail, testEmailMessage } from "./emailTemplates.ts";
+import { recoveryCodeEmail, recoveryRequestNoticeEmail, signupCodeEmail, testEmailMessage } from "./emailTemplates.ts";
 import crypto from "crypto";
 import express from "express";
 import fs from "fs";
@@ -154,6 +154,12 @@ function safeUserAccount(user: UserAccount) {
     password: _password,
     passwordHash: _passwordHash,
     passwordVault: _passwordVault,
+    // The pending code is what proves the person owns the mailbox, so it must never
+    // travel in a payload the account holder can read; admins get it from their own route.
+    verificationCode: _verificationCode,
+    verificationExpiresAt: _verificationExpiresAt,
+    verificationAttempts: _verificationAttempts,
+    verificationSentAt: _verificationSentAt,
     ...safeUser
   } = user;
   return safeUser;
@@ -674,6 +680,13 @@ interface UserAccount {
   evangadiSynced?: boolean;
   activityLog?: ActivityLogItem[];
   videoProgress?: Record<string, { seconds: number; duration: number; percent: number; completed: boolean; updatedAt: string }>;
+  // Accounts created before email verification existed have no flag at all and stay valid.
+  emailVerified?: boolean;
+  verificationCode?: string;
+  verificationExpiresAt?: string;
+  verificationSentAt?: string;
+  verificationAttempts?: number;
+  addedByAdmin?: boolean;
 }
 
 interface DatabaseSchema {
@@ -1076,6 +1089,50 @@ const loginRateLimitMap = new Map<string, { failedCount: number; lockedUntil: nu
 const recoveryRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 
 const RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
+const VERIFICATION_CODE_TTL_MS = 30 * 60 * 1000;
+const VERIFICATION_MAX_ATTEMPTS = 6;
+
+// Six digits: easy to retype from a phone, and guessing is capped by
+// VERIFICATION_MAX_ATTEMPTS before the code is thrown away.
+function sixDigitCode(): string {
+  return String(crypto.randomInt(100_000, 1_000_000));
+}
+
+// Accounts that predate email verification carry no flag at all, so only an
+// explicit false is treated as unverified.
+function isEmailVerified(user: UserAccount): boolean {
+  return user.emailVerified !== false;
+}
+
+function issueSignupCode(user: UserAccount): { code: string; mailSent: boolean } {
+  const code = sixDigitCode();
+  user.emailVerified = false;
+  user.verificationCode = hashPassword(code, `signup:${user.id}`);
+  user.verificationExpiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MS).toISOString();
+  user.verificationAttempts = 0;
+  return { code, mailSent: false };
+}
+
+function signupCodeMatches(user: UserAccount, code: string): boolean {
+  if (!user.verificationCode || !user.verificationExpiresAt) return false;
+  if (Date.parse(user.verificationExpiresAt) < Date.now()) return false;
+  return hashPassword(code, `signup:${user.id}`) === user.verificationCode;
+}
+
+async function sendSignupCode(user: UserAccount, code: string): Promise<{ ok: boolean; error?: string }> {
+  const delivery = await sendMail({
+    to: user.email,
+    ...signupCodeEmail({
+      name: user.name,
+      email: user.email,
+      code,
+      minutesLeft: Math.round(VERIFICATION_CODE_TTL_MS / 60000)
+    })
+  });
+  if (delivery.ok) user.verificationSentAt = new Date().toISOString();
+  else console.error("Signup verification email failed:", delivery.error);
+  return { ok: delivery.ok, error: delivery.error };
+}
 
 const MAIL_PROVIDER_LABEL: Record<string, string> = {
   relay: "Hyvor Relay",
@@ -1142,7 +1199,7 @@ async function notifyAdminOfRecoveryRequest(request: PasswordRecoveryRequest): P
 }
 
 async function issueRecoveryCode(request: PasswordRecoveryRequest) {
-  const code = String(crypto.randomInt(10_000_000, 100_000_000));
+  const code = sixDigitCode();
   request.status = "code-issued";
   request.codeHash = hashPassword(code, `password-recovery:${request.id}`);
   request.codeExpiresAt = new Date(Date.now() + RECOVERY_CODE_TTL_MS).toISOString();
@@ -1303,6 +1360,154 @@ export async function createApp() {
     });
     saveDatabase(dbState);
     res.json({ ok: true, removed: before - dbState.usersData.length });
+  });
+
+  app.patch("/api/profile", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to edit your profile." });
+      return;
+    }
+    const user = dbState.usersData.find((candidate) => candidate.id === session.id);
+    if (!user) {
+      res.status(404).json({ ok: false, error: "No student profile is linked to this session." });
+      return;
+    }
+    const name = String(req.body?.name ?? user.name).trim();
+    const department = String(req.body?.department ?? user.department ?? "").trim();
+    const phone = String(req.body?.phone ?? user.phone ?? "").trim();
+    if (name.length < 2) {
+      res.status(400).json({ ok: false, error: "Enter your full name." });
+      return;
+    }
+    user.name = name.slice(0, 80);
+    user.department = department.slice(0, 80) || user.department;
+    user.phone = phone.slice(0, 32);
+    user.activityLog = [
+      ...(user.activityLog || []).slice(-40),
+      {
+        id: "act-" + Date.now(),
+        type: "Profile Updated",
+        detail: `Student updated their profile — Name: ${user.name}, Dept: ${user.department || "not set"}${user.phone ? ", Phone: " + user.phone : ""}`,
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      }
+    ];
+    saveDatabase(dbState);
+    res.json({ ok: true, user: safeUserAccount(user), message: "Profile saved." });
+  });
+
+  app.get("/api/admin/verifications", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    // The code itself never leaves the server: the administrator confirms the
+    // account instead, which is what makes signup work when email cannot send.
+    const pending = dbState.usersData
+      .filter((user) => !isEmailVerified(user))
+      .map((user) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        department: user.department,
+        phone: user.phone,
+        attempts: Number(user.verificationAttempts) || 0,
+        expiresAt: user.verificationExpiresAt,
+        mailSent: Boolean(user.verificationSentAt),
+        registeredAt: (user.activityLog || []).find((entry) => entry.type === "Account Created")?.timestamp
+      }));
+    res.json({ ok: true, pending, mailConfigured: activeMailProvider() !== "none" });
+  });
+
+  app.post("/api/admin/verifications/:userId/approve", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const user = dbState.usersData.find((candidate) => candidate.id === String(req.params.userId || ""));
+    if (!user) {
+      res.status(404).json({ ok: false, error: "That account no longer exists." });
+      return;
+    }
+    user.emailVerified = true;
+    delete user.verificationCode;
+    delete user.verificationExpiresAt;
+    delete user.verificationAttempts;
+    delete user.verificationSentAt;
+    user.activityLog = [
+      ...(user.activityLog || []),
+      {
+        id: "act-" + Date.now(),
+        type: "Verified",
+        detail: "Administrator confirmed this account from the admin panel.",
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      }
+    ];
+    saveDatabase(dbState);
+    res.json({ ok: true, user: safeUserAccount(user), message: `${user.name} can now sign in.` });
+  });
+
+  app.post("/api/admin/users", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (name.length < 2) {
+      res.status(400).json({ ok: false, error: "Enter the student's full name." });
+      return;
+    }
+    if (!email.includes("@")) {
+      res.status(400).json({ ok: false, error: "Enter a valid email address." });
+      return;
+    }
+    if (password.length < 4) {
+      res.status(400).json({ ok: false, error: "The starting password needs at least 4 characters." });
+      return;
+    }
+    if (dbState.usersData.some((user) => user.email.toLowerCase() === email)) {
+      res.status(409).json({ ok: false, error: "An account already exists for this email." });
+      return;
+    }
+    const plan = String(req.body?.accountPlan || "unpaid").trim();
+    const user = secureUserAccount({
+      id: "user-" + Date.now(),
+      name,
+      email,
+      password,
+      role: "user",
+      department: String(req.body?.department || "").trim() || undefined,
+      phone: String(req.body?.phone || "").trim() || undefined,
+      accountPlan: plan,
+      paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
+      downloadOnlyAccount: false,
+      amountPaidBirr: planPriceBirr(plan),
+      category: plan === "paid_lifetime" ? "Paid 500 Birr · Lifetime VIP" : plan === "unpaid" ? "Unpaid · Pending 2 Uploads" : "Premium · 1 Year",
+      sharedMaterialsCount: 0,
+      downloadsCount: 0,
+      lastActiveAt: "Never signed in",
+      allowedCourseIds: ["course-evangadi", "course-se-capstone", "course-clinical-research", "course-calc-uni"],
+      emailVerified: true,
+      addedByAdmin: true,
+      activityLog: [
+        {
+          id: "act-" + Date.now(),
+          type: "Account Created",
+          detail: `Added by the administrator — Name: ${name}, Email: ${email}`,
+          timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+        }
+      ]
+    });
+    dbState.usersData.unshift(user);
+    saveDatabase(dbState);
+    res.json({ ok: true, user: safeUserAccount(user), message: `${user.name} was added and can sign in with the password you set.` });
   });
 
   app.post("/api/reset", (_req, res) => {
@@ -1655,7 +1860,7 @@ export async function createApp() {
     res.json({ ok: delivery.ok, provider: delivery.provider, to, error: delivery.error });
   });
 
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const name = String(req.body?.name || "").trim() || "Student Learner";
     const email = String(req.body?.email || "").trim().toLowerCase();
@@ -1716,14 +1921,86 @@ export async function createApp() {
     });
 
     dbState.usersData.unshift(user);
+    const { code } = issueSignupCode(user);
+    // Awaited: a serverless instance freezes as soon as the response is flushed.
+    const delivery = await sendSignupCode(user, code);
     saveDatabase(dbState);
-    const session = createSignedSessionToken({
-      id: user.id,
-      name: user.name,
+    res.json({
+      ok: true,
+      pendingVerification: true,
       email: user.email,
-      role: user.role
+      mailSent: delivery.ok,
+      message: delivery.ok
+        ? `We emailed a 6-digit code to ${user.email}. Enter it below to activate the account.`
+        : "Your account was created, but the verification email could not be sent. Ask the administrator to confirm your account from the admin panel."
     });
-    res.json({ ok: true, user: safeUserAccount(user), session, message: "Account created and signed in." });
+  });
+  app.post("/api/auth/verify-email", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const code = String(req.body?.code || "").replace(/\D/g, "");
+    if (req.body?.resend) {
+      const target = dbState.usersData.find((user) => user.email.toLowerCase() === email);
+      if (!target) {
+        res.status(404).json({ ok: false, error: "No account is registered with that email." });
+        return;
+      }
+      if (isEmailVerified(target)) {
+        res.json({ ok: true, alreadyVerified: true, mailSent: false, message: "That account is already verified. Sign in instead." });
+        return;
+      }
+      const { code: fresh } = issueSignupCode(target);
+      const delivery = await sendSignupCode(target, fresh);
+      saveDatabase(dbState);
+      res.json({
+        ok: true,
+        mailSent: delivery.ok,
+        message: delivery.ok
+          ? `A new 6-digit code was emailed to ${target.email}.`
+          : "The email could not be sent. Ask the administrator to confirm your account."
+      });
+      return;
+    }
+    if (code.length !== 6) {
+      res.status(400).json({ ok: false, error: "Enter the 6-digit code from your email." });
+      return;
+    }
+    const user = dbState.usersData.find((candidate) => candidate.email.toLowerCase() === email);
+    if (!user) {
+      res.status(404).json({ ok: false, error: "No account is registered with that email." });
+      return;
+    }
+    if (isEmailVerified(user)) {
+      res.json({ ok: true, message: "That account is already verified. Sign in instead." });
+      return;
+    }
+    user.verificationAttempts = Number(user.verificationAttempts || 0) + 1;
+    if (user.verificationAttempts > VERIFICATION_MAX_ATTEMPTS) {
+      delete user.verificationCode;
+      delete user.verificationExpiresAt;
+      saveDatabase(dbState);
+      res.status(429).json({ ok: false, error: "Too many attempts. Ask the administrator to verify your account." });
+      return;
+    }
+    if (!signupCodeMatches(user, code)) {
+      saveDatabase(dbState);
+      res.status(401).json({
+        ok: false,
+        error:
+          Date.parse(String(user.verificationExpiresAt || "")) < Date.now()
+            ? "That code has expired. Request a new one."
+            : "That code does not match. Check the email and try again."
+      });
+      return;
+    }
+    user.emailVerified = true;
+    delete user.verificationCode;
+    delete user.verificationExpiresAt;
+    delete user.verificationAttempts;
+    user.lastActiveAt = "Active now";
+    saveDatabase(dbState);
+    const session = createSignedSessionToken({ id: user.id, name: user.name, email: user.email, role: user.role });
+    res.json({ ok: true, verified: true, user: safeUserAccount(user), session, message: "Email verified. Welcome to Wollo Share." });
   });
   app.post("/api/auth/google", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -1870,6 +2147,15 @@ export async function createApp() {
     );
 
     if (matchedUser) {
+      if (!isEmailVerified(matchedUser)) {
+        res.status(403).json({
+          ok: false,
+          needsVerification: true,
+          email: matchedUser.email,
+          error: "This account is not verified yet. Enter the 6-digit code from your email, or ask the administrator to confirm it."
+        });
+        return;
+      }
       loginRateLimitMap.delete(lowerId);
       const signedSession = createSignedSessionToken({
         id: matchedUser.id,

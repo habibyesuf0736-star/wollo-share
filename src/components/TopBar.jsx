@@ -31,6 +31,7 @@ export default function TopBar() {
     goLibrary,
     goAdmin,
     goLogin,
+    goProfile,
     view,
     downloadStatus,
     setGate
@@ -88,7 +89,13 @@ export default function TopBar() {
           {session ? (
             <>
               <span className="ws-nav-divider d-none d-md-block" aria-hidden="true" />
-              <span className="ws-user">
+              <button
+                type="button"
+                className={`ws-user ${view.name === "profile" ? "is-active" : ""}`}
+                onClick={goProfile}
+                title="Open your profile"
+                aria-current={view.name === "profile" ? "page" : undefined}
+              >
                 <span className="ws-user-avatar" aria-hidden="true">
                   {initials(displayName)}
                 </span>
@@ -104,7 +111,7 @@ export default function TopBar() {
                   </span>
                   <span className="d-block ws-user-plan">{downloadStatus.badgeText}</span>
                 </span>
-              </span>
+              </button>
               <button type="button" className="btn btn-sm btn-outline-secondary" onClick={logout} title="Sign out">
                 <LogOut size={15} aria-hidden="true" />
               </button>

@@ -14,7 +14,8 @@ async function request(url, options = {}) {
   }
   if (!res.ok && (!payload || payload.ok !== true)) {
     const message = (payload && payload.error) || `Request failed (${res.status})`;
-    return { ok: false, status: res.status, error: message };
+    // Keep server flags such as needsVerification so a screen can react to them.
+    return { ...(payload || {}), ok: false, status: res.status, error: message };
   }
   return payload || { ok: true };
 }
@@ -51,6 +52,33 @@ export function login(identifier, password) {
 
 export function registerAccount(details) {
   return request("/api/auth/register", { method: "POST", body: JSON.stringify(details) });
+}
+
+export function verifyEmail(email, code) {
+  return request("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ email, code }) });
+}
+
+export function resendVerificationCode(email) {
+  return request("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ email, resend: true }) });
+}
+
+export function updateProfile(details, session) {
+  return request("/api/profile", { method: "PATCH", headers: authHeaders(session), body: JSON.stringify(details) });
+}
+
+export function listVerifications(session) {
+  return request("/api/admin/verifications", { headers: authHeaders(session) });
+}
+
+export function approveVerification(userId, session) {
+  return request(`/api/admin/verifications/${encodeURIComponent(userId)}/approve`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
+export function createStudentAccount(details, session) {
+  return request("/api/admin/users", { method: "POST", headers: authHeaders(session), body: JSON.stringify(details) });
 }
 
 export function rateMaterial(courseId, materialId, stars, session) {

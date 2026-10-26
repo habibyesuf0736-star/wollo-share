@@ -20,7 +20,7 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
-import { completeRecovery, requestRecovery } from "../lib/api.js";
+import { completeRecovery, requestRecovery, resendVerificationCode } from "../lib/api.js";
 
 const TABS = [
   ["signin", "Sign in"],
@@ -29,7 +29,7 @@ const TABS = [
 ];
 
 export default function LoginPage() {
-  const { login, register, goLibrary, stats, pageTexts, toast, goAdmin, isAdmin, coursesData } = useApp();
+  const { login, register, verifySignup, goLibrary, stats, pageTexts, toast, goAdmin, isAdmin, coursesData } = useApp();
   const [tab, setTab] = useState("signin");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -37,6 +37,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [signin, setSignin] = useState({ identifier: "", password: "" });
   const [signup, setSignup] = useState({ name: "", email: "", password: "", department: "", phone: "" });
+  const [signupStage, setSignupStage] = useState("form");
+  const [pending, setPending] = useState({ email: "", code: "", mailSent: false, message: "" });
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
 
   const submitSignIn = async (event) => {
@@ -51,6 +53,14 @@ export default function LoginPage() {
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Unable to sign in.");
+      if (res.needsVerification) {
+        // The blocked sign-in does not say whether mail is configured, so the code
+        // screen stays neutral until a real registration/resend reports delivery.
+        setPending({ email: res.email || signin.identifier.trim(), code: "", mailSent: null, message: res.error || "" });
+        setSignup({ ...signup, email: res.email || signin.identifier.trim() });
+        setSignupStage("code");
+        setTab("register");
+      }
       return;
     }
     toast(`Welcome back, ${res.session.name || res.session.email}`);
@@ -82,8 +92,49 @@ export default function LoginPage() {
       setError(res.error || "Registration failed.");
       return;
     }
+    if (res.pendingVerification) {
+      setPending({ email: res.email, code: "", mailSent: res.mailSent, message: res.message || "" });
+      setSignupStage("code");
+      setNotice(res.message || "");
+      return;
+    }
     toast("Account created — you are signed in.");
     goLibrary();
+  };
+
+  const submitVerify = async (event) => {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (pending.code.replace(/\D/g, "").length !== 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setBusy(true);
+    const res = await verifySignup(pending.email, pending.code);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error || "Verification failed.");
+      return;
+    }
+    setSignupStage("form");
+    setPending({ email: "", code: "", mailSent: false, message: "" });
+    toast("Email verified — you are signed in.");
+    goLibrary();
+  };
+
+  const submitResend = async () => {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    const res = await resendVerificationCode(pending.email);
+    setBusy(false);
+    if (!res || res.ok !== true) {
+      setError((res && res.error) || "Could not resend the code.");
+      return;
+    }
+    setPending({ ...pending, mailSent: Boolean(res.mailSent) });
+    setNotice(res.message || "A new code was requested. If email is unavailable, the administrator can confirm your account.");
   };
 
   const submitRecovery = async (event) => {
@@ -117,6 +168,7 @@ export default function LoginPage() {
     setTab(key);
     setError("");
     setNotice("");
+    if (key !== "register") setSignupStage("form");
   };
 
   return (
@@ -256,7 +308,68 @@ export default function LoginPage() {
             </form>
           ) : null}
 
-          {tab === "register" ? (
+          {tab === "register" && signupStage === "code" ? (
+            <form onSubmit={submitVerify} className="d-flex flex-column gap-3">
+              <p className="small text-secondary mb-0">
+                {pending.mailSent === null ? (
+                  <>
+                    Enter the <strong>6-digit code</strong> sent to <strong>{pending.email}</strong>. If it does not
+                    arrive, ask the administrator to confirm the account from the admin panel.
+                  </>
+                ) : pending.mailSent ? (
+                  <>
+                    We emailed a <strong>6-digit code</strong> to <strong>{pending.email}</strong>. It expires in 30 minutes.
+                  </>
+                ) : (
+                  <>
+                    Email delivery is unavailable right now, so no code could be sent. Ask the administrator to confirm{" "}
+                    <strong>{pending.email}</strong> from the admin panel, then sign in with your password.
+                  </>
+                )}
+              </p>
+              <div>
+                <label className="form-label small fw-semibold mb-0" htmlFor="signupCode">
+                  Verification code
+                </label>
+                <div className="ws-field-icon">
+                  <KeyRound size={16} aria-hidden="true" />
+                  <input
+                    id="signupCode"
+                    className="form-control"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    placeholder="123456"
+                    value={pending.code}
+                    onChange={(e) => setPending({ ...pending, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                  />
+                </div>
+              </div>
+              <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
+                {busy ? "Verifying…" : "Verify and sign in"}
+                {busy ? null : <BadgeCheck size={16} aria-hidden="true" />}
+              </button>
+              <div className="d-flex gap-3 flex-wrap align-items-center">
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={submitResend} disabled={busy}>
+                  Resend code
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0"
+                  onClick={() => {
+                    setSignupStage("form");
+                    setPending({ email: "", code: "", mailSent: false, message: "" });
+                    setError("");
+                    setNotice("");
+                  }}
+                >
+                  Use a different email
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {tab === "register" && signupStage !== "code" ? (
             <form onSubmit={submitRegister} className="d-flex flex-column gap-3">
               <div className="row g-2">
                 <div className="col-12 col-sm-6">
@@ -315,6 +428,10 @@ export default function LoginPage() {
                 {busy ? <Sparkles size={16} aria-hidden="true" /> : <BookOpenCheck size={16} aria-hidden="true" />}
                 {busy ? "Creating account…" : "Create free account"}
               </button>
+              <p className="form-text small mb-0">
+                We send a 6-digit verification code to your email. If it does not arrive, the administrator can confirm
+                your account from the admin panel.
+              </p>
             </form>
           ) : null}
 
@@ -339,9 +456,12 @@ export default function LoginPage() {
                       <KeyRound size={16} aria-hidden="true" />
                       <input
                         className="form-control mono"
-                        placeholder="8-digit code from your email"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="6-digit code from your email"
                         value={recovery.code}
-                        onChange={(e) => setRecovery({ ...recovery, code: e.target.value })}
+                        onChange={(e) => setRecovery({ ...recovery, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
                       />
                     </div>
                   </div>

@@ -49,6 +49,7 @@ function readStoredSession() {
 function viewFromLocation() {
   const hash = String(window.location.hash);
   if (window.location.pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
+  if (/^#\/profile/.test(hash)) return { name: "profile" };
   const match = hash.match(/^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics))?/);
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
 }
@@ -344,6 +345,11 @@ export function AppProvider({ children }) {
     setView({ name: "login" });
   }, []);
   const goAdmin = useCallback((tab) => setView({ name: "admin", tab: tab || "" }), []);
+  const goProfile = useCallback(() => {
+    clearAdminHash();
+    setView({ name: "profile" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   // Editing or pasting an address like "#/admin/materials" or "#/login" routes the running
   // app too, not just a fresh page load.
@@ -351,6 +357,7 @@ export function AppProvider({ children }) {
     const onLocationChange = () => {
       const next = viewFromLocation();
       if (next.name === "login") setView({ name: "login" });
+      else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
     };
     window.addEventListener("hashchange", onLocationChange);
@@ -397,7 +404,7 @@ export function AppProvider({ children }) {
   const login = useCallback(
     async ({ identifier, password }) => {
       const res = await api.login(identifier, password);
-      if (!res || res.ok !== true || !res.session) return { ok: false, error: (res && res.error) || "Sign in failed." };
+      if (!res || res.ok !== true || !res.session) return { ok: false, needsVerification: Boolean(res && res.needsVerification), email: res && res.email, error: (res && res.error) || "Sign in failed." };
       const saved = storeSession(res.session);
       hasLocalMutationRef.current = false;
       const state = await fetchServerState(saved.authToken);
@@ -415,12 +422,51 @@ export function AppProvider({ children }) {
     async (details) => {
       const res = await api.registerAccount(details);
       if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Registration failed." };
-      if (res.session) storeSession(res.session);
-      if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
-      return { ok: true, user: res.user };
+      if (res.session) {
+        storeSession(res.session);
+        if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
+        return { ok: true, user: res.user, signedIn: true };
+      }
+      // No session until the 6-digit code is confirmed (or the admin approves it).
+      return {
+        ok: true,
+        signedIn: false,
+        pendingVerification: Boolean(res.pendingVerification),
+        email: res.email || details.email,
+        mailSent: Boolean(res.mailSent),
+        message: res.message
+      };
     },
     [storeSession]
   );
+
+  const verifySignup = useCallback(
+    async (email, code) => {
+      const res = await api.verifyEmail(email, code);
+      if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Verification failed." };
+      if (res.session) {
+        const saved = storeSession(res.session);
+        hasLocalMutationRef.current = false;
+        if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
+        const state = await fetchServerState(saved.authToken);
+        if (state && state.ok !== false) {
+          if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
+          if (state.userRatings) setUserRatings((prev) => ({ ...prev, ...state.userRatings }));
+        }
+        return { ok: true, signedIn: true };
+      }
+      return { ok: true, signedIn: false, message: res.message };
+    },
+    [fetchServerState, storeSession]
+  );
+
+  const saveProfile = useCallback(async (details) => {
+    if (!session) return { ok: false, error: "Sign in to edit your profile." };
+    const res = await api.updateProfile(details, session.authToken);
+    if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Could not save your profile." };
+    if (res.user) setUsersData((prev) => prev.map((u) => (u.id === res.user.id ? { ...u, ...res.user } : u)));
+    return { ok: true, user: res.user, message: res.message };
+  }, [session]);
 
   const logout = useCallback(() => {
     storeSession(null);
@@ -1063,11 +1109,17 @@ export function AppProvider({ children }) {
           toast(res.error || "Could not remove the account from the database.");
           return false;
         }
+        // The DELETE endpoint already persisted the removal, so re-read instead of
+        // queueing a whole-state PUT against the revision that request just bumped.
+        hasLocalMutationRef.current = false;
+        const state = await fetchServerState(session.authToken);
+        if (state && Array.isArray(state.usersData)) setUsersData(state.usersData);
+        return true;
       }
       commitUsers((prev) => prev.filter((u) => u.id !== userId));
       return true;
     },
-    [commitUsers, session, toast]
+    [commitUsers, fetchServerState, session, toast]
   );
 
   const logActivity = useCallback(
@@ -1214,8 +1266,11 @@ export function AppProvider({ children }) {
     goSublist,
     goLogin,
     goAdmin,
+    goProfile,
     login,
     register,
+    verifySignup,
+    saveProfile,
     logout,
     canSeeCourse,
     downloadStatus,
@@ -1229,6 +1284,7 @@ export function AppProvider({ children }) {
     approveSubmission,
     rejectSubmission,
     editSubmission,
+    refreshFromServer: reloadLibraryFromServer,
     submitMaterialForReview,
     videoProgress,
     recordVideoProgress,

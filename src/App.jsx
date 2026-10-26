@@ -11,6 +11,7 @@ import QuickRegisterModal from "./components/QuickRegisterModal.jsx";
 import VideoPlayerModal from "./components/VideoPlayerModal.jsx";
 import LibraryPage from "./pages/LibraryPage.jsx";
 import SublistPage from "./pages/SublistPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import universityEmblem from "./assets/images/wollo-university-emblem.jpg";
@@ -39,6 +40,7 @@ function Shell() {
         <ErrorBoundary>
           {view.name === "sublist" ? <SublistPage key={`${view.courseId}|${view.query || ""}|${view.year || ""}`} /> : null}
           {view.name === "login" ? <LoginPage /> : null}
+          {view.name === "profile" ? <ProfilePage /> : null}
           {view.name === "admin" ? <AdminPage /> : null}
           {view.name === "library" ? <LibraryPage /> : null}
         </ErrorBoundary>

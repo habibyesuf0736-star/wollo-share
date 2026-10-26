@@ -3,7 +3,7 @@ import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
 import DepartmentSelect from "../../components/DepartmentSelect.jsx";
-import { closeRecoveryRequest, getMailSettings, issueRecoveryCode, listRecoveryRequests, saveMailSettings, sendTestEmail } from "../../lib/api.js";
+import { approveVerification, closeRecoveryRequest, createStudentAccount, getMailSettings, issueRecoveryCode, listRecoveryRequests, listVerifications, saveMailSettings, sendTestEmail } from "../../lib/api.js";
 
 const EMPTY_MAIL_FORM = {
   preference: "auto",
@@ -49,13 +49,21 @@ const PLANS = [
   ["paid_download_only", "Paid · Download-only"]
 ];
 
+const EMPTY_STUDENT_FORM = { name: "", email: "", password: "", department: "", phone: "", accountPlan: "unpaid" };
+
 export default function AdminUsers() {
-  const { usersData, saveUser, deleteUser, toast, session, isAdmin, coursesData } = useApp();
+  const { usersData, saveUser, deleteUser, toast, session, isAdmin, coursesData, refreshFromServer } = useApp();
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState("all");
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState({ open: false, userId: null });
-  const [activity, setActivity] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
+  const [approving, setApproving] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_STUDENT_FORM);
+  const [addError, setAddError] = useState("");
+  const [adding, setAdding] = useState(false);
   const [requests, setRequests] = useState([]);
   const [mail, setMail] = useState(null);
   const [form, setForm] = useState(EMPTY_MAIL_FORM);
@@ -140,6 +148,74 @@ export default function AdminUsers() {
     loadRequests();
   }, [loadRequests]);
 
+  // New signups stay unverified until they confirm the 6-digit code or an
+  // administrator approves them here — the only path that works while mail is down.
+  const loadVerifications = useCallback(async () => {
+    if (!isAdmin || !session) return;
+    const res = await listVerifications(session.authToken);
+    if (res && res.ok) {
+      setVerifications({
+        pending: Array.isArray(res.pending) ? res.pending : [],
+        mailConfigured: res.mailConfigured !== false
+      });
+    }
+  }, [isAdmin, session]);
+
+  useEffect(() => {
+    loadVerifications();
+  }, [loadVerifications]);
+
+  const approveAccount = async (entry) => {
+    setApproving(entry.id);
+    const res = await approveVerification(entry.id, session.authToken);
+    setApproving("");
+    if (!res || !res.ok) {
+      toast((res && res.error) || "Could not verify that account.");
+      return;
+    }
+    toast(res.message || `${entry.name || entry.email} can now sign in.`);
+    await loadVerifications();
+    await refreshFromServer();
+  };
+
+  const submitStudent = async (event) => {
+    event.preventDefault();
+    setAddError("");
+    if (addForm.name.trim().length < 2) {
+      setAddError("Enter the student's full name.");
+      return;
+    }
+    if (!addForm.email.includes("@")) {
+      setAddError("Enter a valid email address.");
+      return;
+    }
+    if (addForm.password.length < 4) {
+      setAddError("The starting password needs at least 4 characters.");
+      return;
+    }
+    setAdding(true);
+    const res = await createStudentAccount(
+      {
+        name: addForm.name.trim(),
+        email: addForm.email.trim(),
+        password: addForm.password,
+        department: addForm.department,
+        phone: addForm.phone.trim(),
+        accountPlan: addForm.accountPlan
+      },
+      session.authToken
+    );
+    setAdding(false);
+    if (!res || !res.ok) {
+      setAddError((res && res.error) || "Could not add the student.");
+      return;
+    }
+    toast(res.message || "Student added.");
+    setAddOpen(false);
+    setAddForm(EMPTY_STUDENT_FORM);
+    await refreshFromServer();
+  };
+
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return usersData.filter((user) => {
@@ -156,6 +232,12 @@ export default function AdminUsers() {
 
   const planOf = (user) =>
     user.accountPlan || (user.downloadOnlyAccount ? "paid_download_only" : user.paymentStatus === "paid" ? "paid_lifetime" : "unpaid");
+
+  const planLabelOf = (user) => {
+    const key = planOf(user);
+    const match = PLANS.find(([value]) => value === key);
+    return match ? match[1] : key;
+  };
 
   const updatePlan = (user, plan) => {
     saveUser({
@@ -198,6 +280,52 @@ export default function AdminUsers() {
 
   return (
     <div className="d-flex flex-column gap-3">
+      {verifications.pending.length || !verifications.mailConfigured ? (
+        <div className="card p-3">
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <h3 className="h6 mb-0">Awaiting verification</h3>
+            <span className={`badge ${verifications.pending.length ? "text-bg-warning" : "text-bg-secondary"}`}>
+              {verifications.pending.length} pending
+            </span>
+            <span className="flex-grow-1" />
+            <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={loadVerifications}>
+              Refresh
+            </button>
+          </div>
+          {!verifications.mailConfigured ? (
+            <p className="small text-secondary mb-2">
+              Email delivery is not configured, so new students cannot receive their 6-digit code. Approve each account
+              here to let them sign in.
+            </p>
+          ) : null}
+          {verifications.pending.length ? (
+            <ul className="list-unstyled mb-0 d-flex flex-column gap-2">
+              {verifications.pending.map((entry) => (
+                <li key={entry.id} className="d-flex flex-wrap align-items-center gap-2 small">
+                  <strong>{entry.name || entry.email}</strong>
+                  <span className="text-secondary">{entry.email}</span>
+                  {entry.department ? <span className="text-secondary">· {entry.department}</span> : null}
+                  <span className="text-secondary">
+                    · {entry.mailSent ? `code emailed${entry.expiresAt ? `, expires ${new Date(entry.expiresAt).toLocaleTimeString()}` : ""}` : "code not emailed"}
+                    {entry.attempts ? ` · ${entry.attempts} wrong attempt${entry.attempts === 1 ? "" : "s"}` : ""}
+                  </span>
+                  <span className="flex-grow-1" />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-soft py-0"
+                    disabled={approving === entry.id}
+                    onClick={() => approveAccount(entry)}
+                  >
+                    {approving === entry.id ? "Approving…" : "Approve"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="small text-secondary mb-0">Everyone who signed up has been verified.</p>
+          )}
+        </div>
+      ) : null}
       {requests.length ? (
         <div className="card p-3">
           <h3 className="h6 mb-2">Password recovery requests</h3>
@@ -485,9 +613,20 @@ export default function AdminUsers() {
             </select>
           </div>
           <div className="col-6 col-md-4 text-md-end">
-            <span className="small text-secondary">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm mb-1"
+              onClick={() => {
+                setAddError("");
+                setAddForm(EMPTY_STUDENT_FORM);
+                setAddOpen(true);
+              }}
+            >
+              Add student
+            </button>
+            <div className="small text-secondary">
               <strong>{rows.length}</strong> of {usersData.length} accounts
-            </span>
+            </div>
           </div>
         </div>
       </div>
@@ -537,8 +676,8 @@ export default function AdminUsers() {
                 </td>
                 <td className="text-end table-actions">
                   <div className="d-flex gap-1 flex-wrap justify-content-end">
-                    <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={() => setActivity(user)}>
-                      Activity
+                    <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={() => setProfile(user)}>
+                      Profile
                     </button>
                     <button type="button" className="btn btn-sm btn-soft py-0" onClick={() => setEditing({ ...user })}>
                       Edit
@@ -588,22 +727,164 @@ export default function AdminUsers() {
         ) : null}
       </Modal>
 
-      <Modal open={Boolean(activity)} onClose={() => setActivity(null)} title={activity ? `Activity · ${activity.name}` : "Activity"}>
-        {activity ? (
-          (activity.activityLog || []).length ? (
-            <ul className="list-unstyled d-flex flex-column gap-2 mb-0" style={{ maxHeight: 420, overflowY: "auto" }}>
-              {activity.activityLog.map((event) => (
-                <li key={event.id} className="small">
-                  <strong>{event.type}</strong> — {event.detail}
-                  <span className="text-secondary d-block mono" style={{ fontSize: 11 }}>
-                    {event.timestamp}
-                  </span>
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add a student" subtitle="The account works immediately with the password you set." size="narrow">
+        <form onSubmit={submitStudent} className="d-flex flex-column gap-3">
+          <div>
+            <label className="form-label small fw-semibold">Full name</label>
+            <input className="form-control" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
+          </div>
+          <div>
+            <label className="form-label small fw-semibold">Email</label>
+            <input className="form-control" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
+          </div>
+          <div>
+            <label className="form-label small fw-semibold">Starting password</label>
+            <input
+              className="form-control"
+              type="text"
+              autoComplete="new-password"
+              value={addForm.password}
+              onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
+            />
+            <p className="small text-secondary mb-0 mt-1">Share it with the student; they can keep using it to sign in.</p>
+          </div>
+          <div>
+            <label className="form-label small fw-semibold">Department</label>
+            <DepartmentSelect
+              coursesData={coursesData}
+              value={addForm.department}
+              onChange={(department) => setAddForm({ ...addForm, department })}
+            />
+          </div>
+          <div className="row g-2">
+            <div className="col-12 col-sm-6">
+              <label className="form-label small fw-semibold">Phone</label>
+              <input className="form-control" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
+            </div>
+            <div className="col-12 col-sm-6">
+              <label className="form-label small fw-semibold">Plan</label>
+              <select
+                className="form-select"
+                value={addForm.accountPlan}
+                onChange={(e) => setAddForm({ ...addForm, accountPlan: e.target.value })}
+              >
+                {PLANS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {addError ? (
+            <div className="banner warn" role="alert">
+              <span>{addError}</span>
+            </div>
+          ) : null}
+          <div className="d-flex justify-content-end gap-2">
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setAddOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={adding}>
+              {adding ? "Adding…" : "Add student"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(profile)}
+        onClose={() => setProfile(null)}
+        title={profile ? `${profile.name || profile.email}` : "Student profile"}
+        subtitle={profile ? profile.email : ""}
+      >
+        {profile ? (
+          <div className="d-flex flex-column gap-3">
+            <ul className="list-unstyled small mb-0 d-flex flex-column gap-2">
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Department</span>
+                <strong>{profile.department || "—"}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Phone</span>
+                <strong>{profile.phone || "—"}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Plan</span>
+                <strong>{planLabelOf(profile)}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Status</span>
+                <strong>{profile.emailVerified === false ? "Awaiting verification" : "Verified"}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Downloads / credits</span>
+                <strong>
+                  {Number(profile.downloadsCount) || 0} · {Number(profile.downloadCredits) || 0} credit
+                  {Number(profile.downloadCredits) === 1 ? "" : "s"}
+                </strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Approved shares</span>
+                <strong>{Number(profile.sharedMaterialsCount) || 0}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Assigned courses</span>
+                <strong>{(profile.allowedCourseIds || []).length}</strong>
+              </li>
+              <li className="d-flex justify-content-between gap-2">
+                <span className="text-secondary">Last activity</span>
+                <strong>{profile.lastActiveAt || "—"}</strong>
+              </li>
+              {profile.addedByAdmin ? (
+                <li className="d-flex justify-content-between gap-2">
+                  <span className="text-secondary">Created by</span>
+                  <strong>Administrator</strong>
                 </li>
-              ))}
+              ) : null}
             </ul>
-          ) : (
-            <p className="small text-secondary">No recorded activity for this account.</p>
-          )
+
+            <div>
+              <h4 className="h6 mb-2">Activity</h4>
+              {(profile.activityLog || []).length ? (
+                <ul className="list-unstyled d-flex flex-column gap-2 mb-0" style={{ maxHeight: 240, overflowY: "auto" }}>
+                  {profile.activityLog.map((event) => (
+                    <li key={event.id} className="small">
+                      <strong>{event.type}</strong> — {event.detail}
+                      <span className="text-secondary d-block mono" style={{ fontSize: 11 }}>
+                        {event.timestamp}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="small text-secondary mb-0">No recorded activity for this account.</p>
+              )}
+            </div>
+
+            <div className="d-flex justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => {
+                  setEditing({ ...profile });
+                  setProfile(null);
+                }}
+              >
+                Edit account
+              </button>
+              <button
+                type="button"
+                className="btn btn-coral"
+                onClick={() => {
+                  setConfirm({ open: true, userId: profile.id });
+                  setProfile(null);
+                }}
+              >
+                Remove from site
+              </button>
+            </div>
+          </div>
         ) : null}
       </Modal>
 
@@ -613,7 +894,10 @@ export default function AdminUsers() {
         message="The student will lose access to their uploads, ratings and downloads."
         onConfirm={async () => {
           const removed = await deleteUser(confirm.userId);
-          if (removed) toast("Account deleted.");
+          if (removed) {
+            toast("Account deleted.");
+            await loadVerifications();
+          }
         }}
         onClose={() => setConfirm({ open: false, userId: null })}
       />
