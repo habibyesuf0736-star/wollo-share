@@ -1252,6 +1252,23 @@ export async function createApp() {
     }
   });
 
+  // A response must not say "saved" before the row is written. Otherwise the next
+  // request reads the older row and its save puts that older document back.
+  app.use((_req, res, next) => {
+    const end = res.end.bind(res);
+    let finishing = false;
+    res.end = ((...args: any[]) => {
+      if (finishing) return end(...args);
+      finishing = true;
+      flushRemoteSaves().then(
+        () => end(...args),
+        () => end(...args)
+      );
+      return res;
+    }) as typeof res.end;
+    next();
+  });
+
   // ============================================================================
   // FULL-STACK REST API ROUTES (/api/*)
   // ============================================================================
