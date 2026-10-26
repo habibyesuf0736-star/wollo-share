@@ -227,6 +227,16 @@ Everything else keeps working; only `/api/auth/google` returns its "not configur
 
 ## 8. Known limits of the serverless shape
 
+- **A cold start never writes to the row.** `loadDatabase()` used to call `saveDatabase()`
+  while booting, and in Supabase mode that pushed the boot snapshot — on Vercel the seed
+  catalog, since the bundle has no `data/wollo-db.json` — over the live row before
+  hydration read it back. Boot is read-only now; only a request that changes something
+  writes. Proof: restarting the server leaves the row's `updatedAt` untouched, and a stub
+  store sees a single `GET` and no `POST` during boot.
+- `npm run db:status` now prints a content digest as well as both timestamps, so "is the
+  file and the row the same document?" has a direct answer. `db:push` refuses when the row
+  is newer, `db:pull` refuses when the file is newer; `--force` overrides either.
+
 - Login and recovery rate-limiters live in process memory, so each cold start resets
   them. Fine for a university library; move to the row if you ever need real enforcement.
 - `data/wollo-db.json` is never written on Vercel (the store is remote); the file stays

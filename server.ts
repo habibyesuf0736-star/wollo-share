@@ -979,14 +979,18 @@ function loadDatabase(): DatabaseSchema {
       const content = fs.readFileSync(DB_FILE, "utf-8");
       const parsed = JSON.parse(content);
       const normalized = normalizeDatabase(parsed);
-      saveDatabase(normalized);
+      // In Supabase mode this snapshot is only a placeholder until hydrateState()
+      // replaces it. Saving here would push a possibly stale file over the live row.
+      if (!remoteEnabled()) saveDatabase(normalized);
       return normalized;
     }
   } catch (err) {
     console.error("Failed to read database file, initializing default state:", err);
   }
   const initial = buildDefaultDatabase();
-  saveDatabase(initial);
+  // Same rule: with a remote store the seed catalog must never reach the row from the
+  // boot path. On Vercel the data file is absent, so this is the common route there.
+  if (!remoteEnabled()) saveDatabase(initial);
   return initial;
 }
 
@@ -1017,18 +1021,14 @@ let dbState: DatabaseSchema = loadDatabase();
 // is only a starting point and every request must wait for the real state.
 async function hydrateState(): Promise<void> {
   if (!remoteEnabled()) return;
-  try {
-    const doc = await loadRemoteState();
-    if (doc) {
-      dbState = normalizeDatabase(doc as Record<string, unknown>);
-      console.log("state loaded from Supabase");
-    } else {
-      saveDatabase(dbState);
-      console.log("Supabase state table was empty, seeded it from the local snapshot");
-    }
-  } catch (err) {
-    console.error("Failed to load state from Supabase:", (err as Error).message);
+  const doc = await loadRemoteState();
+  if (doc) {
+    dbState = normalizeDatabase(doc as Record<string, unknown>);
+    console.log("state loaded from Supabase");
+    return;
   }
+  saveDatabase(dbState);
+  console.log("Supabase state row was empty, seeded it from the boot snapshot");
 }
 
 const MAIL_VAULT_CONTEXT = "wollo-mail-settings";
