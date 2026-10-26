@@ -1557,6 +1557,114 @@ export async function createApp() {
     res.json({ ok: true });
   });
 
+  // A backup is the whole document, credentials included, because a restore has to
+  // bring accounts back with their passwords intact. It is admin-only and the file is
+  // the administrator's to keep private.
+  function backupCounts() {
+    return {
+      accounts: dbState.usersData.length,
+      courses: dbState.coursesData.length,
+      materials: dbState.coursesData.reduce((sum, course) => sum + (course.materials || []).length, 0),
+      submissions: dbState.materialSubmissions.length,
+      ratings: Object.keys(dbState.userRatings || {}).length
+    };
+  }
+
+  app.get("/api/admin/backup", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+    res.setHeader("Content-Disposition", `attachment; filename="wollo-share-backup-${stamp}.json"`);
+    res.json({
+      format: "wollo-share-backup",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      storage: remoteEnabled() ? "supabase" : "local-file",
+      counts: backupCounts(),
+      state: {
+        coursesData: dbState.coursesData,
+        usersData: dbState.usersData,
+        pageTexts: dbState.pageTexts,
+        appearanceSettings: dbState.appearanceSettings,
+        userRatings: dbState.userRatings,
+        customAdminPassword: dbState.customAdminPassword,
+        passwordRecoveryRequests: dbState.passwordRecoveryRequests,
+        materialSubmissions: dbState.materialSubmissions,
+        mailSettings: dbState.mailSettings,
+        contentRevision: dbState.contentRevision || 0,
+        updatedAt: dbState.updatedAt || 0
+      }
+    });
+  });
+
+  app.get("/api/admin/backup/info", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    res.json({
+      ok: true,
+      storage: remoteEnabled() ? "supabase" : "local-file",
+      counts: backupCounts(),
+      updatedAt: dbState.updatedAt || 0,
+      contentRevision: dbState.contentRevision || 0
+    });
+  });
+
+  app.post("/api/admin/restore", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    // Accept the downloaded wrapper as-is, and a bare state document for older files.
+    const incoming = body.state && typeof body.state === "object" ? body.state : body;
+    const users = Array.isArray(incoming.usersData) ? incoming.usersData : null;
+    const courses = Array.isArray(incoming.coursesData) ? incoming.coursesData : null;
+    if (!users || !courses) {
+      res.status(400).json({ ok: false, error: "That file is not a Wollo Share backup: it has no accounts or courses." });
+      return;
+    }
+    if (!users.length || !courses.length) {
+      res.status(400).json({ ok: false, error: "That backup is empty, so it was not restored. Pick a file with accounts and courses in it." });
+      return;
+    }
+    const brokenAccount = users.find((user: UserAccount | null) => !user || typeof user.id !== "string" || typeof user.email !== "string");
+    if (brokenAccount) {
+      res.status(400).json({ ok: false, error: "One of the accounts in that backup is missing its id or email, so nothing was restored." });
+      return;
+    }
+
+    const serverRevision = Number(dbState.contentRevision) || 0;
+    const restored = normalizeDatabase({
+      coursesData: courses,
+      usersData: users,
+      pageTexts: incoming.pageTexts,
+      appearanceSettings: incoming.appearanceSettings,
+      userRatings: incoming.userRatings,
+      customAdminPassword: incoming.customAdminPassword,
+      passwordRecoveryRequests: incoming.passwordRecoveryRequests,
+      materialSubmissions: incoming.materialSubmissions,
+      mailSettings: incoming.mailSettings,
+      contentRevision: serverRevision + 1
+    });
+    // normalizeDatabase re-seeds the demo accounts when they are absent; a restore must
+    // reproduce the backup exactly, so drop anything that was not in the file.
+    const backupIds = new Set(users.map((user: UserAccount) => String(user.id)));
+    restored.usersData = restored.usersData.filter((user) => backupIds.has(String(user.id)));
+    dbState = restored;
+    applyMailSettings();
+    saveDatabase(dbState);
+    res.json({ ok: true, storedIn: remoteEnabled() ? "supabase" : "local-file", restored: backupCounts(), contentRevision: dbState.contentRevision });
+  });
+
   // 3. Authentication Endpoints
   app.post("/api/auth/password-recovery/request", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");

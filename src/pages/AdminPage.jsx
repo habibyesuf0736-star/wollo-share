@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BarChart3, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Palette, Users } from "lucide-react";
+import { BarChart3, DatabaseBackup, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Palette, Users } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import * as api from "../lib/api.js";
 import AdminCommandBar from "../components/AdminCommandBar.jsx";
@@ -10,6 +10,7 @@ import AdminSubmissions from "./admin/AdminSubmissions.jsx";
 import AdminAppearance from "./admin/AdminAppearance.jsx";
 import AdminUsers from "./admin/AdminUsers.jsx";
 import AdminAnalytics from "./admin/AdminAnalytics.jsx";
+import AdminBackup from "./admin/AdminBackup.jsx";
 
 const TABS = [
   ["overview", "Overview", LayoutDashboard],
@@ -18,7 +19,8 @@ const TABS = [
   ["materials", "Materials", FolderOpen],
   ["appearance", "Branding & ads", Palette],
   ["users", "Students", Users],
-  ["analytics", "Analytics", BarChart3]
+  ["analytics", "Analytics", BarChart3],
+  ["backup", "Backup", DatabaseBackup]
 ];
 
 const TAB_KEYS = TABS.map(([key]) => key);
@@ -169,6 +171,7 @@ export default function AdminPage() {
       {tab === "appearance" ? <AdminAppearance /> : null}
       {tab === "users" ? <AdminUsers /> : null}
       {tab === "analytics" ? <AdminAnalytics /> : null}
+      {tab === "backup" ? <AdminBackup /> : null}
     </div>
   );
 }

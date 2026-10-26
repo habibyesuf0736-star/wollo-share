@@ -84,6 +84,22 @@ export function shareVerificationCode(userId, session) {
   });
 }
 
+export function getBackup(session) {
+  return request("/api/admin/backup", { headers: authHeaders(session) });
+}
+
+export function getBackupInfo(session) {
+  return request("/api/admin/backup/info", { headers: authHeaders(session) });
+}
+
+export function restoreBackup(backup, session) {
+  return request("/api/admin/restore", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(backup)
+  });
+}
+
 export function createStudentAccount(details, session) {
   return request("/api/admin/users", { method: "POST", headers: authHeaders(session), body: JSON.stringify(details) });
 }
