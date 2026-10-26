@@ -11,9 +11,28 @@ import { remoteEnabled, loadRemoteState, queueRemoteSave } from "./stateStore.ts
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const FIREBASE_CONFIG = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8")
-) as { apiKey?: string; projectId?: string };
+// Serverless bundles do not necessarily carry the JSON file next to the entry, so the
+// config is looked for in a few places and a miss must not take the whole API down.
+function readFirebaseConfig(): { apiKey?: string; projectId?: string } {
+  const candidates = [
+    path.join(__dirname, "firebase-applet-config.json"),
+    path.join(process.cwd(), "firebase-applet-config.json"),
+    path.join(__dirname, "..", "firebase-applet-config.json")
+  ];
+  for (const file of candidates) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8")) as { apiKey?: string; projectId?: string };
+    } catch {
+      // try the next location
+    }
+  }
+  return {};
+}
+
+const FIREBASE_CONFIG: { apiKey?: string; projectId?: string } = {
+  apiKey: process.env.FIREBASE_WEB_API_KEY || readFirebaseConfig().apiKey,
+  projectId: process.env.FIREBASE_PROJECT_ID || readFirebaseConfig().projectId
+};
 
 const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "wollo-db.json");

@@ -177,7 +177,55 @@ error string: `not validated` → §5.2, `auth failed` → key/user, `timeout` �
 
 ---
 
-## 7. Known limits of the serverless shape
+## 7. If the live site shows "Request failed (500)"
+
+That string comes from the SPA when `/api/...` answers 500, so the page is fine and the
+**function** is failing. Two causes covered this deployment:
+
+1. **`firebase-applet-config.json` was not inside the function bundle.** `server.ts` used
+   to read it with an un-caught `fs.readFileSync` at import time, so a missing file made
+   *every* API call throw before Express was even built. The read now tries three
+   locations and degrades to `{}`; `vercel.json` also ships the file with
+   `functions["api/index.ts"].includeFiles`.
+2. **A required environment variable was missing**, which used to throw an opaque error.
+   The function entry now answers misconfiguration as JSON instead of crashing:
+
+   ```json
+   { "ok": false, "error": "The API is not configured correctly on this deployment.",
+     "hint": "Check the Vercel environment variables and redeploy." }
+   ```
+
+   Signed in as admin, the same response adds `hint` with the real reason and `missing`
+   with the variable **names** only.
+
+To read the actual reason without signing in: **Vercel dashboard → your project →
+Deployments → the latest one → Logs** (or Observability → Logs → Runtime). Then check,
+in this order:
+
+| Symptom in the log | Cause |
+| --- | --- |
+| `SESSION_SECRET is not set, so signed sessions cannot be verified.` | add `SESSION_SECRET` to **Production**, redeploy |
+| `WOLLO_STATE_STORE=supabase but SUPABASE_URL / … are not all set.` | the Supabase vars are missing or scoped to Preview only |
+| `state read failed (401)` | the API keys are the new `sb_…` form — swap in the legacy JWTs (§2) |
+| `Failed to load state from Supabase: …` and the site then shows the seeded 4-course catalog | the row is unreachable, so the app fell back to defaults; the library you see is **not** your data |
+| `Function timed out after 30 seconds` | mail provider is unreachable; raise `maxDuration` or fix the sender |
+
+Two deployment gotchas that are easy to miss:
+
+- Vercel env vars are scoped per environment. Set them for **Production** as well as
+  Preview, and a change only applies after a **new deploy** (Redeploy → Use Latest
+  Configuration and Build Output is not enough for code, but is enough for env vars).
+- `NODE_ENV` is `production` on Vercel. The app refuses to start there without
+  `SESSION_SECRET`, on purpose — sessions are signed with it.
+
+Google sign-in specifically: if the config file still isn't readable in the bundle, set
+`FIREBASE_WEB_API_KEY` (and optionally `FIREBASE_PROJECT_ID`) as env vars — they take
+precedence over the file at [server.ts:14](file:///C:/Users/habib/Desktop/New%20folder/wollo-share/server.ts#L14).
+Everything else keeps working; only `/api/auth/google` returns its "not configured" error.
+
+---
+
+## 8. Known limits of the serverless shape
 
 - Login and recovery rate-limiters live in process memory, so each cold start resets
   them. Fine for a university library; move to the row if you ever need real enforcement.
