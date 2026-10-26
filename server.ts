@@ -983,6 +983,11 @@ function normalizeMailSettings(raw: unknown): MailSettings {
   };
 }
 
+// Evangadi sells its own course pack, so it is never part of a student's library.
+function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
+  return String(course.id || "") === "course-evangadi" || /evangadi/i.test(String(course.name || ""));
+}
+
 function loadDatabase(): DatabaseSchema {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -1318,8 +1323,14 @@ export async function createApp() {
         ? dbState.usersData.map(safeUserAccount)
         : dbState.usersData.filter((user) => user.id === session.id).map(safeUserAccount)
       : [];
+    // The Evangadi pack is sold by that provider, so students never receive it. Keeping
+    // it out of the payload also keeps its material links off their devices.
+    const visibleCourses =
+      session && session.role === "admin"
+        ? dbState.coursesData
+        : dbState.coursesData.filter((course) => !isEvangadiCourse(course));
     res.json({
-      coursesData: dbState.coursesData,
+      coursesData: visibleCourses,
       usersData: visibleUsers,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,

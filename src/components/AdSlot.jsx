@@ -20,7 +20,7 @@ function adVars(ad) {
   return style;
 }
 
-export function AdCard({ ad, onClose, preview }) {
+export function AdCard({ ad, onClose, preview, onAction }) {
   const link = safeAdLink(ad.linkUrl);
   const style = ad.style && AD_STYLES.some((s) => s.key === ad.style) ? ad.style : "banner";
   const title = ad.title || "Announcement";
@@ -48,6 +48,11 @@ export function AdCard({ ad, onClose, preview }) {
             {ad.ctaLabel || "Learn more"}
             <ArrowGlyph />
           </a>
+        ) : onAction ? (
+          <button type="button" className="ad-cta is-button" onClick={onAction}>
+            {ad.ctaLabel || "Learn more"}
+            <ArrowGlyph />
+          </button>
         ) : ad.ctaLabel ? (
           <span className="ad-cta is-static">{ad.ctaLabel}</span>
         ) : null}

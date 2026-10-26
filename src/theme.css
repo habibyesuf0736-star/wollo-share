@@ -1649,6 +1649,11 @@ a {
   color: color-mix(in srgb, var(--ad-a) 85%, var(--ink));
   box-shadow: none;
 }
+.ad-cta.is-button {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
 .ad-cta-arrow {
   transition: transform 0.18s var(--ease);
 }

@@ -3,6 +3,7 @@ import { ArrowRight, Building2, FolderDown, GraduationCap, LibraryBig, Search, S
 import { useApp, DEFAULT_TEXTS } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import AdSlot from "../components/AdSlot.jsx";
+import PlanPromo from "../components/PlanPromo.jsx";
 import CourseCard from "../components/CourseCard.jsx";
 import MaterialRow from "../components/MaterialRow.jsx";
 import EmptyState from "../components/EmptyState.jsx";
@@ -396,6 +397,7 @@ export default function LibraryPage() {
       </section>
 
       <AdSlot placement="hero" />
+      <PlanPromo />
 
       {departmentPanel && !resultsMode && !activeCollege ? (
         <section className="ws-dept mb-3" aria-label={`Your department: ${departmentPanel.label}`}>

@@ -3,7 +3,7 @@ import { Check, Clock, Gift, Sparkles, Upload } from "lucide-react";
 import Modal from "./Modal.jsx";
 import { useApp } from "../store/AppContext.jsx";
 
-const PLANS = [
+export const PLANS = [
   {
     key: "premium_monthly",
     title: "Premium monthly",
@@ -33,6 +33,7 @@ export default function UpgradeGateModal() {
   if (!open) return null;
 
   const materialName = gate.title || "this material";
+  const plansOnly = Boolean(gate.plansOnly);
   const required = downloadStatus.requiredCount || 2;
   const progress = Number(downloadStatus.progress) || 0;
   const credits = Number(downloadStatus.credits) || 0;
@@ -44,8 +45,12 @@ export default function UpgradeGateModal() {
     <Modal
       open={open}
       onClose={closeGate}
-      title={`Download “${materialName}”`}
-      subtitle="Free materials stay open to everyone. Everything else is a premium file — or one you can earn."
+      title={plansOnly ? "Wollo Share Premium" : `Download “${materialName}”`}
+      subtitle={
+        plansOnly
+          ? "Choose a plan and the library team switches your account over."
+          : "Free materials stay open to everyone. Everything else is a premium file — or one you can earn."
+      }
       size="wide"
     >
       <div className="d-flex flex-column gap-3">

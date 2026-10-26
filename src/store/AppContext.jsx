@@ -139,6 +139,8 @@ export function AppProvider({ children }) {
 
   const canSeeCourse = useCallback(
     (course) => {
+      // Evangadi sells its own pack, so it is not part of the student library at all.
+      if (course.id === "course-evangadi" || /evangadi/i.test(String(course.name || ""))) return isAdmin;
       if (!course.restricted) return true;
       if (studentPreview) return false;
       if (isAdmin) return true;
