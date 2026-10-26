@@ -1557,18 +1557,101 @@ export async function createApp() {
     res.json({ ok: true });
   });
 
-  // A backup is the whole document, credentials included, because a restore has to
-  // bring accounts back with their passwords intact. It is admin-only and the file is
-  // the administrator's to keep private.
-  function backupCounts() {
+  // Backups are split so accounts and library move independently: an accounts file
+  // never touches courses, a library file never touches sign-ins. Both carry credential
+  // fields, so the files are admin-only and the administrator's to keep private.
+  function accountsCounts() {
+    const users = dbState.usersData;
     return {
-      accounts: dbState.usersData.length,
-      courses: dbState.coursesData.length,
-      materials: dbState.coursesData.reduce((sum, course) => sum + (course.materials || []).length, 0),
-      submissions: dbState.materialSubmissions.length,
-      ratings: Object.keys(dbState.userRatings || {}).length
+      accounts: users.length,
+      verified: users.filter((user) => isEmailVerified(user)).length,
+      pending: users.filter((user) => !isEmailVerified(user)).length,
+      paid: users.filter((user) => String(user.accountPlan || "unpaid") !== "unpaid").length
     };
   }
+
+  function libraryCounts() {
+    return {
+      courses: dbState.coursesData.length,
+      materials: dbState.coursesData.reduce((sum, course) => sum + (course.materials || []).length, 0),
+      ratings: Object.keys(dbState.userRatings || {}).length,
+      submissions: dbState.materialSubmissions.length
+    };
+  }
+
+  function backupMeta(format: string, counts: Record<string, number>) {
+    return {
+      format,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      storage: remoteEnabled() ? "supabase" : "local-file",
+      counts
+    };
+  }
+
+  function libraryState() {
+    return {
+      coursesData: dbState.coursesData,
+      pageTexts: dbState.pageTexts,
+      appearanceSettings: dbState.appearanceSettings,
+      userRatings: dbState.userRatings,
+      materialSubmissions: dbState.materialSubmissions
+    };
+  }
+
+  function backupDocument(scope: string) {
+    if (scope === "accounts") {
+      return { ...backupMeta("wollo-share-accounts", accountsCounts()), state: { usersData: dbState.usersData } };
+    }
+    if (scope === "library") {
+      return { ...backupMeta("wollo-share-library", libraryCounts()), state: libraryState() };
+    }
+    return {
+      ...backupMeta("wollo-share-backup", { ...accountsCounts(), ...libraryCounts() }),
+      state: {
+        ...libraryState(),
+        usersData: dbState.usersData,
+        customAdminPassword: dbState.customAdminPassword,
+        passwordRecoveryRequests: dbState.passwordRecoveryRequests,
+        mailSettings: dbState.mailSettings,
+        contentRevision: dbState.contentRevision || 0,
+        updatedAt: dbState.updatedAt || 0
+      }
+    };
+  }
+
+  function csvCell(value: unknown): string {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  app.get("/api/admin/backup/accounts.csv", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const rows = [
+      ["Name", "Email", "Phone", "Department", "Status", "Verified", "Joined", "Last active", "Downloads"],
+      ...dbState.usersData.map((user) => [
+        user.name,
+        user.email,
+        user.phone || "",
+        user.department || "",
+        user.category || user.accountPlan || "",
+        isEmailVerified(user) ? "Yes" : "No",
+        (user.activityLog || []).find((entry) => entry.type === "Account Created")?.timestamp || "",
+        user.lastActiveAt || "",
+        String(user.downloadsCount || 0)
+      ])
+    ];
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+    // The BOM keeps Excel from mangling the department names.
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="wollo-share-accounts-${stamp}.csv"`);
+    res.send("\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
+  });
 
   app.get("/api/admin/backup", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -1577,28 +1660,14 @@ export async function createApp() {
       res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
       return;
     }
+    const scope = String(req.query.scope || "all");
+    if (!["accounts", "library", "all"].includes(scope)) {
+      res.status(400).json({ ok: false, error: "Unknown backup scope. Use accounts, library or all." });
+      return;
+    }
     const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
-    res.setHeader("Content-Disposition", `attachment; filename="wollo-share-backup-${stamp}.json"`);
-    res.json({
-      format: "wollo-share-backup",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      storage: remoteEnabled() ? "supabase" : "local-file",
-      counts: backupCounts(),
-      state: {
-        coursesData: dbState.coursesData,
-        usersData: dbState.usersData,
-        pageTexts: dbState.pageTexts,
-        appearanceSettings: dbState.appearanceSettings,
-        userRatings: dbState.userRatings,
-        customAdminPassword: dbState.customAdminPassword,
-        passwordRecoveryRequests: dbState.passwordRecoveryRequests,
-        materialSubmissions: dbState.materialSubmissions,
-        mailSettings: dbState.mailSettings,
-        contentRevision: dbState.contentRevision || 0,
-        updatedAt: dbState.updatedAt || 0
-      }
-    });
+    res.setHeader("Content-Disposition", `attachment; filename="wollo-share-${scope === "all" ? "backup" : scope}-${stamp}.json"`);
+    res.json(backupDocument(scope));
   });
 
   app.get("/api/admin/backup/info", (req, res) => {
@@ -1611,7 +1680,8 @@ export async function createApp() {
     res.json({
       ok: true,
       storage: remoteEnabled() ? "supabase" : "local-file",
-      counts: backupCounts(),
+      accounts: accountsCounts(),
+      library: libraryCounts(),
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
     });
@@ -1628,41 +1698,74 @@ export async function createApp() {
     const incoming = body.state && typeof body.state === "object" ? body.state : body;
     const users = Array.isArray(incoming.usersData) ? incoming.usersData : null;
     const courses = Array.isArray(incoming.coursesData) ? incoming.coursesData : null;
-    if (!users || !courses) {
+    // What the file contains decides what it may replace, so restoring an accounts file
+    // can never wipe the library and vice versa, whichever button the admin pressed.
+    const scope = users && courses ? "all" : users ? "accounts" : courses ? "library" : "";
+    if (!scope) {
       res.status(400).json({ ok: false, error: "That file is not a Wollo Share backup: it has no accounts or courses." });
       return;
     }
-    if (!users.length || !courses.length) {
-      res.status(400).json({ ok: false, error: "That backup is empty, so it was not restored. Pick a file with accounts and courses in it." });
-      return;
+    if (users) {
+      if (!users.length) {
+        res.status(400).json({ ok: false, error: "That accounts backup is empty, so nothing was restored." });
+        return;
+      }
+      const brokenAccount = users.find((user: UserAccount | null) => !user || typeof user.id !== "string" || typeof user.email !== "string");
+      if (brokenAccount) {
+        res.status(400).json({ ok: false, error: "One of the accounts in that backup is missing its id or email, so nothing was restored." });
+        return;
+      }
     }
-    const brokenAccount = users.find((user: UserAccount | null) => !user || typeof user.id !== "string" || typeof user.email !== "string");
-    if (brokenAccount) {
-      res.status(400).json({ ok: false, error: "One of the accounts in that backup is missing its id or email, so nothing was restored." });
+    if (courses && !courses.length) {
+      res.status(400).json({ ok: false, error: "That library backup is empty, so nothing was restored." });
       return;
     }
 
     const serverRevision = Number(dbState.contentRevision) || 0;
-    const restored = normalizeDatabase({
-      coursesData: courses,
-      usersData: users,
-      pageTexts: incoming.pageTexts,
-      appearanceSettings: incoming.appearanceSettings,
-      userRatings: incoming.userRatings,
-      customAdminPassword: incoming.customAdminPassword,
-      passwordRecoveryRequests: incoming.passwordRecoveryRequests,
-      materialSubmissions: incoming.materialSubmissions,
-      mailSettings: incoming.mailSettings,
-      contentRevision: serverRevision + 1
-    });
-    // normalizeDatabase re-seeds the demo accounts when they are absent; a restore must
-    // reproduce the backup exactly, so drop anything that was not in the file.
-    const backupIds = new Set(users.map((user: UserAccount) => String(user.id)));
-    restored.usersData = restored.usersData.filter((user) => backupIds.has(String(user.id)));
-    dbState = restored;
-    applyMailSettings();
+    if (scope === "accounts") {
+      const restored = normalizeDatabase({ ...dbState, usersData: users as UserAccount[], contentRevision: serverRevision + 1 });
+      // normalizeDatabase re-seeds the demo accounts when they are absent; a restore must
+      // reproduce the backup exactly, so drop anything that was not in the file.
+      const backupIds = new Set((users as UserAccount[]).map((user) => String(user.id)));
+      restored.usersData = restored.usersData.filter((user) => backupIds.has(String(user.id)));
+      dbState = restored;
+    } else if (scope === "library") {
+      dbState = normalizeDatabase({
+        ...dbState,
+        coursesData: courses as Course[],
+        pageTexts: incoming.pageTexts ?? dbState.pageTexts,
+        appearanceSettings: incoming.appearanceSettings ?? dbState.appearanceSettings,
+        userRatings: incoming.userRatings ?? dbState.userRatings,
+        materialSubmissions: incoming.materialSubmissions ?? dbState.materialSubmissions,
+        contentRevision: serverRevision + 1
+      });
+    } else {
+      const restored = normalizeDatabase({
+        ...dbState,
+        coursesData: courses as Course[],
+        usersData: users as UserAccount[],
+        pageTexts: incoming.pageTexts ?? dbState.pageTexts,
+        appearanceSettings: incoming.appearanceSettings ?? dbState.appearanceSettings,
+        userRatings: incoming.userRatings ?? dbState.userRatings,
+        customAdminPassword: incoming.customAdminPassword ?? dbState.customAdminPassword,
+        passwordRecoveryRequests: incoming.passwordRecoveryRequests ?? dbState.passwordRecoveryRequests,
+        materialSubmissions: incoming.materialSubmissions ?? dbState.materialSubmissions,
+        mailSettings: incoming.mailSettings ?? dbState.mailSettings,
+        contentRevision: serverRevision + 1
+      });
+      const backupIds = new Set((users as UserAccount[]).map((user) => String(user.id)));
+      restored.usersData = restored.usersData.filter((user) => backupIds.has(String(user.id)));
+      dbState = restored;
+      applyMailSettings();
+    }
     saveDatabase(dbState);
-    res.json({ ok: true, storedIn: remoteEnabled() ? "supabase" : "local-file", restored: backupCounts(), contentRevision: dbState.contentRevision });
+    res.json({
+      ok: true,
+      scope,
+      storedIn: remoteEnabled() ? "supabase" : "local-file",
+      restored: { accounts: accountsCounts(), library: libraryCounts() },
+      contentRevision: dbState.contentRevision
+    });
   });
 
   // 3. Authentication Endpoints

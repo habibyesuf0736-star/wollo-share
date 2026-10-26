@@ -84,12 +84,22 @@ export function shareVerificationCode(userId, session) {
   });
 }
 
-export function getBackup(session) {
-  return request("/api/admin/backup", { headers: authHeaders(session) });
+export function getBackup(session, scope = "all") {
+  return request(`/api/admin/backup?scope=${encodeURIComponent(scope)}`, { headers: authHeaders(session) });
 }
 
 export function getBackupInfo(session) {
   return request("/api/admin/backup/info", { headers: authHeaders(session) });
+}
+
+export async function getAccountsCsv(session) {
+  try {
+    const res = await fetch("/api/admin/backup/accounts.csv", { headers: authHeaders(session) });
+    if (!res.ok) return { ok: false, error: `Request failed (${res.status})` };
+    return { ok: true, text: await res.text() };
+  } catch {
+    return { ok: false, error: "Could not download the accounts list." };
+  }
 }
 
 export function restoreBackup(backup, session) {
