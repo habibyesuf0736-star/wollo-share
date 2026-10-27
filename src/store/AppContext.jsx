@@ -184,6 +184,24 @@ export function AppProvider({ children }) {
     writeJson(STORAGE_KEYS.USER_RATINGS, userRatings);
   }, [userRatings]);
 
+  // The browser tab wears the signed-in student's own photo; the admin's uploaded logo
+  // comes next and the university emblem is the fallback. The type attribute is dropped
+  // because a saved avatar is a data URL that may be JPEG or PNG.
+  const tabPhoto = activeUser?.avatarUrl || "";
+  useEffect(() => {
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    const href = tabPhoto || appearanceSettings.logoUrl || "/wollo-university-emblem.jpg";
+    if (link.getAttribute("href") !== href) {
+      link.setAttribute("href", href);
+      if (tabPhoto) link.removeAttribute("type");
+    }
+  }, [appearanceSettings.logoUrl, tabPhoto]);
+
   // Admin edits are pushed to the shared JSON database (debounced). The queue is
   // mirrored to localStorage so a reload or crash mid-save is replayed on next boot.
   const pendingSyncRef = useRef(null);

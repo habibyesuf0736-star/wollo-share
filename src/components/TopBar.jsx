@@ -2,6 +2,7 @@ import React from "react";
 import { useApp } from "../store/AppContext.jsx";
 import { Crown, Eye, LibraryBig, LifeBuoy, LogIn, LogOut, ShieldCheck, Upload } from "lucide-react";
 import universityEmblem from "../assets/images/wollo-university-emblem.jpg";
+import UserAvatar from "./UserAvatar.jsx";
 
 function BrandMark() {
   const { appearanceSettings } = useApp();
@@ -10,12 +11,6 @@ function BrandMark() {
       <img src={appearanceSettings.logoUrl || universityEmblem} alt="" />
     </span>
   );
-}
-
-function initials(name) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "WS";
-  return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
 }
 
 export default function TopBar() {
@@ -109,15 +104,7 @@ export default function TopBar() {
                 title="Open your profile"
                 aria-current={view.name === "profile" ? "page" : undefined}
               >
-                {activeUser?.avatarUrl ? (
-                  <span className="ws-user-avatar has-photo">
-                    <img src={activeUser.avatarUrl} alt="" />
-                  </span>
-                ) : (
-                  <span className="ws-user-avatar" aria-hidden="true">
-                    {initials(displayName)}
-                  </span>
-                )}
+                <UserAvatar photo={activeUser?.avatarUrl} name={displayName} alt="" />
                 <span className="d-none d-sm-block text-start">
                   <span className="d-block ws-user-name">
                     {displayName}

@@ -19,6 +19,7 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
+import UserAvatar from "../components/UserAvatar.jsx";
 import { listLoginDevices, revokeLoginDevice, signOutOtherDevices } from "../lib/api.js";
 import { phoneProblem, readAvatarDataUrl } from "../lib/utils.js";
 
@@ -180,12 +181,6 @@ export default function ProfilePage() {
 
   const displayName = activeUser?.name || session.name || session.email || "Student";
   const isOwnerAdmin = session.role === "admin";
-  const initials = displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join("");
 
   const submit = async (event) => {
     event.preventDefault();
@@ -219,15 +214,7 @@ export default function ProfilePage() {
 
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div className="d-flex align-items-center gap-3">
-          {activeUser?.avatarUrl ? (
-            <span className="ws-user-avatar has-photo" style={{ width: 56, height: 56 }}>
-              <img src={activeUser.avatarUrl} alt={`${displayName}'s profile photo`} />
-            </span>
-          ) : (
-            <span className="ws-user-avatar" style={{ width: 56, height: 56, fontSize: "1.1rem" }} aria-hidden="true">
-              {initials || "WS"}
-            </span>
-          )}
+          <UserAvatar photo={activeUser?.avatarUrl} name={displayName} size={56} />
           <div>
             <h1 className="h3 mb-1">{displayName}</h1>
             <div className="d-flex flex-wrap gap-2 align-items-center small text-secondary">
