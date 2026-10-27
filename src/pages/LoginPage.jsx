@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowRight,
   BadgeCheck,
@@ -11,6 +12,7 @@ import {
   Lock,
   Mail,
   Phone,
+  QrCode,
   ShieldCheck,
   Sparkles,
   Star,
@@ -20,15 +22,25 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
-import { completeRecovery, requestRecovery, resendVerificationCode } from "../lib/api.js";
+import { completeRecovery, pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
+import { SITE_ORIGIN } from "../lib/seo.js";
 
 const TABS = [
   ["signin", "Sign in"],
+  ["qr", "Scan with phone"],
   ["register", "Create account"],
   ["recovery", "Recover access"]
 ];
+
+// Shown on the phone so the student knows which screen they are signing in.
+function deviceLabel() {
+  const ua = String(navigator.userAgent || "");
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "another device";
+  return `${browser} on ${os}`;
+}
 
 export default function LoginPage() {
   const { login, register, verifySignup, adoptSession, goLibrary, stats, pageTexts, toast, goAdmin, goSupport, isAdmin, coursesData } = useApp();
@@ -42,6 +54,77 @@ export default function LoginPage() {
   const [signupStage, setSignupStage] = useState("form");
   const [pending, setPending] = useState({ email: "", code: "", mailSent: false, message: "" });
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
+  const [qr, setQr] = useState({ id: "", url: "", status: "idle", secondsLeft: 0, error: "" });
+  const [qrNonce, setQrNonce] = useState(0);
+
+  // Opening the QR tab mints a code, shows it, and collects the session the moment the
+  // phone approves it. Leaving the tab stops both the countdown and the polling.
+  useEffect(() => {
+    if (tab !== "qr") return undefined;
+    let cancelled = false;
+    let timer = null;
+    let requestId = "";
+    let expiresAt = 0;
+
+    const clear = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    timer = setInterval(async () => {
+      if (!requestId) return;
+      const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+      if (left === 0) {
+        clear();
+        setQr((prev) => (prev.id === requestId ? { ...prev, secondsLeft: 0, status: "expired" } : prev));
+        return;
+      }
+      setQr((prev) => (prev.id === requestId ? { ...prev, secondsLeft: left } : prev));
+      const poll = await pollQrLogin(requestId);
+      if (cancelled) return;
+      if (poll && poll.status === "approved" && poll.session) {
+        clear();
+        setQr((prev) => ({ ...prev, status: "approved" }));
+        const session = adoptSession(poll.session);
+        toast(`Signed in as ${session.name || session.email}`);
+        if (session.role === "admin") goAdmin();
+        else if (session.role === "support") goSupport();
+        else goLibrary();
+        return;
+      }
+      if (poll && (poll.status === "expired" || poll.status === "consumed")) {
+        clear();
+        setQr((prev) => ({ ...prev, status: poll.status === "expired" ? "expired" : "used" }));
+      }
+    }, 1500);
+
+    (async () => {
+      setQr({ id: "", url: "", status: "starting", secondsLeft: 0, error: "" });
+      const res = await startQrLogin(deviceLabel());
+      if (cancelled) return;
+      if (!res || !res.ok || !res.id) {
+        clear();
+        setQr({ id: "", url: "", status: "error", secondsLeft: 0, error: (res && res.error) || "Could not create a sign-in code." });
+        return;
+      }
+      requestId = res.id;
+      expiresAt = Number(res.expiresAt) || Date.now() + 120000;
+      setQr({
+        id: res.id,
+        url: `${SITE_ORIGIN}/authorize/${res.id}`,
+        status: "waiting",
+        secondsLeft: Math.max(0, Math.round((expiresAt - Date.now()) / 1000)),
+        error: ""
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      clear();
+    };
+  }, [adoptSession, goAdmin, goLibrary, goSupport, qrNonce, tab, toast]);
 
   const submitSignIn = async (event) => {
     event.preventDefault();
@@ -342,6 +425,50 @@ export default function LoginPage() {
                 Forgot your password?
               </button>
             </form>
+          ) : null}
+
+          {tab === "qr" ? (
+            <div className="d-flex flex-column align-items-center gap-3 text-center">
+              <p className="small text-secondary mb-0">
+                Use the phone you already signed in to Wollo Share with. Open its camera, point it at this code and
+                confirm — this screen signs itself in.
+              </p>
+              {qr.status === "waiting" && qr.url ? (
+                <div
+                  className="d-inline-block p-3"
+                  style={{ background: "#fff", border: "1px solid rgba(15,23,42,.08)", borderRadius: 16 }}
+                >
+                  <QRCodeSVG value={qr.url} size={196} level="M" aria-label="Wollo Share sign-in code" />
+                </div>
+              ) : (
+                <div
+                  className="d-flex align-items-center justify-content-center text-secondary small text-center px-3"
+                  style={{ width: 226, height: 226, border: "1px dashed rgba(15,23,42,.18)", borderRadius: 16 }}
+                >
+                  {qr.status === "approved" ? (
+                    <span className="d-inline-flex align-items-center gap-2">
+                      <BadgeCheck size={16} aria-hidden="true" /> Signed in…
+                    </span>
+                  ) : qr.status === "starting" ? (
+                    "Creating your code…"
+                  ) : (
+                    <QrCode size={34} aria-hidden="true" />
+                  )}
+                </div>
+              )}
+              <div className="small text-secondary" role="status">
+                {qr.status === "waiting" ? `Valid for another ${qr.secondsLeft}s.` : null}
+                {qr.status === "expired" ? "This code expired — nothing was signed in." : null}
+                {qr.status === "used" ? "That code was already used on another screen." : null}
+                {qr.status === "error" ? qr.error : null}
+              </div>
+              <button type="button" className="btn btn-primary" onClick={() => setQrNonce((n) => n + 1)}>
+                {qr.status === "waiting" ? "New code" : qr.status === "error" ? "Try again" : "Show a new code"}
+              </button>
+              <p className="form-text small mb-0">
+                Only approve a code you asked for — confirming hands your account to that computer for a day.
+              </p>
+            </div>
           ) : null}
 
           {tab === "register" && signupStage === "code" ? (

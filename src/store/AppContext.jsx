@@ -52,6 +52,9 @@ function viewFromLocation() {
   const pathname = String(window.location.pathname);
   const coursePath = pathname.match(/^\/c\/([^/]+)/);
   if (coursePath) return { name: "sublist", courseId: null, courseSlug: decodeURIComponent(coursePath[1]) };
+  // A scanned sign-in code lands here; the id is the only thing the link carries.
+  const authorizePath = pathname.match(/^\/authorize\/([A-Za-z0-9_-]{8,64})/);
+  if (authorizePath) return { name: "deviceLogin", qrId: authorizePath[1] };
   if (pathname === "/support" || /^#\/support/.test(hash)) return { name: "support" };
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
@@ -420,6 +423,15 @@ export function AppProvider({ children }) {
       });
       return;
     }
+    if (view.name === "deviceLogin") {
+      applyPageSeo({
+        path: "/authorize",
+        title: `Sign in on this device | ${SITE_NAME}`,
+        description: "Confirm this computer or laptop on Wollo Share after scanning the sign-in code with your phone.",
+        noindex: true
+      });
+      return;
+    }
     if (view.name === "profile" || view.name === "admin") {
       applyPageSeo({ ...LIBRARY_SEO, noindex: true });
       return;
@@ -433,6 +445,7 @@ export function AppProvider({ children }) {
     const onLocationChange = () => {
       const next = viewFromLocation();
       if (next.name === "login") setView({ name: "login" });
+      else if (next.name === "deviceLogin") setView({ name: "deviceLogin", qrId: next.qrId });
       else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "support") setView({ name: "support" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });

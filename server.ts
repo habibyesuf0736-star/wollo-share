@@ -753,6 +753,7 @@ interface DatabaseSchema {
   userRatings: Record<string, number>;
   customAdminPassword: string;
   passwordRecoveryRequests: PasswordRecoveryRequest[];
+  qrLoginRequests: QrLoginRequest[];
   materialSubmissions: MaterialSubmission[];
   supportTickets: SupportTicket[];
   mailSettings?: MailSettings;
@@ -794,6 +795,17 @@ interface PasswordRecoveryRequest {
   failedAttempts: number;
   notificationSent?: boolean;
   codeSentAt?: string;
+}
+
+// One desktop screen waiting to be signed in. The id is the only secret the desk
+// holds, so the phone that approves it is what mints the session.
+interface QrLoginRequest {
+  id: string;
+  label: string;
+  createdAt: string;
+  expiresAt: number;
+  status: "pending" | "approved" | "consumed";
+  account?: { id: string; email: string; name: string; role: string };
 }
 
 // A student contribution waiting in the admin review queue. Approving two of them
@@ -847,6 +859,7 @@ function buildDefaultDatabase(): DatabaseSchema {
     userRatings: {},
     customAdminPassword: "",
     passwordRecoveryRequests: [],
+    qrLoginRequests: [],
     materialSubmissions: [],
     supportTickets: [],
     mailSettings: {}
@@ -997,6 +1010,12 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
           ...request,
           failedAttempts: Number.isInteger(request.failedAttempts) ? request.failedAttempts : 0
         }))
+      : [],
+    qrLoginRequests: Array.isArray(raw.qrLoginRequests)
+      ? raw.qrLoginRequests.filter((request): request is QrLoginRequest =>
+          Boolean(request && typeof request.id === "string" && typeof request.expiresAt === "number" &&
+            ["pending", "approved", "consumed"].includes(request.status))
+        )
       : [],
     materialSubmissions: Array.isArray(raw.materialSubmissions)
       ? raw.materialSubmissions.filter((s): s is MaterialSubmission =>
@@ -1174,6 +1193,7 @@ applyMailSettings();
 // Brute-force login attempt rate-limiter
 const loginRateLimitMap = new Map<string, { failedCount: number; lockedUntil: number }>();
 const recoveryRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
+const qrStartRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 
 const RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
 const VERIFICATION_CODE_TTL_MS = 30 * 60 * 1000;
@@ -2712,6 +2732,137 @@ export async function createApp() {
     });
 
     res.status(401).json({ ok: false, error: "Invalid username/email or password." });
+  });
+
+  // Sign in on a second screen: the desk asks for a code, prints it as a QR and polls,
+  // and only a phone that is already signed in can turn that code into a session.
+  const QR_LOGIN_TTL_MS = 2 * 60 * 1000;
+
+  app.post("/api/qr-login/start", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const now = Date.now();
+    const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+    const rate = qrStartRateLimitMap.get(clientKey);
+    if (!rate || now - rate.windowStartedAt >= 15 * 60 * 1000) {
+      qrStartRateLimitMap.set(clientKey, { count: 1, windowStartedAt: now });
+    } else if (rate.count >= 60) {
+      res.status(429).json({ ok: false, error: "Too many sign-in codes requested from this network. Try again in a few minutes." });
+      return;
+    } else {
+      rate.count++;
+    }
+
+    // Only the newest codes are worth keeping; a handout lives for two minutes.
+    dbState.qrLoginRequests = dbState.qrLoginRequests.filter((request) => request.expiresAt > now).slice(-59);
+    const qrRequest: QrLoginRequest = {
+      id: crypto.randomBytes(16).toString("base64url"),
+      label: String(req.body?.label || "").replace(/\s+/g, " ").trim().slice(0, 80),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: now + QR_LOGIN_TTL_MS,
+      status: "pending"
+    };
+    dbState.qrLoginRequests.push(qrRequest);
+    saveDatabase(dbState);
+    res.json({ ok: true, id: qrRequest.id, expiresAt: qrRequest.expiresAt });
+  });
+
+  // The code id is 128 random bits and is only ever rendered inside the QR on the screen
+  // that asked for it, so possession of it is the proof — and it hands out one session.
+  app.get("/api/qr-login/status", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const now = Date.now();
+    const request = dbState.qrLoginRequests.find((entry) => entry.id === String(req.query?.id || ""));
+    if (!request || request.status === "consumed") {
+      res.json({ ok: true, status: "consumed" });
+      return;
+    }
+    if (request.expiresAt <= now) {
+      res.json({ ok: true, status: "expired" });
+      return;
+    }
+    if (request.status === "pending") {
+      res.json({ ok: true, status: "pending" });
+      return;
+    }
+    const account = request.account;
+    request.status = "consumed";
+    saveDatabase(dbState);
+    if (!account) {
+      res.json({ ok: true, status: "consumed" });
+      return;
+    }
+    res.json({ ok: true, status: "approved", name: account.name, session: createSignedSessionToken(account) });
+  });
+
+  // The phone reads the code before it approves it: the device label only, never the
+  // handout, so opening the link can't steal the session meant for the other screen.
+  app.get("/api/qr-login/preview", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in on this device first." });
+      return;
+    }
+    const request = dbState.qrLoginRequests.find((entry) => entry.id === String(req.query?.id || ""));
+    if (!request) {
+      res.json({ ok: true, status: "consumed", expired: false, label: "" });
+      return;
+    }
+    res.json({
+      ok: true,
+      status: request.status,
+      expired: request.expiresAt <= Date.now(),
+      label: request.label,
+      expiresAt: request.expiresAt
+    });
+  });
+
+  app.post("/api/qr-login/approve", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in on this phone first, then scan the code again." });
+      return;
+    }
+
+    const request = dbState.qrLoginRequests.find((entry) => entry.id === String(req.body?.id || ""));
+    if (!request) {
+      res.status(404).json({ ok: false, error: "That sign-in code is gone. Ask the other screen to show a new one." });
+      return;
+    }
+    if (request.status === "approved") {
+      res.status(409).json({ ok: false, error: "That code is already waiting for the other screen to pick it up." });
+      return;
+    }
+    if (request.status === "consumed") {
+      res.status(409).json({ ok: false, error: "That code already signed a device in. Show a new one." });
+      return;
+    }
+    if (request.expiresAt <= Date.now()) {
+      res.status(410).json({ ok: false, error: "That sign-in code expired. Ask the other screen to show a new one." });
+      return;
+    }
+
+    let account: QrLoginRequest["account"];
+    if (session.id === "admin-owner") {
+      account = { id: "admin-owner", email: ADMIN_EMAIL, name: "Habib Yesuf", role: "admin" };
+    } else {
+      const user = dbState.usersData.find((entry) => entry.id === session.id);
+      if (!user) {
+        res.status(403).json({ ok: false, error: "That account no longer exists, so it cannot sign another device in." });
+        return;
+      }
+      if (!isEmailVerified(user)) {
+        res.status(403).json({ ok: false, error: "Confirm this account with its 6-digit code before it signs another device in." });
+        return;
+      }
+      account = { id: user.id, email: user.email, name: user.name, role: user.role || "user" };
+    }
+
+    request.status = "approved";
+    request.account = account;
+    saveDatabase(dbState);
+    res.json({ ok: true, accountName: account.name, label: request.label });
   });
 
   // 3. Dedicated Course, Material & Side-Material REST Endpoints (Admin-protected)

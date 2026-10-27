@@ -13,6 +13,7 @@ import LibraryPage from "./pages/LibraryPage.jsx";
 import SublistPage from "./pages/SublistPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
+import DeviceLoginPage from "./pages/DeviceLoginPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import SupportPage from "./pages/SupportPage.jsx";
 import universityEmblem from "./assets/images/wollo-university-emblem.jpg";
@@ -41,6 +42,7 @@ function Shell() {
         <ErrorBoundary>
           {view.name === "sublist" ? <SublistPage key={`${view.courseId}|${view.query || ""}|${view.year || ""}`} /> : null}
           {view.name === "login" ? <LoginPage /> : null}
+          {view.name === "deviceLogin" ? <DeviceLoginPage key={view.qrId} qrId={view.qrId} /> : null}
           {view.name === "profile" ? <ProfilePage /> : null}
           {view.name === "support" ? <SupportPage /> : null}
           {view.name === "admin" ? <AdminPage /> : null}

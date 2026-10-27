@@ -3,6 +3,7 @@ Allow: /
 
 # The staff workspace is not for search results.
 Disallow: /api/
+Disallow: /authorize/
 Disallow: /*#/admin
 Disallow: /*#/profile
 

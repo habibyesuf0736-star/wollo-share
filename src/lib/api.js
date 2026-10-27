@@ -54,6 +54,29 @@ export function registerAccount(details) {
   return request("/api/auth/register", { method: "POST", body: JSON.stringify(details) });
 }
 
+// Sign in on a second screen: the desk asks for a code and shows it as a QR, a phone
+// that is already signed in approves it, and the desk collects its session by polling.
+export function startQrLogin(label) {
+  return request("/api/qr-login/start", { method: "POST", body: JSON.stringify({ label }) });
+}
+
+export function pollQrLogin(id) {
+  return request(`/api/qr-login/status?id=${encodeURIComponent(id)}`);
+}
+
+export function approveQrLogin(id, session) {
+  return request("/api/qr-login/approve", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ id })
+  });
+}
+
+// What the scanning phone is allowed to see about a code: the device it names, never a session.
+export function previewQrLogin(id, session) {
+  return request(`/api/qr-login/preview?id=${encodeURIComponent(id)}`, { headers: authHeaders(session) });
+}
+
 export function verifyEmail(email, code) {
   return request("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ email, code }) });
 }
