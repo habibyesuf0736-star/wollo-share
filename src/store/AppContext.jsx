@@ -406,7 +406,14 @@ export function AppProvider({ children }) {
   const login = useCallback(
     async ({ identifier, password }) => {
       const res = await api.login(identifier, password);
-      if (!res || res.ok !== true || !res.session) return { ok: false, needsVerification: Boolean(res && res.needsVerification), email: res && res.email, error: (res && res.error) || "Sign in failed." };
+      if (!res || res.ok !== true || !res.session)
+        return {
+          ok: false,
+          needsVerification: Boolean(res && res.needsVerification),
+          needsRecovery: Boolean(res && res.needsRecovery),
+          email: res && res.email,
+          error: (res && res.error) || "Sign in failed."
+        };
       const saved = storeSession(res.session);
       hasLocalMutationRef.current = false;
       const state = await fetchServerState(saved.authToken);

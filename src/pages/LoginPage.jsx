@@ -62,6 +62,10 @@ export default function LoginPage() {
         setSignupStage("code");
         setTab("register");
       }
+      if (res.needsRecovery) {
+        setRecovery({ email: res.email || signin.identifier.trim(), code: "", newPassword: "", stage: "code" });
+        setTab("recovery");
+      }
       return;
     }
     toast(`Welcome back, ${res.session.name || res.session.email}`);
@@ -147,8 +151,12 @@ export default function LoginPage() {
     event.preventDefault();
     setError("");
     setNotice("");
-    setBusy(true);
     if (recovery.stage === "request") {
+      if (!recovery.email.includes("@")) {
+        setError("Enter the email you use to sign in.");
+        return;
+      }
+      setBusy(true);
       const res = await requestRecovery(recovery.email);
       setBusy(false);
       if (res && res.ok) {
@@ -159,6 +167,15 @@ export default function LoginPage() {
       }
       return;
     }
+    if (recovery.code.length !== 6) {
+      setError("Enter the 6-digit recovery code from your email.");
+      return;
+    }
+    if (recovery.newPassword.length < 8) {
+      setError("Choose a new password of at least 8 characters.");
+      return;
+    }
+    setBusy(true);
     const res = await completeRecovery({ email: recovery.email, code: recovery.code, newPassword: recovery.newPassword });
     setBusy(false);
     if (res && res.ok) {
@@ -457,6 +474,10 @@ export default function LoginPage() {
               </div>
               {recovery.stage === "code" ? (
                 <>
+                  <p className="small text-secondary mb-0">
+                    Step 2 of 2 — the reset stays open until you enter the code and a new password. Signing in with your
+                    old password brings you back here.
+                  </p>
                   <div>
                     <label className="form-label small fw-semibold mb-0">Recovery code</label>
                     <div className="ws-field-icon">

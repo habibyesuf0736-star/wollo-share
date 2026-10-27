@@ -2448,6 +2448,33 @@ export async function createApp() {
       lowerId === OWNER_ALT_EMAIL.toLowerCase() ||
       lowerId === "habib" ||
       lowerId === "habibyesuf81";
+
+    // A live recovery code means the password reset is still open. Signing in with the
+    // old password would leave it half-done, so send them back to the code step instead.
+    const resetAccount = dbState.usersData.find(
+      (user) => user.email.toLowerCase() === lowerId || user.name.toLowerCase() === lowerId
+    );
+    const resetUserId = isAdminId ? "admin-owner" : resetAccount?.id || "";
+    const openReset = resetUserId
+      ? dbState.passwordRecoveryRequests.find(
+          (request) =>
+            request.userId === resetUserId &&
+            request.status === "code-issued" &&
+            Boolean(request.codeHash && request.codeExpiresAt) &&
+            Date.parse(String(request.codeExpiresAt)) > Date.now()
+        )
+      : undefined;
+    if (openReset) {
+      res.status(403).json({
+        ok: false,
+        needsRecovery: true,
+        email: openReset.email,
+        error:
+          "You have a password reset in progress. Enter the 6-digit recovery code from your email and choose a new password to finish, then sign in with that password."
+      });
+      return;
+    }
+
     if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
       loginRateLimitMap.delete(lowerId);
       const signedSession = createSignedSessionToken({
