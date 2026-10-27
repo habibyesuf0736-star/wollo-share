@@ -845,15 +845,9 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     });
   });
 
-  const usersData: UserAccount[] = Array.isArray(raw.usersData) && raw.usersData.length > 0
-    ? raw.usersData
-    : defaults.usersData;
-
-  DEFAULT_USERS.forEach((defU) => {
-    if (!usersData.some((u) => u.email.toLowerCase() === defU.email.toLowerCase())) {
-      usersData.push(JSON.parse(JSON.stringify(defU)));
-    }
-  });
+  // Only a store with no users key at all (a first run) gets the sample accounts;
+  // an empty list means the administrator removed them and must stay empty.
+  const usersData: UserAccount[] = Array.isArray(raw.usersData) ? raw.usersData : defaults.usersData;
 
   usersData.forEach((u: any) => {
     secureUserAccount(u);
@@ -1412,13 +1406,15 @@ export async function createApp() {
       return;
     }
     const userId = String(req.params.userId || "");
-    const before = dbState.usersData.length;
-    dbState = normalizeDatabase({
-      ...dbState,
-      usersData: dbState.usersData.filter((user) => user.id !== userId)
-    });
+    const before = dbState.usersData;
+    const remaining = before.filter((user) => user.id !== userId);
+    if (remaining.length === before.length) {
+      res.status(404).json({ ok: false, error: "That account is not in the library any more." });
+      return;
+    }
+    dbState = normalizeDatabase({ ...dbState, usersData: remaining });
     saveDatabase(dbState);
-    res.json({ ok: true, removed: before - dbState.usersData.length });
+    res.json({ ok: true, removed: before.length - remaining.length });
   });
 
   app.patch("/api/profile", (req, res) => {
