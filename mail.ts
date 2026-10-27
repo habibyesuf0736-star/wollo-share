@@ -228,23 +228,35 @@ export function hasMailtrapConfiguration(): boolean {
   return Boolean(mailtrap.apiToken && mailtrap.from);
 }
 
-export function activeMailProvider(): MailProvider {
+// Every provider that has enough configuration to attempt a send, in the order the
+// administrator's preference says to try them.
+export function mailProviderCandidates(): MailProvider[] {
   const { preference } = effectiveMailConfig();
-  if (preference === "none") return "none";
-  const relayReady = hasRelayConfiguration();
-  const smtpReady = hasSmtpConfiguration();
-  const brevoReady = hasBrevoConfiguration();
-  const mailtrapReady = hasMailtrapConfiguration();
-  if (preference === "relay") return relayReady ? "relay" : brevoReady ? "brevo" : mailtrapReady ? "mailtrap" : smtpReady ? "smtp" : "none";
-  if (preference === "smtp") return smtpReady ? "smtp" : brevoReady ? "brevo" : mailtrapReady ? "mailtrap" : relayReady ? "relay" : "none";
-  if (preference === "brevo") return brevoReady ? "brevo" : mailtrapReady ? "mailtrap" : smtpReady ? "smtp" : relayReady ? "relay" : "none";
-  if (preference === "mailtrap") return mailtrapReady ? "mailtrap" : smtpReady ? "smtp" : relayReady ? "relay" : "none";
-  // Automatic: HTTPS APIs first (no SMTP ports or IP allowlists), SMTP as the last resort.
-  if (relayReady) return "relay";
-  if (brevoReady) return "brevo";
-  if (mailtrapReady) return "mailtrap";
-  if (smtpReady) return "smtp";
-  return "none";
+  if (preference === "none") return [];
+  const ready: Record<MailProvider, boolean> = {
+    none: false,
+    relay: hasRelayConfiguration(),
+    smtp: hasSmtpConfiguration(),
+    brevo: hasBrevoConfiguration(),
+    mailtrap: hasMailtrapConfiguration()
+  };
+  // HTTPS APIs come before SMTP: they need no open port, and providers that gate on a
+  // fixed source IP cannot be satisfied from a serverless host anyway.
+  const order: MailProvider[] =
+    preference === "relay"
+      ? ["relay", "brevo", "mailtrap", "smtp"]
+      : preference === "smtp"
+      ? ["smtp", "brevo", "mailtrap", "relay"]
+      : preference === "brevo"
+      ? ["brevo", "mailtrap", "smtp", "relay"]
+      : preference === "mailtrap"
+      ? ["mailtrap", "smtp", "relay", "brevo"]
+      : ["relay", "brevo", "mailtrap", "smtp"];
+  return order.filter((provider) => ready[provider]);
+}
+
+export function activeMailProvider(): MailProvider {
+  return mailProviderCandidates()[0] || "none";
 }
 
 export function mailStatus() {
@@ -436,26 +448,43 @@ export async function sendMail(message: MailMessage): Promise<MailResult> {
   if (!String(message.to || "").trim()) {
     return { ok: false, provider: activeMailProvider(), error: "A recipient email address is required." };
   }
-  const provider = activeMailProvider();
-  if (provider === "relay") return sendViaRelay(message);
-  if (provider === "brevo") return sendViaBrevo(message);
-  if (provider === "mailtrap") return sendViaMailtrap(message);
-  if (provider === "smtp") return sendViaSmtp(message);
-  const preference = effectiveMailConfig().preference;
-  const missing =
-    preference === "smtp"
-      ? "the SMTP password (Gmail needs an app password, Brevo needs its SMTP key)"
-      : preference === "brevo"
-      ? "the Brevo API key and a verified sender"
-      : preference === "mailtrap"
-      ? "the Mailtrap API token and a verified sender"
-      : preference === "relay"
-      ? "the Relay URL, project API key and verified sender"
-      : "a Relay URL + project API key, a Brevo API key, a Mailtrap API token (each with a verified sender), or SMTP host + login + password + verified sender";
-  return {
-    ok: false,
-    provider: "none",
-    error: `Email delivery is not set up yet — add ${missing} in Admin → Users → Email delivery and press Save.`
-  };
+  const candidates = mailProviderCandidates();
+  if (!candidates.length) {
+    const preference = effectiveMailConfig().preference;
+    const missing =
+      preference === "smtp"
+        ? "the SMTP password (Gmail needs an app password, Brevo needs its SMTP key)"
+        : preference === "brevo"
+        ? "the Brevo API key and a verified sender"
+        : preference === "mailtrap"
+        ? "the Mailtrap API token and a verified sender"
+        : preference === "relay"
+        ? "the Relay URL, project API key and verified sender"
+        : "a Relay URL + project API key, a Brevo API key, a Mailtrap API token (each with a verified sender), or SMTP host + login + password + verified sender";
+    return {
+      ok: false,
+      provider: "none",
+      error: `Email delivery is not set up yet — add ${missing} in Admin → Users → Email delivery and press Save.`
+    };
+  }
+  // One provider refusing (a bad key, an IP allowlist, a closed port) should not strand a
+  // student when another one is configured and working, so keep trying in order.
+  const failures: string[] = [];
+  let last: MailResult | null = null;
+  for (const provider of candidates) {
+    const result =
+      provider === "relay"
+        ? await sendViaRelay(message)
+        : provider === "brevo"
+        ? await sendViaBrevo(message)
+        : provider === "mailtrap"
+        ? await sendViaMailtrap(message)
+        : await sendViaSmtp(message);
+    if (result.ok) return result;
+    last = result;
+    failures.push(`${provider}: ${result.error || "refused"}`);
+  }
+  const error = failures.length === 1 ? failures[0] : `${failures.length} mail providers failed — ${failures.join(" · ")}`;
+  return { ok: false, provider: last ? last.provider : candidates[0], error };
 }
 

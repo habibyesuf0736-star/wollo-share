@@ -3,17 +3,35 @@ import Modal from "./Modal.jsx";
 import DepartmentSelect from "./DepartmentSelect.jsx";
 import { useApp } from "../store/AppContext.jsx";
 import { phoneProblem } from "../lib/utils.js";
+import { resendVerificationCode } from "../lib/api.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 
 export default function QuickRegisterModal() {
-  const { gate, closeGate, setGate, register, goLogin, toast, coursesData } = useApp();
+  const { gate, closeGate, setGate, register, verifySignup, adoptSession, goLogin, toast, coursesData } = useApp();
   const open = Boolean(gate && gate.type === "register");
+  const [stage, setStage] = useState("form");
   const [form, setForm] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
+  const [pending, setPending] = useState({ email: "", code: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   if (!open) return null;
+
+  // The student is now a signed-in member of the library, so hand them back to whatever
+  // gate their download hit next instead of dropping them at the top of the site.
+  const releaseToNextGate = (name) => {
+    toast(`Account created — welcome, ${name}!`);
+    if (gate.materialId) {
+      setGate({ type: "upgrade", courseId: gate.courseId, materialId: gate.materialId, sideMaterialId: gate.sideMaterialId, title: gate.title });
+    } else {
+      closeGate();
+    }
+    setStage("form");
+    setForm({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
+    setPending({ email: "", code: "" });
+    setNotice("");
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -46,16 +64,97 @@ export default function QuickRegisterModal() {
       return;
     }
     if (res.pendingVerification) {
-      setNotice(res.message || "We emailed a 6-digit code to your address. Sign in and enter it to finish.");
+      // Code is on its way: stay in this dialog and collect it, so the download they
+      // clicked is still the thing they finish.
+      setPending({ email: res.email || form.email.trim(), code: "" });
+      setStage("code");
+      setNotice(res.message || `We emailed a 6-digit code to ${res.email}. Enter it to open your account.`);
       return;
     }
-    toast(`Account created — welcome, ${res.user ? res.user.name : "student"}!`);
-    if (gate.materialId) {
-      setGate({ type: "upgrade", courseId: gate.courseId, materialId: gate.materialId, sideMaterialId: gate.sideMaterialId, title: gate.title });
-    } else {
-      closeGate();
-    }
+    releaseToNextGate(res.user ? res.user.name : "student");
   };
+
+  const submitCode = async (event) => {
+    event.preventDefault();
+    const code = pending.code.replace(/\D/g, "");
+    if (code.length !== 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const res = await verifySignup(pending.email, code);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error || "That code did not match.");
+      return;
+    }
+    if (!res.signedIn) {
+      // The address was already confirmed (an administrator did it), so the account
+      // needs a normal sign-in rather than another code.
+      toast(res.message || "That account is already verified. Sign in to continue.");
+      closeGate();
+      goLogin();
+      return;
+    }
+    releaseToNextGate("student");
+  };
+
+  const resend = async () => {
+    setBusy(true);
+    setError("");
+    const res = await resendVerificationCode(pending.email);
+    setBusy(false);
+    if (!res || res.ok !== true) {
+      setError((res && res.error) || "Could not send another code.");
+      return;
+    }
+    if (res.session) {
+      // The provider refused the mail, so the server opened a plain student account
+      // rather than leaving this dialog waiting for a code nobody receives.
+      adoptSession(res.session);
+      releaseToNextGate(res.user ? res.user.name : "student");
+      return;
+    }
+    setNotice(res.message || "A new 6-digit code is on its way.");
+  };
+
+  if (stage === "code") {
+    return (
+      <Modal
+        open={open}
+        onClose={closeGate}
+        title="Enter your verification code"
+        subtitle={`We sent a 6-digit code to ${pending.email}. It keeps ${gate.title ? `“${gate.title}”` : "the library"} unlocked for you.`}
+        size="narrow"
+      >
+        <form onSubmit={submitCode} className="d-flex flex-column gap-3">
+          <input
+            className="form-control text-center"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="000000"
+            value={pending.code}
+            onChange={(e) => setPending({ ...pending, code: e.target.value.replace(/\D/g, "") })}
+          />
+          {notice ? <p className="small text-muted mb-0">{notice}</p> : null}
+          {error ? <p className="text-danger small mb-0">{error}</p> : null}
+          <div className="d-flex justify-content-between gap-2">
+            <button type="button" className="btn btn-outline-secondary" onClick={resend} disabled={busy}>
+              {busy ? "Sending…" : "Resend code"}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              Verify and continue
+            </button>
+          </div>
+          <button type="button" className="btn btn-link btn-sm p-0" onClick={() => { closeGate(); goLogin(); }}>
+            Use a different email
+          </button>
+        </form>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -93,23 +192,14 @@ export default function QuickRegisterModal() {
           <p className="form-text small mb-0">Required — the library team uses it to reach you about your uploads.</p>
         </div>
         {error ? <p className="text-danger small mb-0">{error}</p> : null}
-        {notice ? (
-          <div className="d-flex flex-column gap-2">
-            <p className="small mb-0">{notice}</p>
-            <button type="button" className="btn btn-primary" onClick={() => { closeGate(); goLogin(); }}>
-              Continue to sign in
-            </button>
-          </div>
-        ) : (
-          <div className="d-flex justify-content-between gap-2">
-            <button type="button" className="btn btn-outline-secondary" onClick={() => { closeGate(); goLogin(); }}>
-              I already have an account
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? "Creating…" : "Create account"}
-            </button>
-          </div>
-        )}
+        <div className="d-flex justify-content-between gap-2">
+          <button type="button" className="btn btn-outline-secondary" onClick={() => { closeGate(); goLogin(); }}>
+            I already have an account
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? "Creating…" : "Create account"}
+          </button>
+        </div>
       </form>
     </Modal>
   );
