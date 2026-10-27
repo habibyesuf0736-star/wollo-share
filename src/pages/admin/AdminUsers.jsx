@@ -111,8 +111,8 @@ export default function AdminUsers() {
       setAddError("Enter a valid email address.");
       return;
     }
-    if (addForm.password.length < 4) {
-      setAddError("The starting password needs at least 4 characters.");
+    if (addForm.password.length < 8) {
+      setAddError("The starting password needs at least 8 characters.");
       return;
     }
     const addPhoneError = phoneProblem(addForm.phone);

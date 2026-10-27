@@ -43,6 +43,25 @@ const ADMIN_EMAIL = "habibyesuf81@gmail.com";
 const OWNER_ALT_EMAIL = "habibyesuf0736@gmail.com";
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || ADMIN_EMAIL;
 
+// Script execution, framing and object embeds stay on this origin; the few third-party
+// origins are the ones the app really needs (YouTube player, Firebase auth/analytics).
+// connect-src is left open to https:/wss: because the Firebase SDK talks to rotating
+// googleapis endpoints and blocking them would sign students out of Google login.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'self'",
+  "form-action 'self'",
+  "script-src 'self' https://www.youtube.com https://www.googletagmanager.com https://www.google-analytics.com https://apis.google.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data: https://fonts.gstatic.com https://www.gstatic.com",
+  "connect-src 'self' https: wss:",
+  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://accounts.google.com https://apis.google.com",
+  "upgrade-insecure-requests"
+].join("; ");
+
 // Salted multi-round SHA-256 hashes of primary & secondary admin passwords (never stored in plaintext)
 const VAULT_MASTER_KEY = process.env.WOLLO_VAULT_MASTER_KEY || "WOLLO_SHARE_AES_CTR_HMAC_VAULT_KEY_2026_V1";
 const SESSION_HMAC_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -1286,10 +1305,40 @@ function applyMailSettings(): void {
 
 applyMailSettings();
 
-// Brute-force login attempt rate-limiter
+// Brute-force login attempt rate-limiters.
+// The failure counter is keyed by screen *and* source address, never by the account alone:
+// a key like that lets any visitor burn five wrong guesses and lock the real owner out of
+// their own account for as long as they like.
 const loginRateLimitMap = new Map<string, { failedCount: number; lockedUntil: number }>();
+const ipFailureRateLimitMap = new Map<string, { count: number; windowStartedAt: number; lockedUntil: number }>();
 const recoveryRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 const qrStartRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
+const signupRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
+const codeRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
+
+const LOGIN_IP_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_IP_MAX_FAILURES = 25;
+const RATE_MAP_SOFT_LIMIT = 2000;
+
+function requestClientIp(req: express.Request): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+// Every limiter here is in-process memory, and an attacker can mint keys forever
+// (one per guessed account name, one per fake email) unless old windows are dropped.
+function pruneRateMap<T extends { count?: number; windowStartedAt?: number; lockedUntil?: number }>(
+  map: Map<string, T>,
+  windowMs: number
+) {
+  if (map.size < RATE_MAP_SOFT_LIMIT) return;
+  const now = Date.now();
+  for (const [key, entry] of map) {
+    const idle = now - Number(entry.windowStartedAt || 0);
+    if (Number(entry.lockedUntil || 0) <= now && (entry.windowStartedAt === undefined || idle >= windowMs)) {
+      map.delete(key);
+    }
+  }
+}
 
 const RECOVERY_CODE_TTL_MS = 30 * 60 * 1000;
 const VERIFICATION_CODE_TTL_MS = 30 * 60 * 1000;
@@ -1468,13 +1517,32 @@ async function issueRecoveryCode(request: PasswordRecoveryRequest) {
 
 export async function createApp() {
   const app = express();
-  app.use(express.json({ limit: "50mb" }));
+  // Behind Vercel every request arrives from one proxy address, so without this req.ip is
+  // the same value for the whole planet and every per-network limit would be a global one.
+  // The address is only ever an abuse signal — nothing authorizes on it — so a client that
+  // forges X-Forwarded-For can at worst reset its own counters.
+  app.set("trust proxy", true);
+  // Materials and brand images ride along as data URLs, so the administrator's wholesale
+  // save and a whole-library restore really do carry megabytes. Both are admin-gated;
+  // every other route — the ones any signed-out visitor can hit — stays at 6mb.
+  app.use("/api/admin/restore", express.json({ limit: "50mb" }));
+  app.use("/api/state", express.json({ limit: "50mb" }));
+  app.use(express.json({ limit: "6mb" }));
 
-  // Security HTTP headers
+  // Security HTTP headers. The edge adds the same set for the HTML document and the
+  // static bundle (vercel.json), so this middleware is what protects every /api response.
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-DNS-Prefetch-Control", "off");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+      // Vite injects inline bootstrap scripts while developing, so a strict policy here
+      // would only break the local server.
+      res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+    }
     next();
   });
 
@@ -1514,11 +1582,8 @@ export async function createApp() {
 
   // 1. Health & Full Application State
   app.get("/api/health", (_req, res) => {
-    res.json({
-      status: "ok",
-      security: "SHA-256+AES-VAULT+HMAC-SESSION",
-      timestamp: new Date().toISOString()
-    });
+    // Nothing about the credential or session scheme belongs in an unauthenticated reply.
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
   app.get("/api/download", (req, res) => {
@@ -1927,8 +1992,8 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: "Enter a valid email address." });
       return;
     }
-    if (password.length < 4) {
-      res.status(400).json({ ok: false, error: "The starting password needs at least 4 characters." });
+    if (password.length < 8) {
+      res.status(400).json({ ok: false, error: "The starting password needs at least 8 characters." });
       return;
     }
     const phoneError = phoneProblem(req.body?.phone);
@@ -2246,7 +2311,8 @@ export async function createApp() {
   app.post("/api/auth/password-recovery/request", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const now = Date.now();
-    const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+    const clientKey = requestClientIp(req);
+    pruneRateMap(recoveryRequestRateLimitMap, 15 * 60 * 1000);
     const rate = recoveryRequestRateLimitMap.get(clientKey);
     if (!rate || now - rate.windowStartedAt >= 15 * 60 * 1000) {
       recoveryRequestRateLimitMap.set(clientKey, { count: 1, windowStartedAt: now });
@@ -2592,12 +2658,36 @@ export async function createApp() {
     const plan = String(req.body?.accountPlan || "unpaid").trim();
     const registeredAt = new Date().toISOString().slice(0, 16).replace("T", " ");
 
+    // Accounts live in one shared document, so unbounded signup is an outage and a
+    // phishing list, not just noise. Generous enough for a shared campus lab.
+    const signupIp = requestClientIp(req);
+    const signupWindow = signupRequestRateLimitMap.get(signupIp);
+    const signupNow = Date.now();
+    if (!signupWindow || signupNow - signupWindow.windowStartedAt >= 60 * 60 * 1000) {
+      pruneRateMap(signupRequestRateLimitMap, 60 * 60 * 1000);
+      signupRequestRateLimitMap.set(signupIp, { count: 1, windowStartedAt: signupNow });
+    } else if (signupWindow.count >= 40) {
+      res.status(429).json({
+        ok: false,
+        error: "Too many accounts were created from this network just now. Please try again later."
+      });
+      return;
+    } else {
+      signupWindow.count++;
+    }
+
     if (!email || !email.includes("@")) {
       res.status(400).json({ ok: false, error: "Please enter a valid email address." });
       return;
     }
-    if (password.length < 4) {
-      res.status(400).json({ ok: false, error: "Password must be at least 4 characters long." });
+    if (password.length < 8) {
+      res.status(400).json({ ok: false, error: "Password must be at least 8 characters long." });
+      return;
+    }
+    // A sign-in that matches now also verifies the account, so a password an attacker could
+    // guess has to be worth more than six digits of a phone PIN.
+    if (/^\d{6,12}$/.test(password) || /^(password|passwd|welcome|hello|student|qwerty|123456)[^\n]{0,6}$/i.test(password)) {
+      res.status(400).json({ ok: false, error: "Choose something other than a PIN or a word like “password”." });
       return;
     }
     const phoneError = phoneProblem(phone);
@@ -2681,13 +2771,29 @@ export async function createApp() {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const code = String(req.body?.code || "").replace(/\D/g, "");
     if (req.body?.resend) {
-      const target = dbState.usersData.find((user) => user.email.toLowerCase() === email);
-      if (!target) {
-        res.status(404).json({ ok: false, error: "No account is registered with that email." });
+      // One mailbox plus one source gets a few codes per window: a resent code is an email
+      // the provider has to pay for, and an unchecked loop is a spam tool.
+      const resendKey = `${requestClientIp(req)}|${email}`;
+      const resendNow = Date.now();
+      const resendWindow = codeRateLimitMap.get(resendKey);
+      if (!resendWindow || resendNow - resendWindow.windowStartedAt >= 10 * 60 * 1000) {
+        pruneRateMap(codeRateLimitMap, 10 * 60 * 1000);
+        codeRateLimitMap.set(resendKey, { count: 1, windowStartedAt: resendNow });
+      } else if (resendWindow.count >= 3) {
+        res.status(429).json({ ok: false, error: "Too many codes requested for that address. Please wait a few minutes." });
         return;
+      } else {
+        resendWindow.count++;
       }
-      if (isEmailVerified(target)) {
-        res.json({ ok: true, alreadyVerified: true, mailSent: false, message: "That account is already verified. Sign in instead." });
+      const target = dbState.usersData.find((user) => user.email.toLowerCase() === email);
+      // Whether the address has an account, and whether it is already verified, is not
+      // something an unauthenticated caller gets to learn — the wording stays neutral.
+      if (!target || isEmailVerified(target)) {
+        res.json({
+          ok: true,
+          mailSent: false,
+          message: "If that address has an unverified Wollo Share account, a fresh code is on its way. It expires in 30 minutes."
+        });
         return;
       }
       const { code: fresh } = issueSignupCode(target);
@@ -2712,13 +2818,26 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: "Enter the 6-digit code from your email." });
       return;
     }
-    const user = dbState.usersData.find((candidate) => candidate.email.toLowerCase() === email);
-    if (!user) {
-      res.status(404).json({ ok: false, error: "No account is registered with that email." });
+    // Guessing is limited twice: this window stops one source working through the million
+    // combinations, and VERIFICATION_MAX_ATTEMPTS throws the code away for that account.
+    const attemptKey = `${requestClientIp(req)}|${email}`;
+    const attemptNow = Date.now();
+    const attemptWindow = codeRateLimitMap.get(attemptKey);
+    if (!attemptWindow || attemptNow - attemptWindow.windowStartedAt >= 10 * 60 * 1000) {
+      pruneRateMap(codeRateLimitMap, 10 * 60 * 1000);
+      codeRateLimitMap.set(attemptKey, { count: 1, windowStartedAt: attemptNow });
+    } else if (attemptWindow.count >= 10) {
+      res.status(429).json({ ok: false, error: "Too many codes tried for that address. Please wait a few minutes." });
       return;
+    } else {
+      attemptWindow.count++;
     }
-    if (isEmailVerified(user)) {
-      res.json({ ok: true, message: "That account is already verified. Sign in instead." });
+
+    const user = dbState.usersData.find((candidate) => candidate.email.toLowerCase() === email);
+    // An unknown address, an already-verified account and a wrong code all get the same
+    // answer, so this route cannot be used to ask whether an email has an account.
+    if (!user || isEmailVerified(user)) {
+      res.status(401).json({ ok: false, error: "That code does not match the address. Check both, or sign in with your password." });
       return;
     }
     user.verificationAttempts = Number(user.verificationAttempts || 0) + 1;
@@ -2735,8 +2854,8 @@ export async function createApp() {
         ok: false,
         error:
           Date.parse(String(user.verificationExpiresAt || "")) < Date.now()
-            ? "That code has expired. Request a new one."
-            : "That code does not match. Check the email and try again."
+            ? "That code has expired. Request a new one, or sign in with your password."
+            : "That code does not match the address. Check both, or sign in with your password."
       });
       return;
     }
@@ -2816,7 +2935,9 @@ export async function createApp() {
       id: uid,
       name,
       email,
-      password: "google_oauth_protected_" + uid.slice(0, 8),
+      // Unguessable and never typed: this account signs in through Google, and password
+      // recovery can still email a code to the verified address.
+      password: crypto.randomBytes(24).toString("base64url"),
       role: "user",
       department: "General Studies & Science",
       accountPlan: "free",
@@ -2863,14 +2984,37 @@ export async function createApp() {
     const identifier = String(req.body?.identifier || "").trim();
     const password = String(req.body?.password || "");
     const lowerId = identifier.toLowerCase() || "anonymous";
+    const clientIp = requestClientIp(req);
+    const attemptKey = `${clientIp}|${lowerId}`;
+    const now = Date.now();
 
-    const rateRecord = loginRateLimitMap.get(lowerId);
-    if (rateRecord && rateRecord.lockedUntil > Date.now()) {
-      const waitSecs = Math.ceil((rateRecord.lockedUntil - Date.now()) / 1000);
+    // Two budgets, checked before any credential is looked at: the first stops one source
+    // hammering a single account, the second stops one source walking through many.
+    const ipRecord = ipFailureRateLimitMap.get(clientIp);
+    if (ipRecord && ipRecord.lockedUntil > now) {
+      res.status(429).json({
+        ok: false,
+        error: `Too many failed sign-in attempts from your network. Try again in ${Math.ceil((ipRecord.lockedUntil - now) / 1000)}s.`
+      });
+      return;
+    }
+    const rateRecord = loginRateLimitMap.get(attemptKey);
+    if (rateRecord && rateRecord.lockedUntil > now) {
+      const waitSecs = Math.ceil((rateRecord.lockedUntil - now) / 1000);
       res.status(429).json({
         ok: false,
         error: `Too many failed login attempts. Please wait ${waitSecs}s before trying again.`
       });
+      return;
+    }
+    pruneRateMap(loginRateLimitMap, 60 * 60 * 1000);
+    pruneRateMap(ipFailureRateLimitMap, LOGIN_IP_WINDOW_MS);
+
+    // Accounts onboarded with Google used to be given a password derived from their own
+    // uid, which anyone holding that uid could rebuild. Answering that shape with a plain
+    // rejection closes the door on the accounts that still carry it.
+    if (/^google_oauth_protected_/i.test(password.trim())) {
+      res.status(401).json({ ok: false, error: "Invalid username/email or password." });
       return;
     }
 
@@ -2910,7 +3054,7 @@ export async function createApp() {
     }
 
     if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
-      loginRateLimitMap.delete(lowerId);
+      loginRateLimitMap.delete(attemptKey);
       const signedSession = issueDeviceSession(
         {
           id: "admin-owner",
@@ -2934,7 +3078,7 @@ export async function createApp() {
 
     if (matchedUser) {
       const verifiedNow = verifyAccountAtSignIn(matchedUser);
-      loginRateLimitMap.delete(lowerId);
+      loginRateLimitMap.delete(attemptKey);
       const signedSession = issueDeviceSession(
         {
           id: matchedUser.id,
@@ -2955,10 +3099,19 @@ export async function createApp() {
     }
 
     const prevFailed = (rateRecord?.failedCount || 0) + 1;
-    loginRateLimitMap.set(lowerId, {
+    loginRateLimitMap.set(attemptKey, {
       failedCount: prevFailed,
       lockedUntil: prevFailed >= 5 ? Date.now() + 30 * 1000 : 0
     });
+
+    const ipWindow =
+      ipRecord && now - ipRecord.windowStartedAt < LOGIN_IP_WINDOW_MS
+        ? { count: ipRecord.count + 1, windowStartedAt: ipRecord.windowStartedAt, lockedUntil: ipRecord.lockedUntil }
+        : { count: 1, windowStartedAt: now, lockedUntil: 0 };
+    // A source that fails this often is walking through a list of accounts, not mistyping.
+    ipWindow.lockedUntil =
+      ipWindow.count >= LOGIN_IP_MAX_FAILURES ? now + Math.min(60 * 60 * 1000, ipWindow.count * 60 * 1000) : 0;
+    ipFailureRateLimitMap.set(clientIp, ipWindow);
 
     res.status(401).json({ ok: false, error: "Invalid username/email or password." });
   });
@@ -2970,7 +3123,8 @@ export async function createApp() {
   app.post("/api/qr-login/start", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const now = Date.now();
-    const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+    const clientKey = requestClientIp(req);
+    pruneRateMap(qrStartRateLimitMap, 15 * 60 * 1000);
     const rate = qrStartRateLimitMap.get(clientKey);
     if (!rate || now - rate.windowStartedAt >= 15 * 60 * 1000) {
       qrStartRateLimitMap.set(clientKey, { count: 1, windowStartedAt: now });

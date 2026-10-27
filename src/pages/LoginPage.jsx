@@ -154,8 +154,8 @@ export default function LoginPage() {
   const submitRegister = async (event) => {
     event.preventDefault();
     setError("");
-    if (!signup.email.includes("@") || signup.password.length < 4) {
-      setError("Enter a valid email and a password of at least 4 characters.");
+    if (!signup.email.includes("@") || signup.password.length < 8) {
+      setError("Enter a valid email and a password of at least 8 characters.");
       return;
     }
     if (!signup.department) {

@@ -35,8 +35,8 @@ export default function QuickRegisterModal() {
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!form.email.includes("@") || form.password.length < 4) {
-      setError("Enter a valid email and a password with at least 4 characters.");
+    if (!form.email.includes("@") || form.password.length < 8) {
+      setError("Enter a valid email and a password with at least 8 characters.");
       return;
     }
     if (!form.department) {
