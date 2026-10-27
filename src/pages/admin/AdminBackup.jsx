@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, BookOpen, Database, Download, FileSpreadsheet, ShieldCheck, Upload, Users } from "lucide-react";
+import { AlertTriangle, BookOpen, Database, Download, FileSpreadsheet, FileText, ShieldCheck, Upload, Users } from "lucide-react";
 import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import StatCard from "../../components/StatCard.jsx";
@@ -88,6 +88,19 @@ export default function AdminBackup() {
     toast("Accounts list downloaded — open it in Excel or Sheets.");
   };
 
+  const downloadSentCsv = async () => {
+    setBusy("sent");
+    setError("");
+    const res = await api.getSubmissionsCsv(session.authToken);
+    setBusy("");
+    if (!res || res.ok === false) {
+      setError((res && res.error) || "Could not download the sent materials list.");
+      return;
+    }
+    saveFile(`wollo-share-sent-materials-${fileStamp()}.csv`, res.text, "text/csv");
+    toast("Sent materials downloaded — every document students submitted, with its review status.");
+  };
+
   const pickFile = (scope) => {
     setIntent(scope);
     setError("");
@@ -154,6 +167,8 @@ export default function AdminBackup() {
 
   const accounts = (info && info.accounts) || {};
   const library = (info && info.library) || {};
+  const sent = (info && info.sentMaterials) || {};
+  const complaints = (info && info.complaints) || {};
 
   return (
     <div className="d-flex flex-column gap-3">
@@ -235,6 +250,34 @@ export default function AdminBackup() {
                 Restore library…
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <div className="d-flex align-items-center gap-2">
+              <FileText size={16} aria-hidden="true" />
+              <h3 className="h6 mb-0">Materials students sent</h3>
+            </div>
+            <p className="small text-secondary mb-0 mt-1">
+              {info
+                ? `${sent.total} sent · ${sent.pending} waiting for review · ${sent.approved} published · ${sent.rejected} rejected · ${sent.contributors} contributors`
+                : "Reading the database…"}{" "}
+              Every row carries the student, the course, the file and who decided it, so the whole contribution history fits in one spreadsheet.
+            </p>
+            <p className="small text-secondary mb-0 mt-1">
+              {info
+                ? `${complaints.open} complaints open · ${complaints.answered} answered · ${complaints.closed} closed`
+                : "Complaint counts load with the database summary."}
+            </p>
+          </div>
+          <div className="d-flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2" onClick={downloadSentCsv} disabled={Boolean(busy)}>
+              <FileSpreadsheet size={15} aria-hidden="true" />
+              {busy === "sent" ? "Preparing…" : "Sent materials CSV"}
+            </button>
           </div>
         </div>
       </div>

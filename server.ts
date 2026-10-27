@@ -149,6 +149,13 @@ function verifyRequestSession(req: express.Request) {
   return { id, email, role };
 }
 
+// Support staff run the review queue, the complaints inbox and the reference materials,
+// so every "administrator or staff" gate is tested with this instead of role !== "admin".
+const STAFF_ROLES = new Set(["admin", "support"]);
+function isStaffSession(session: { role: string }): boolean {
+  return STAFF_ROLES.has(String(session.role || ""));
+}
+
 function safeUserAccount(user: UserAccount) {
   const {
     password: _password,
@@ -390,6 +397,21 @@ function buildRegularFreshmanCourses(): any[] {
     subcategories: [...DEFAULT_SUBCATEGORIES],
     materials: []
   }));
+}
+
+// The starter pack published into an empty freshman course. Semester I is the natural
+// sciences set; semester II is what pre-engineering, medicine and the other fields take.
+const FRESHMAN_SEED_PACK: Array<{ suffix: string; subcategory: string; type: string; size: string }> = [
+  { suffix: "Complete Lecture Notes", subcategory: "Lecture Notes", type: "PDF", size: "3.2 MB" },
+  { suffix: "Class Slides", subcategory: "Slides & Presentations", type: "PPT", size: "6.8 MB" },
+  { suffix: "Past Exam Collection", subcategory: "Past Exams & Quizzes", type: "PDF", size: "1.4 MB" },
+  { suffix: "Assignment Solutions", subcategory: "Assignments & Projects", type: "DOC", size: "0.7 MB" }
+];
+
+function freshmanStreamForSemester(semester: string): string {
+  return /II$/.test(String(semester || ""))
+    ? "Pre-Engineering, Medicine & Other Fields"
+    : "Natural Sciences";
 }
 
 const IT_CURRICULUM_COURSES: Array<[string, string, number, number]> = [
@@ -689,6 +711,38 @@ interface UserAccount {
   addedByAdmin?: boolean;
 }
 
+// A complaint or problem a student left for the support team. Staff reply in-thread;
+// the student sees the same thread on their own support screen.
+interface SupportReply {
+  id: string;
+  text: string;
+  authorName: string;
+  by: "student" | "staff";
+  createdAt: string;
+}
+
+interface SupportTicket {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  category: string;
+  courseId?: string;
+  message: string;
+  status: "open" | "answered" | "closed";
+  createdAt: string;
+  updatedAt: string;
+  replies: SupportReply[];
+}
+
+const SUPPORT_CATEGORIES = [
+  "Broken or wrong material",
+  "Download problem",
+  "Missing course material",
+  "Account or payment",
+  "Something else"
+];
+
 interface DatabaseSchema {
   coursesData: Course[];
   usersData: UserAccount[];
@@ -698,6 +752,7 @@ interface DatabaseSchema {
   customAdminPassword: string;
   passwordRecoveryRequests: PasswordRecoveryRequest[];
   materialSubmissions: MaterialSubmission[];
+  supportTickets: SupportTicket[];
   mailSettings?: MailSettings;
   updatedAt?: number;
   // Bumped only by admin wholesale state saves. `updatedAt` moves on every student
@@ -791,6 +846,7 @@ function buildDefaultDatabase(): DatabaseSchema {
     customAdminPassword: "",
     passwordRecoveryRequests: [],
     materialSubmissions: [],
+    supportTickets: [],
     mailSettings: {}
   };
 }
@@ -944,6 +1000,18 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
       ? raw.materialSubmissions.filter((s): s is MaterialSubmission =>
           Boolean(s && typeof s.id === "string" && typeof s.courseId === "string" && typeof s.name === "string")
         )
+      : [],
+    supportTickets: Array.isArray(raw.supportTickets)
+      ? raw.supportTickets.filter((t): t is SupportTicket =>
+          Boolean(t && typeof t.id === "string" && typeof t.userId === "string" && typeof t.message === "string")
+        ).map((t) => ({
+          ...t,
+          category: String(t.category || "Something else"),
+          status: ["open", "answered", "closed"].includes(t.status) ? t.status : "open",
+          createdAt: t.createdAt || new Date().toISOString(),
+          updatedAt: t.updatedAt || t.createdAt || new Date().toISOString(),
+          replies: Array.isArray(t.replies) ? t.replies.filter((r) => Boolean(r && typeof r.text === "string")) : []
+        }))
       : [],
     mailSettings: normalizeMailSettings(raw.mailSettings),
     updatedAt: Number(raw.updatedAt) || 0,
@@ -1390,6 +1458,7 @@ export async function createApp() {
       customAdminPassword: dbState.customAdminPassword,
       passwordRecoveryRequests: dbState.passwordRecoveryRequests,
       materialSubmissions: dbState.materialSubmissions,
+      supportTickets: dbState.supportTickets,
       mailSettings: dbState.mailSettings,
       contentRevision: serverRevision + 1
     });
@@ -1678,6 +1747,7 @@ export async function createApp() {
         usersData: dbState.usersData,
         customAdminPassword: dbState.customAdminPassword,
         passwordRecoveryRequests: dbState.passwordRecoveryRequests,
+        supportTickets: dbState.supportTickets,
         mailSettings: dbState.mailSettings,
         contentRevision: dbState.contentRevision || 0,
         updatedAt: dbState.updatedAt || 0
@@ -1718,6 +1788,37 @@ export async function createApp() {
     res.send("\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
   });
 
+  app.get("/api/admin/backup/submissions.csv", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const rows = [
+      ["Sent on", "Student", "Email", "Course", "Document", "Format", "Size", "Year", "Semester", "Category", "Status", "Decided by", "Reason"],
+      ...dbState.materialSubmissions.map((submission) => [
+        (submission.createdAt || "").slice(0, 16).replace("T", " "),
+        submission.contributorName || "",
+        submission.userEmail || "",
+        submission.courseName || "",
+        submission.name,
+        submission.type || "",
+        submission.size || "",
+        submission.year || "",
+        submission.semester || "",
+        submission.subcategory || "",
+        submission.status,
+        submission.decidedBy || "",
+        submission.reason || ""
+      ])
+    ];
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="wollo-share-sent-materials-${stamp}.csv"`);
+    res.send("\uFEFF" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
+  });
+
   app.get("/api/admin/backup", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const session = verifyRequestSession(req);
@@ -1742,11 +1843,24 @@ export async function createApp() {
       res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
       return;
     }
+    const submissions = dbState.materialSubmissions;
     res.json({
       ok: true,
       storage: remoteEnabled() ? "supabase" : "local-file",
       accounts: accountsCounts(),
       library: libraryCounts(),
+      sentMaterials: {
+        total: submissions.length,
+        pending: submissions.filter((s) => s.status === "pending").length,
+        approved: submissions.filter((s) => s.status === "approved").length,
+        rejected: submissions.filter((s) => s.status === "rejected").length,
+        contributors: new Set(submissions.map((s) => s.userId)).size
+      },
+      complaints: {
+        open: dbState.supportTickets.filter((t) => t.status === "open").length,
+        answered: dbState.supportTickets.filter((t) => t.status === "answered").length,
+        closed: dbState.supportTickets.filter((t) => t.status === "closed").length
+      },
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
     });
@@ -1815,6 +1929,7 @@ export async function createApp() {
         customAdminPassword: incoming.customAdminPassword ?? dbState.customAdminPassword,
         passwordRecoveryRequests: incoming.passwordRecoveryRequests ?? dbState.passwordRecoveryRequests,
         materialSubmissions: incoming.materialSubmissions ?? dbState.materialSubmissions,
+        supportTickets: incoming.supportTickets ?? dbState.supportTickets,
         mailSettings: incoming.mailSettings ?? dbState.mailSettings,
         contentRevision: serverRevision + 1
       });
@@ -2523,8 +2638,8 @@ export async function createApp() {
   // 3. Dedicated Course, Material & Side-Material REST Endpoints (Admin-protected)
   app.post("/api/courses/:courseId/materials/:materialId/side-materials", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "Only the Administrator can add or edit side materials." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can add or edit reference materials." });
       return;
     }
 
@@ -2572,8 +2687,8 @@ export async function createApp() {
 
   app.delete("/api/courses/:courseId/materials/:materialId/side-materials/:sideMatId", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "Only the Administrator can delete side materials." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can delete reference materials." });
       return;
     }
 
@@ -2842,8 +2957,8 @@ export async function createApp() {
 
   app.get("/api/admin/material-submissions", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
       return;
     }
     res.json({ ok: true, submissions: [...dbState.materialSubmissions].reverse() });
@@ -2851,8 +2966,8 @@ export async function createApp() {
 
   app.patch("/api/admin/material-submissions/:submissionId", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
       return;
     }
     const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
@@ -2879,8 +2994,8 @@ export async function createApp() {
 
   app.post("/api/admin/material-submissions/:submissionId/approve", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
       return;
     }
     const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
@@ -2950,8 +3065,8 @@ export async function createApp() {
 
   app.post("/api/admin/material-submissions/:submissionId/reject", (req, res) => {
     const session = verifyRequestSession(req);
-    if (!session || session.role !== "admin") {
-      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
       return;
     }
     const submission = dbState.materialSubmissions.find((s) => s.id === req.params.submissionId);
@@ -2962,9 +3077,289 @@ export async function createApp() {
     submission.status = "rejected";
     submission.decidedAt = new Date().toISOString();
     submission.decidedBy = session.email;
-    submission.reason = String(req.body?.reason || "The administrator could not verify this document.").slice(0, 300);
+    submission.reason = String(req.body?.reason || "The review team could not verify this document.").slice(0, 300);
     saveDatabase(dbState);
     res.json({ ok: true, submission });
+  });
+
+  // ============================================================================
+  // SUPPORT TEAM: staff roles, complaints inbox, library writes
+  // ============================================================================
+
+  // The administrator hands out the support role; students cannot grant it to themselves,
+  // and it is never granted to the owner account.
+  app.post("/api/admin/users/:userId/role", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const userId = String(req.params.userId || "");
+    const target = dbState.usersData.find((user) => user.id === userId);
+    if (!target) {
+      res.status(404).json({ ok: false, error: "That account is not in the library any more." });
+      return;
+    }
+    if (target.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+      res.status(400).json({ ok: false, error: "The owner account always keeps administrator access." });
+      return;
+    }
+    const role = String(req.body?.role || "").trim();
+    if (!["user", "support"].includes(role)) {
+      res.status(400).json({ ok: false, error: "Choose either a student or a support staff account." });
+      return;
+    }
+    target.role = role;
+    target.activityLog = [
+      {
+        id: "act-" + Date.now(),
+        type: role === "support" ? "Became Support Staff" : "Left Support Team",
+        detail: role === "support" ? "The administrator added you to the support team." : "The administrator moved you back to a student account.",
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      },
+      ...(target.activityLog || [])
+    ].slice(0, 60);
+    saveDatabase(dbState);
+    res.json({ ok: true, user: safeUserAccount(target) });
+  });
+
+  app.post("/api/support/tickets", (req, res) => {
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in so the support team can reply to you." });
+      return;
+    }
+    const message = String(req.body?.message || "").trim().slice(0, 2000);
+    if (message.length < 10) {
+      res.status(400).json({ ok: false, error: "Tell the support team a little more (at least 10 characters)." });
+      return;
+    }
+    const rawCategory = String(req.body?.category || "Something else").trim();
+    const category = SUPPORT_CATEGORIES.includes(rawCategory) ? rawCategory : "Something else";
+    const open = dbState.supportTickets.filter((t) => t.userId === user.id && t.status !== "closed");
+    if (open.length >= 5) {
+      res.status(429).json({ ok: false, error: "You already have 5 complaints open. The support team is working on them." });
+      return;
+    }
+    const now = new Date().toISOString();
+    const ticket: SupportTicket = {
+      id: "trk-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      category,
+      courseId: String(req.body?.courseId || "").trim() || undefined,
+      message,
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+      replies: []
+    };
+    dbState.supportTickets.push(ticket);
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Complaint Sent", detail: `${category} — sent to the support team`, timestamp: now.slice(0, 16).replace("T", " ") },
+      ...(user.activityLog || [])
+    ].slice(0, 60);
+    saveDatabase(dbState);
+    res.json({ ok: true, ticket });
+  });
+
+  app.get("/api/support/tickets/mine", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see your complaints." });
+      return;
+    }
+    res.json({
+      ok: true,
+      tickets: [...dbState.supportTickets].filter((t) => t.userId === session.id).reverse()
+    });
+  });
+
+  app.get("/api/support/tickets", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    res.json({ ok: true, tickets: [...dbState.supportTickets].reverse() });
+  });
+
+  // Both sides post in the same thread: staff answers, the student can add detail.
+  app.post("/api/support/tickets/:ticketId/reply", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to reply." });
+      return;
+    }
+    const ticket = dbState.supportTickets.find((t) => t.id === req.params.ticketId);
+    if (!ticket) {
+      res.status(404).json({ ok: false, error: "That complaint is no longer in the inbox." });
+      return;
+    }
+    const isOwner = ticket.userId === session.id;
+    if (!isOwner && !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team or the student who filed this can reply." });
+      return;
+    }
+    if (ticket.status === "closed") {
+      res.status(409).json({ ok: false, error: "This complaint is closed. Send a new one if the problem came back." });
+      return;
+    }
+    const text = String(req.body?.text || "").trim().slice(0, 2000);
+    if (!text) {
+      res.status(400).json({ ok: false, error: "Write a message before sending it." });
+      return;
+    }
+    const staff = isStaffSession(session) && !isOwner;
+    ticket.replies = [
+      ...(ticket.replies || []),
+      {
+        id: "rpy-" + Date.now() + "-" + crypto.randomInt(100, 999),
+        text,
+        authorName: staff ? "Support team" : "You",
+        by: staff ? "staff" : "student",
+        createdAt: new Date().toISOString()
+      }
+    ];
+    ticket.status = staff ? "answered" : "open";
+    ticket.updatedAt = new Date().toISOString();
+    saveDatabase(dbState);
+    res.json({ ok: true, ticket });
+  });
+
+  app.post("/api/support/tickets/:ticketId/close", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to close a complaint." });
+      return;
+    }
+    const ticket = dbState.supportTickets.find((t) => t.id === req.params.ticketId);
+    if (!ticket) {
+      res.status(404).json({ ok: false, error: "That complaint is no longer in the inbox." });
+      return;
+    }
+    if (ticket.userId !== session.id && !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team or the student who filed this can close it." });
+      return;
+    }
+    ticket.status = "closed";
+    ticket.updatedAt = new Date().toISOString();
+    saveDatabase(dbState);
+    res.json({ ok: true, ticket });
+  });
+
+  // Staff cannot use the administrator's wholesale state save, so the library writes
+  // they need go through their own endpoints.
+  app.post("/api/courses/:courseId/materials", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const course = dbState.coursesData.find((c) => c.id === req.params.courseId);
+    if (!course) {
+      res.status(404).json({ ok: false, error: "Choose the course this material belongs to." });
+      return;
+    }
+    const name = String(req.body?.name || "").trim().slice(0, 180);
+    if (!name) {
+      res.status(400).json({ ok: false, error: "Give the document a title." });
+      return;
+    }
+    const semesters = Array.isArray(course.semesters) && course.semesters.length ? course.semesters : [];
+    const semesterEntry = semesters.find((label) => label === req.body?.semesterLabel) || semesters[0] || "";
+    const match = /^Year (\d+) · (.+)$/.exec(String(semesterEntry));
+    const material: CourseMaterial = {
+      id: "mat-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      name,
+      type: String(req.body?.type || "PDF").slice(0, 12),
+      size: String(req.body?.size || "1.0 MB").slice(0, 16),
+      url: String(req.body?.url || "#sample-file").slice(0, 500),
+      year: String(req.body?.year || course.defaultYear || "Year 1").slice(0, 24),
+      semester: match ? match[2] : String(req.body?.semester || "First Semester").slice(0, 40),
+      department: String(req.body?.department || course.name || "").slice(0, 120),
+      subcategory: String(req.body?.subcategory || "Lecture Notes").slice(0, 60),
+      sharedBy: session.role === "support" ? "Support team" : "Administrator",
+      hidden: Boolean(req.body?.hidden),
+      ratingAvg: 0,
+      ratingCount: 0,
+      sideMaterials: []
+    };
+    course.materials = [...(course.materials || []), material];
+    saveDatabase(dbState);
+    res.json({ ok: true, material, course });
+  });
+
+  // Freshman courses arrive empty, so the support team publishes the starter pack for
+  // every Year 1 course. Always previewed first: nothing is written until dryRun is false.
+  app.post("/api/support/freshman/seed", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const dryRun = req.body?.dryRun !== false;
+    const targets = dbState.coursesData.filter((course) => course.college === "Common Freshman Courses");
+    type Planned = { course: Course; name: string; year: string; semester: string; department: string; pack: (typeof FRESHMAN_SEED_PACK)[number] };
+    const planned: Planned[] = [];
+    for (const course of targets) {
+      const label = (course.semesters || [])[0] || "Year 1 · Semester I";
+      const match = /^Year (\d+) · (.+)$/.exec(label);
+      const year = match ? `Year ${match[1]}` : course.defaultYear || "Year 1";
+      const semester = match ? match[2] : "First Semester";
+      const shortName = String(course.name || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+      const department = freshmanStreamForSemester(semester);
+      for (const pack of FRESHMAN_SEED_PACK) {
+        const name = `${shortName} — ${pack.suffix}`;
+        if ((course.materials || []).some((m) => m.name === name)) continue;
+        planned.push({ course, name, year, semester, department, pack });
+      }
+    }
+    if (dryRun) {
+      // One row per course so staff can see both semester streams in the preview
+      // instead of a file-level slice that only shows whichever course came first.
+      const byCourse = new Map();
+      for (const p of planned) {
+        const row = byCourse.get(p.course.id) || { course: p.course.name, semester: p.semester, department: p.department, count: 0 };
+        row.count += 1;
+        byCourse.set(p.course.id, row);
+      }
+      res.json({
+        ok: true,
+        dryRun: true,
+        courses: targets.length,
+        wouldAdd: planned.length,
+        sample: [...byCourse.values()]
+      });
+      return;
+    }
+    let added = 0;
+    for (const item of planned) {
+      item.course.materials = [
+        ...(item.course.materials || []),
+        {
+          id: "mat-" + Date.now() + "-" + crypto.randomInt(10000, 99999),
+          name: item.name,
+          type: item.pack.type,
+          size: item.pack.size,
+          url: "#sample-file",
+          year: item.year,
+          semester: item.semester,
+          department: item.department,
+          subcategory: item.pack.subcategory,
+          sharedBy: session.role === "support" ? "Support team" : "Administrator",
+          hidden: false,
+          ratingAvg: 0,
+          ratingCount: 0,
+          sideMaterials: []
+        } as CourseMaterial
+      ];
+      added += 1;
+    }
+    saveDatabase(dbState);
+    res.json({ ok: true, dryRun: false, courses: targets.length, added });
   });
 
   // Resume markers for lecture videos, stored on the account so they follow the

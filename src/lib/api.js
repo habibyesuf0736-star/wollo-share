@@ -102,6 +102,67 @@ export async function getAccountsCsv(session) {
   }
 }
 
+export async function getSubmissionsCsv(session) {
+  try {
+    const res = await fetch("/api/admin/backup/submissions.csv", { headers: authHeaders(session) });
+    if (!res.ok) return { ok: false, error: `Request failed (${res.status})` };
+    return { ok: true, text: await res.text() };
+  } catch {
+    return { ok: false, error: "Could not download the sent materials list." };
+  }
+}
+
+export function assignUserRole(userId, role, session) {
+  return request(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ role })
+  });
+}
+
+export function createTicket(payload, session) {
+  return request("/api/support/tickets", { method: "POST", headers: authHeaders(session), body: JSON.stringify(payload) });
+}
+
+export function listMyTickets(session) {
+  return request("/api/support/tickets/mine", { headers: authHeaders(session) });
+}
+
+export function listTickets(session) {
+  return request("/api/support/tickets", { headers: authHeaders(session) });
+}
+
+export function replyTicket(ticketId, text, session) {
+  return request(`/api/support/tickets/${encodeURIComponent(ticketId)}/reply`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ text })
+  });
+}
+
+export function closeTicket(ticketId, session) {
+  return request(`/api/support/tickets/${encodeURIComponent(ticketId)}/close`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
+export function addCourseMaterial(courseId, material, session) {
+  return request(`/api/courses/${encodeURIComponent(courseId)}/materials`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(material)
+  });
+}
+
+export function seedFreshmanMaterials(dryRun, session) {
+  return request("/api/support/freshman/seed", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ dryRun })
+  });
+}
+
 export function restoreBackup(backup, session) {
   return request("/api/admin/restore", {
     method: "POST",

@@ -1,6 +1,6 @@
 import React from "react";
 import { useApp } from "../store/AppContext.jsx";
-import { Crown, Eye, LibraryBig, LogIn, LogOut, ShieldCheck, Upload } from "lucide-react";
+import { Crown, Eye, LibraryBig, LifeBuoy, LogIn, LogOut, ShieldCheck, Upload } from "lucide-react";
 import universityEmblem from "../assets/images/wollo-university-emblem.jpg";
 
 function BrandMark() {
@@ -25,11 +25,13 @@ export default function TopBar() {
     activeUser,
     isAdmin,
     ownerIsAdmin,
+    ownerIsStaff,
     studentPreview,
     toggleStudentPreview,
     logout,
     goLibrary,
     goAdmin,
+    goSupport,
     goLogin,
     goProfile,
     view,
@@ -64,6 +66,17 @@ export default function TopBar() {
             <Upload size={15} className="me-1 align-text-bottom" aria-hidden="true" />
             Share material
           </button>
+          {session ? (
+            <button
+              type="button"
+              className={`btn btn-sm ${view.name === "support" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={goSupport}
+              title={ownerIsStaff && !studentPreview ? "The support team panel" : "Leave your complaints and problems for the support team"}
+            >
+              <LifeBuoy size={15} className="me-1 align-text-bottom" aria-hidden="true" />
+              {ownerIsStaff && !studentPreview ? "Support panel" : "Need help?"}
+            </button>
+          ) : null}
           {isAdmin ? (
             <button
               type="button"

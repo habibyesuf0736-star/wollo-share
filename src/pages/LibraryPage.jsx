@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ArrowRight, Building2, FolderDown, GraduationCap, LibraryBig, Search, Sparkles, Star, Upload, X } from "lucide-react";
+import { ArrowRight, Building2, FolderDown, GraduationCap, LibraryBig, LifeBuoy, Search, Sparkles, Star, Upload, X } from "lucide-react";
 import { useApp, DEFAULT_TEXTS } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import AdSlot from "../components/AdSlot.jsx";
@@ -70,6 +70,7 @@ export default function LibraryPage() {
     goBrowse,
     goSublist,
     goLogin,
+    goSupport,
     moveCourse,
     deleteCourse,
     updateCourse,
@@ -367,6 +368,9 @@ export default function LibraryPage() {
           <a className="btn btn-sm btn-outline-secondary" href="#ws-colleges">
             <LibraryBig size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Browse by college
           </a>
+          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={goSupport}>
+            <LifeBuoy size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Something wrong? Tell support
+          </button>
           {session && !studentPreview ? null : (
             <button type="button" className="btn btn-sm btn-soft" onClick={goLogin}>
               <Sparkles size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Create free account

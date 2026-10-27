@@ -30,7 +30,7 @@ const TABS = [
 ];
 
 export default function LoginPage() {
-  const { login, register, verifySignup, goLibrary, stats, pageTexts, toast, goAdmin, isAdmin, coursesData } = useApp();
+  const { login, register, verifySignup, goLibrary, stats, pageTexts, toast, goAdmin, goSupport, isAdmin, coursesData } = useApp();
   const [tab, setTab] = useState("signin");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -70,6 +70,7 @@ export default function LoginPage() {
     }
     toast(`Welcome back, ${res.session.name || res.session.email}`);
     if (res.session.role === "admin") goAdmin();
+    else if (res.session.role === "support") goSupport();
     else goLibrary();
   };
 

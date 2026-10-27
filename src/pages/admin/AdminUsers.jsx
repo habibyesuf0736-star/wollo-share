@@ -53,12 +53,13 @@ const PLANS = [
 const EMPTY_STUDENT_FORM = { name: "", email: "", password: "", department: "", phone: "", accountPlan: "unpaid" };
 
 export default function AdminUsers() {
-  const { usersData, saveUser, deleteUser, toast, session, isAdmin, coursesData, refreshFromServer } = useApp();
+  const { usersData, saveUser, deleteUser, setUserRole, toast, session, isAdmin, coursesData, refreshFromServer } = useApp();
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState("all");
   const [editing, setEditing] = useState(null);
   const [editError, setEditError] = useState("");
   const [confirm, setConfirm] = useState({ open: false, userId: null });
+  const [roleBusy, setRoleBusy] = useState("");
   const [profile, setProfile] = useState(null);
   const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
   const [approving, setApproving] = useState("");
@@ -311,6 +312,14 @@ export default function AdminUsers() {
     });
     toast("Account updated.");
     setEditing(null);
+  };
+
+  const toggleStaff = async (user) => {
+    const nextRole = user.role === "support" ? "user" : "support";
+    setRoleBusy(user.id);
+    const res = await setUserRole(user.id, nextRole);
+    setRoleBusy("");
+    if (res && res.ok === false && res.error) toast(res.error);
   };
 
   return (
@@ -696,7 +705,14 @@ export default function AdminUsers() {
             {rows.map((user) => (
               <tr key={user.id}>
                 <td data-label="Student">
-                  <div className="fw-semibold">{user.name}</div>
+                  <div className="fw-semibold">
+                    {user.name}
+                    {user.role === "support" ? (
+                      <span className="badge rounded-pill text-bg-info ms-2 align-middle" style={{ fontSize: 10 }}>
+                        Support team
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="small text-secondary">{user.email}</div>
                 </td>
                 <td className="small" data-label="Department">{user.department || "—"}</td>
@@ -730,6 +746,17 @@ export default function AdminUsers() {
                     <button type="button" className="btn btn-sm btn-soft py-0" onClick={() => { setEditError(""); setEditing({ ...user }); }}>
                       Edit
                     </button>
+                    {user.role !== "admin" ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary py-0"
+                        disabled={roleBusy === user.id}
+                        onClick={() => toggleStaff(user)}
+                        title={user.role === "support" ? "Move back to a normal student account" : "Give this account the support panel"}
+                      >
+                        {roleBusy === user.id ? "Saving…" : user.role === "support" ? "Remove from team" : "Make support"}
+                      </button>
+                    ) : null}
                     <button type="button" className="btn btn-sm btn-coral py-0" onClick={() => setConfirm({ open: true, userId: user.id })}>
                       Delete
                     </button>

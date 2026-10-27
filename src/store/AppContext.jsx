@@ -50,7 +50,10 @@ function viewFromLocation() {
   const hash = String(window.location.hash);
   if (window.location.pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
-  const match = hash.match(/^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics))?/);
+  if (/^#\/support/.test(hash)) return { name: "support" };
+  const match = hash.match(
+    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics|backup))?/
+  );
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
 }
 
@@ -58,8 +61,8 @@ function initialView() {
   return viewFromLocation();
 }
 
-function clearAdminHash() {
-  if (/^#\/admin/.test(window.location.hash)) {
+function clearStaffHash() {
+  if (/^#\/(admin|support)/.test(window.location.hash)) {
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 }
@@ -124,6 +127,10 @@ export function AppProvider({ children }) {
   /* ------------------------------------------------------------ derived auth */
   const isAdmin = Boolean(session && session.role === "admin" && !studentPreview);
   const ownerIsAdmin = Boolean(session && session.role === "admin");
+  // Support staff run their own panel, but they are still library staff: everything an
+  // administrator can review or publish, they can too — except the admin workspace itself.
+  const isStaff = Boolean(session && (session.role === "admin" || session.role === "support") && !studentPreview);
+  const ownerIsStaff = Boolean(session && (session.role === "admin" || session.role === "support"));
   const activeUser = useMemo(() => {
     if (!session) return null;
     return (
@@ -145,7 +152,7 @@ export function AppProvider({ children }) {
       if (studentPreview) return false;
       if (isAdmin) return true;
       if (!session) return false;
-      if (session.role === "admin") return true;
+      if (session.role === "admin" || session.role === "support") return true;
       if (!activeUser) return course.id === "course-evangadi";
       if (activeUser.role === "admin") return true;
       return Array.isArray(activeUser.allowedCourseIds) && activeUser.allowedCourseIds.includes(course.id);
@@ -325,31 +332,38 @@ export function AppProvider({ children }) {
 
   /* ---------------------------------------------------------------- navigation */
   const goLibrary = useCallback(() => {
-    clearAdminHash();
+    clearStaffHash();
     setBrowse({ college: "", courseId: "" });
     setView({ name: "library", courseId: null });
   }, []);
   // Keeps the current college/program selection so "back" from a program's
   // materials returns to the year list instead of the top of the library.
   const goBrowse = useCallback((next) => {
-    clearAdminHash();
+    clearStaffHash();
     if (next) setBrowse((prev) => ({ ...prev, ...next }));
     setView({ name: "library", courseId: null });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
   const goSublist = useCallback((courseId, query = "", year = "") => {
-    clearAdminHash();
+    clearStaffHash();
     setView({ name: "sublist", courseId, query, year });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
   const goLogin = useCallback(() => {
-    clearAdminHash();
+    clearStaffHash();
     setView({ name: "login" });
   }, []);
   const goAdmin = useCallback((tab) => setView({ name: "admin", tab: tab || "" }), []);
   const goProfile = useCallback(() => {
-    clearAdminHash();
+    clearStaffHash();
     setView({ name: "profile" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  // The support panel has its own address so a staff member can bookmark it and a
+  // student can come back to their complaint thread without going through the library.
+  const goSupport = useCallback(() => {
+    setView({ name: "support" });
+    window.history.replaceState(null, "", window.location.pathname + window.location.search + "#/support");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
@@ -360,6 +374,7 @@ export function AppProvider({ children }) {
       const next = viewFromLocation();
       if (next.name === "login") setView({ name: "login" });
       else if (next.name === "profile") setView({ name: "profile" });
+      else if (next.name === "support") setView({ name: "support" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
     };
     window.addEventListener("hashchange", onLocationChange);
@@ -389,7 +404,7 @@ export function AppProvider({ children }) {
     const next = !studentPreview;
     setStudentPreview(next);
     if (next) {
-      clearAdminHash();
+      clearStaffHash();
       setView({ name: "library", courseId: null });
     }
   }, [setStudentPreview, studentPreview]);
@@ -1131,6 +1146,21 @@ export function AppProvider({ children }) {
     [commitUsers, fetchServerState, session, toast]
   );
 
+  // The administrator hands out the support role; the server owns the change so a
+  // wholesale state save can never quietly move a student back into the team.
+  const setUserRole = useCallback(
+    async (userId, role) => {
+      if (!isAdmin) return { ok: false, error: "Only the administrator assigns support roles." };
+      const res = await api.assignUserRole(userId, role, session.authToken);
+      if (res && res.ok !== false && res.user) {
+        setUsersData((prev) => prev.map((u) => (u.id === res.user.id ? { ...u, ...res.user } : u)));
+        toast(res.user.name + (role === "support" ? " is now support staff." : " is back to a student account."));
+      }
+      return res;
+    },
+    [isAdmin, session, toast]
+  );
+
   const logActivity = useCallback(
     (type, detail) => {
       if (!activeUser) return;
@@ -1162,7 +1192,7 @@ export function AppProvider({ children }) {
     return res;
   }, [isAdmin, session, toast]);
 
-  /* ---------------------------------------------------- review queue (admin) */
+  /* ------------------------------------------- review queue (admin & support) */
   // Approving writes straight into the shared database, so the workspace re-reads
   // the library afterwards and drops any queued local edit that would overwrite it.
   const reloadLibraryFromServer = useCallback(async () => {
@@ -1175,7 +1205,7 @@ export function AppProvider({ children }) {
 
   const approveSubmission = useCallback(
     async (submissionId) => {
-      if (!isAdmin) return { ok: false, error: "Admin session required." };
+      if (!isStaff) return { ok: false, error: "Support team session required." };
       hasLocalMutationRef.current = false;
       const res = await api.approveMaterialSubmission(submissionId, {}, session.authToken);
       if (res && res.ok !== false) {
@@ -1184,28 +1214,28 @@ export function AppProvider({ children }) {
       }
       return res;
     },
-    [isAdmin, reloadLibraryFromServer, session, toast]
+    [isStaff, reloadLibraryFromServer, session, toast]
   );
 
   const rejectSubmission = useCallback(
     async (submissionId, reason) => {
-      if (!isAdmin) return { ok: false, error: "Admin session required." };
+      if (!isStaff) return { ok: false, error: "Support team session required." };
       const res = await api.rejectMaterialSubmission(submissionId, reason, session.authToken);
       if (res && res.ok !== false) toast("Submission rejected.");
       return res;
     },
-    [isAdmin, session, toast]
+    [isStaff, session, toast]
   );
 
   const editSubmission = useCallback(
     async (submissionId, patch) => {
-      if (!isAdmin) return { ok: false, error: "Admin session required." };
+      if (!isStaff) return { ok: false, error: "Support team session required." };
       hasLocalMutationRef.current = false;
       const res = await api.updateMaterialSubmission(submissionId, patch, session.authToken);
       if (res && res.ok !== false) await reloadLibraryFromServer();
       return res;
     },
-    [isAdmin, reloadLibraryFromServer, session]
+    [isStaff, reloadLibraryFromServer, session]
   );
 
   /* ------------------------------------------------------------ appearance */
@@ -1264,6 +1294,8 @@ export function AppProvider({ children }) {
     activeUser,
     isAdmin,
     ownerIsAdmin,
+    isStaff,
+    ownerIsStaff,
     canEdit,
     studentPreview,
     setStudentPreview,
@@ -1276,6 +1308,7 @@ export function AppProvider({ children }) {
     goLogin,
     goAdmin,
     goProfile,
+    goSupport,
     login,
     register,
     verifySignup,
@@ -1327,6 +1360,7 @@ export function AppProvider({ children }) {
     commitAppearance,
     saveUser,
     deleteUser,
+    setUserRole,
     logActivity,
     resetDatabase,
     toast,
