@@ -226,3 +226,14 @@ export function initialsOf(name) {
     .join("")
     .toUpperCase();
 }
+
+// Mirrors phoneProblem() in server.ts so the form and the API reject the same numbers.
+export function phoneProblem(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "Your phone number is required — the library team uses it to reach you.";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 9 || digits.length > 15) {
+    return "Enter a valid phone number, e.g. +251 912 345 678.";
+  }
+  return "";
+}

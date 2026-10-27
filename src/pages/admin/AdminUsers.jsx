@@ -4,6 +4,7 @@ import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
 import DepartmentSelect from "../../components/DepartmentSelect.jsx";
 import { approveVerification, closeRecoveryRequest, createStudentAccount, getMailSettings, issueRecoveryCode, listRecoveryRequests, listVerifications, saveMailSettings, sendTestEmail, shareVerificationCode } from "../../lib/api.js";
+import { phoneProblem } from "../../lib/utils.js";
 
 const EMPTY_MAIL_FORM = {
   preference: "auto",
@@ -56,6 +57,7 @@ export default function AdminUsers() {
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState("all");
   const [editing, setEditing] = useState(null);
+  const [editError, setEditError] = useState("");
   const [confirm, setConfirm] = useState({ open: false, userId: null });
   const [profile, setProfile] = useState(null);
   const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
@@ -215,6 +217,11 @@ export default function AdminUsers() {
       setAddError("The starting password needs at least 4 characters.");
       return;
     }
+    const addPhoneError = phoneProblem(addForm.phone);
+    if (addPhoneError) {
+      setAddError(addPhoneError);
+      return;
+    }
     setAdding(true);
     const res = await createStudentAccount(
       {
@@ -289,12 +296,18 @@ export default function AdminUsers() {
 
   const saveEdit = (event) => {
     event.preventDefault();
+    const editPhoneError = phoneProblem(editing.phone);
+    if (editPhoneError) {
+      setEditError(editPhoneError);
+      return;
+    }
+    setEditError("");
     saveUser({
       ...editing,
       name: editing.name.trim(),
       email: editing.email.trim().toLowerCase(),
       department: editing.department || "",
-      phone: editing.phone || ""
+      phone: editing.phone.trim().slice(0, 32)
     });
     toast("Account updated.");
     setEditing(null);
@@ -714,7 +727,7 @@ export default function AdminUsers() {
                     <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={() => setProfile(user)}>
                       Profile
                     </button>
-                    <button type="button" className="btn btn-sm btn-soft py-0" onClick={() => setEditing({ ...user })}>
+                    <button type="button" className="btn btn-sm btn-soft py-0" onClick={() => { setEditError(""); setEditing({ ...user }); }}>
                       Edit
                     </button>
                     <button type="button" className="btn btn-sm btn-coral py-0" onClick={() => setConfirm({ open: true, userId: user.id })}>
@@ -748,8 +761,13 @@ export default function AdminUsers() {
               value={editing.department || ""}
               onChange={(department) => setEditing({ ...editing, department })}
             />
-            <label className="form-label small fw-semibold mb-0">Phone</label>
-            <input className="form-control" value={editing.phone || ""} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+            <label className="form-label small fw-semibold mb-0">Phone number</label>
+            <input className="form-control" inputMode="tel" value={editing.phone || ""} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+            {editError ? (
+              <div className="banner warn" role="alert">
+                <span>{editError}</span>
+              </div>
+            ) : null}
             <div className="d-flex justify-content-end gap-2">
               <button type="button" className="btn btn-outline-secondary" onClick={() => setEditing(null)}>
                 Cancel
@@ -841,8 +859,8 @@ export default function AdminUsers() {
           </div>
           <div className="row g-2">
             <div className="col-12 col-sm-6">
-              <label className="form-label small fw-semibold">Phone</label>
-              <input className="form-control" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
+              <label className="form-label small fw-semibold">Phone number</label>
+              <input className="form-control" inputMode="tel" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
             </div>
             <div className="col-12 col-sm-6">
               <label className="form-label small fw-semibold">Plan</label>
@@ -950,6 +968,7 @@ export default function AdminUsers() {
                 type="button"
                 className="btn btn-outline-secondary"
                 onClick={() => {
+                  setEditError("");
                   setEditing({ ...profile });
                   setProfile(null);
                 }}

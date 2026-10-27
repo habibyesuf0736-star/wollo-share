@@ -3,6 +3,7 @@ import { BadgeCheck, Crown, Download, GraduationCap, Mail, Phone, Save, ShieldCh
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
+import { phoneProblem } from "../lib/utils.js";
 
 const PLAN_LABELS = {
   admin: "Administrator",
@@ -76,6 +77,11 @@ export default function ProfilePage() {
     setError("");
     if (form.name.trim().length < 2) {
       setError("Enter your full name (at least 2 characters).");
+      return;
+    }
+    const phoneError = phoneProblem(form.phone);
+    if (phoneError) {
+      setError(phoneError);
       return;
     }
     setBusy(true);
@@ -185,6 +191,7 @@ export default function ProfilePage() {
                         placeholder="09xx xxx xxx"
                       />
                     </div>
+                    <p className="form-text small mb-0">Required — the library team uses it to reach you.</p>
                   </div>
                   <div className="col-12">
                     <label className="form-label small fw-semibold">Email (used to sign in)</label>

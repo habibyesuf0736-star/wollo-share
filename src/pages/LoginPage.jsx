@@ -21,6 +21,7 @@ import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
 import { completeRecovery, requestRecovery, resendVerificationCode } from "../lib/api.js";
+import { phoneProblem } from "../lib/utils.js";
 
 const TABS = [
   ["signin", "Sign in"],
@@ -77,6 +78,11 @@ export default function LoginPage() {
     }
     if (!signup.department) {
       setError("Select your department / program so we can surface your course materials.");
+      return;
+    }
+    const phoneError = phoneProblem(signup.phone);
+    if (phoneError) {
+      setError(phoneError);
       return;
     }
     setBusy(true);
@@ -401,11 +407,12 @@ export default function LoginPage() {
                   </div>
                 </div>
                 <div className="col-12 col-sm-6">
-                  <label className="form-label small fw-semibold">Phone (optional)</label>
+                  <label className="form-label small fw-semibold">Phone number</label>
                   <div className="ws-field-icon">
                     <Phone size={16} aria-hidden="true" />
-                    <input className="form-control" value={signup.phone} onChange={(e) => setSignup({ ...signup, phone: e.target.value })} placeholder="+251 …" />
+                    <input className="form-control" inputMode="tel" value={signup.phone} onChange={(e) => setSignup({ ...signup, phone: e.target.value })} placeholder="+251 …" />
                   </div>
+                  <p className="form-text small mb-0">Required — the library team uses it to reach you.</p>
                 </div>
                 <div className="col-12">
                   <label className="form-label small fw-semibold" htmlFor="signupDepartment">

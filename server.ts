@@ -988,6 +988,17 @@ function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
   return String(course.id || "") === "course-evangadi" || /evangadi/i.test(String(course.name || ""));
 }
 
+// The team reaches students by phone, so an account without a usable one is incomplete. Returns "" when the number is acceptable.
+function phoneProblem(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "Your phone number is required — the library team uses it to reach you.";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 9 || digits.length > 15) {
+    return "Enter a valid phone number, e.g. +251 912 345 678.";
+  }
+  return "";
+}
+
 function loadDatabase(): DatabaseSchema {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -1429,6 +1440,11 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: "Enter your full name." });
       return;
     }
+    const phoneError = phoneProblem(phone);
+    if (phoneError) {
+      res.status(400).json({ ok: false, error: phoneError });
+      return;
+    }
     user.name = name.slice(0, 80);
     user.department = department.slice(0, 80) || user.department;
     user.phone = phone.slice(0, 32);
@@ -1556,6 +1572,11 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: "The starting password needs at least 4 characters." });
       return;
     }
+    const phoneError = phoneProblem(req.body?.phone);
+    if (phoneError) {
+      res.status(400).json({ ok: false, error: phoneError });
+      return;
+    }
     if (dbState.usersData.some((user) => user.email.toLowerCase() === email)) {
       res.status(409).json({ ok: false, error: "An account already exists for this email." });
       return;
@@ -1568,7 +1589,7 @@ export async function createApp() {
       password,
       role: "user",
       department: String(req.body?.department || "").trim() || undefined,
-      phone: String(req.body?.phone || "").trim() || undefined,
+      phone: String(req.body?.phone || "").trim().slice(0, 32),
       accountPlan: plan,
       paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
       downloadOnlyAccount: false,
@@ -2173,6 +2194,11 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: "Password must be at least 4 characters long." });
       return;
     }
+    const phoneError = phoneProblem(phone);
+    if (phoneError) {
+      res.status(400).json({ ok: false, error: phoneError });
+      return;
+    }
     if (dbState.usersData.some((user) => user.email.toLowerCase() === email)) {
       res.status(409).json({ ok: false, error: "An account already exists for this email. Sign in instead." });
       return;
@@ -2185,7 +2211,7 @@ export async function createApp() {
       password,
       role: "user",
       department,
-      phone: phone || undefined,
+      phone: phone.slice(0, 32),
       accountPlan: plan,
       paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
       downloadOnlyAccount: false,
