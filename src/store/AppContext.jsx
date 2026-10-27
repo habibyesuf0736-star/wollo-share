@@ -499,7 +499,6 @@ export function AppProvider({ children }) {
       if (!res || res.ok !== true || !res.session)
         return {
           ok: false,
-          needsVerification: Boolean(res && res.needsVerification),
           needsRecovery: Boolean(res && res.needsRecovery),
           email: res && res.email,
           error: (res && res.error) || "Sign in failed."
@@ -512,7 +511,7 @@ export function AppProvider({ children }) {
         if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
         if (state.userRatings) setUserRatings((prev) => ({ ...prev, ...state.userRatings }));
       }
-      return { ok: true, session: saved };
+      return { ok: true, session: saved, verifiedNow: Boolean(res.verifiedNow), message: res.message || "" };
     },
     [storeSession]
   );

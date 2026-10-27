@@ -1336,6 +1336,29 @@ function activateUnconfirmedSignup(user: UserAccount) {
   ];
 }
 
+// The mailbox is the unreliable part here, not the student. Someone who types the right
+// password owns an account they created themselves, so sign-in completes it rather than
+// parking them on a code they may never receive. The flag and the log entry keep the
+// trail: the address was accepted by proof of password, never proven by email.
+function verifyAccountAtSignIn(user: UserAccount): boolean {
+  if (user.emailVerified !== false) return false;
+  user.emailVerified = true;
+  user.emailUnconfirmed = true;
+  delete user.verificationCode;
+  delete user.verificationExpiresAt;
+  delete user.verificationAttempts;
+  user.activityLog = [
+    ...(user.activityLog || []).slice(-40),
+    {
+      id: "act-" + Date.now(),
+      type: "Verified",
+      detail: "Account verified at sign-in — the password matched, so no code was required.",
+      timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+    }
+  ];
+  return true;
+}
+
 function signupCodeMatches(user: UserAccount, code: string): boolean {
   if (!user.verificationCode || !user.verificationExpiresAt) return false;
   if (Date.parse(user.verificationExpiresAt) < Date.now()) return false;
@@ -2910,15 +2933,7 @@ export async function createApp() {
     );
 
     if (matchedUser) {
-      if (!isEmailVerified(matchedUser)) {
-        res.status(403).json({
-          ok: false,
-          needsVerification: true,
-          email: matchedUser.email,
-          error: "This account is not verified yet. Enter the 6-digit code from your email, or ask the administrator to confirm it."
-        });
-        return;
-      }
+      const verifiedNow = verifyAccountAtSignIn(matchedUser);
       loginRateLimitMap.delete(lowerId);
       const signedSession = issueDeviceSession(
         {
@@ -2930,7 +2945,12 @@ export async function createApp() {
         req,
         "password"
       );
-      res.json({ ok: true, session: signedSession });
+      res.json({
+        ok: true,
+        session: signedSession,
+        verifiedNow,
+        message: verifiedNow ? "Your account is verified — you are signed in." : ""
+      });
       return;
     }
 

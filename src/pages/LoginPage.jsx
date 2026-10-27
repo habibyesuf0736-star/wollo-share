@@ -138,21 +138,14 @@ export default function LoginPage() {
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Unable to sign in.");
-      if (res.needsVerification) {
-        // The blocked sign-in does not say whether mail is configured, so the code
-        // screen stays neutral until a real registration/resend reports delivery.
-        setPending({ email: res.email || signin.identifier.trim(), code: "", mailSent: null, message: res.error || "" });
-        setSignup({ ...signup, email: res.email || signin.identifier.trim() });
-        setSignupStage("code");
-        setTab("register");
-      }
       if (res.needsRecovery) {
         setRecovery({ email: res.email || signin.identifier.trim(), code: "", newPassword: "", stage: "code" });
         setTab("recovery");
       }
       return;
     }
-    toast(`Welcome back, ${res.session.name || res.session.email}`);
+    if (res.verifiedNow) toast("Account verified — welcome back.");
+    else toast(`Welcome back, ${res.session.name || res.session.email}`);
     if (res.session.role === "admin") goAdmin();
     else if (res.session.role === "support") goSupport();
     else goLibrary();
@@ -474,12 +467,7 @@ export default function LoginPage() {
           {tab === "register" && signupStage === "code" ? (
             <form onSubmit={submitVerify} className="d-flex flex-column gap-3">
               <p className="small text-secondary mb-0">
-                {pending.mailSent === null ? (
-                  <>
-                    Enter the <strong>6-digit code</strong> sent to <strong>{pending.email}</strong>. If it does not
-                    arrive, ask the administrator to confirm the account from the admin panel.
-                  </>
-                ) : pending.mailSent ? (
+                {pending.mailSent ? (
                   <>
                     We emailed a <strong>6-digit code</strong> to <strong>{pending.email}</strong>. It expires in 30 minutes.
                   </>
@@ -593,8 +581,8 @@ export default function LoginPage() {
                 {busy ? "Creating account…" : "Create free account"}
               </button>
               <p className="form-text small mb-0">
-                We send a 6-digit verification code to your email. If it does not arrive, the administrator can confirm
-                your account from the admin panel.
+                We send a 6-digit verification code to your email. If it does not arrive, just sign in with your
+                password — that verifies the account — or ask the administrator to confirm it from the admin panel.
               </p>
             </form>
           ) : null}

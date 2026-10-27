@@ -14,7 +14,7 @@ async function request(url, options = {}) {
   }
   if (!res.ok && (!payload || payload.ok !== true)) {
     const message = (payload && payload.error) || `Request failed (${res.status})`;
-    // Keep server flags such as needsVerification so a screen can react to them.
+    // Keep server flags such as needsRecovery so a screen can react to them.
     return { ...(payload || {}), ok: false, status: res.status, error: message };
   }
   return payload || { ok: true };
