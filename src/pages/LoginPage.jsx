@@ -22,6 +22,7 @@ import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
 import { completeRecovery, requestRecovery, resendVerificationCode } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
+import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 
 const TABS = [
   ["signin", "Sign in"],
@@ -30,14 +31,14 @@ const TABS = [
 ];
 
 export default function LoginPage() {
-  const { login, register, verifySignup, goLibrary, stats, pageTexts, toast, goAdmin, goSupport, isAdmin, coursesData } = useApp();
+  const { login, register, verifySignup, adoptSession, goLibrary, stats, pageTexts, toast, goAdmin, goSupport, isAdmin, coursesData } = useApp();
   const [tab, setTab] = useState("signin");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [signin, setSignin] = useState({ identifier: "", password: "" });
-  const [signup, setSignup] = useState({ name: "", email: "", password: "", department: "", phone: "" });
+  const [signup, setSignup] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
   const [signupStage, setSignupStage] = useState("form");
   const [pending, setPending] = useState({ email: "", code: "", mailSent: false, message: "" });
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
@@ -110,6 +111,7 @@ export default function LoginPage() {
       return;
     }
     toast("Account created — you are signed in.");
+    if (res.message && !res.mailSent) setNotice(res.message);
     goLibrary();
   };
 
@@ -142,6 +144,16 @@ export default function LoginPage() {
     setBusy(false);
     if (!res || res.ok !== true) {
       setError((res && res.error) || "Could not resend the code.");
+      return;
+    }
+    if (res.session) {
+      // Email delivery is refused by the provider, so the server opened the account as an
+      // ordinary student instead of leaving the visitor stuck on this screen.
+      adoptSession(res.session);
+      setSignupStage("form");
+      setPending({ email: "", code: "", mailSent: false, message: "" });
+      toast("Signed in — your email could not be confirmed, but the library is open.");
+      goLibrary();
       return;
     }
     setPending({ ...pending, mailSent: Boolean(res.mailSent) });

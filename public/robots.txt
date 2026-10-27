@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# The staff workspace is not for search results.
+Disallow: /api/
+Disallow: /*#/admin
+Disallow: /*#/profile
+
+Sitemap: https://wollo-share.vercel.app/sitemap.xml

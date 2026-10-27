@@ -712,6 +712,11 @@ export default function AdminUsers() {
                         Support team
                       </span>
                     ) : null}
+                    {user.emailUnconfirmed ? (
+                      <span className="badge rounded-pill text-bg-warning ms-2 align-middle" style={{ fontSize: 10 }}>
+                        Email unconfirmed
+                      </span>
+                    ) : null}
                   </div>
                   <div className="small text-secondary">{user.email}</div>
                 </td>

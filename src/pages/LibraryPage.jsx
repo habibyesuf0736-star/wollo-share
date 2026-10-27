@@ -9,7 +9,7 @@ import MaterialRow from "../components/MaterialRow.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import CourseFormModal from "../components/CourseFormModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
-import { matchDepartmentPrograms, normalizeDepartment } from "../lib/departments.js";
+import { matchDepartmentPrograms, normalizeDepartment, isProgramCourse } from "../lib/departments.js";
 import {
   courseAverageRating,
   doesDocumentMatchQuery,
@@ -153,7 +153,9 @@ export default function LibraryPage() {
     const saved = String((activeUser && activeUser.department) || "").trim();
     if (!saved || !session || studentPreview || session.role === "admin") return null;
     const programs = matchDepartmentPrograms(accessible, saved);
-    const program = programs[0] || null;
+    // A freshman department matches the whole Year 1 block, so there is no single program
+    // to open — the panel jumps to the college instead.
+    const program = programs.find(isProgramCourse) || null;
     const programIds = new Set(programs.map((course) => course.id));
     const programNames = new Set(programs.map((course) => normalizeDepartment(course.name)));
     const needle = normalizeDepartment(saved);
@@ -167,7 +169,7 @@ export default function LibraryPage() {
         if (fromProgram || taggedMine) materials.push({ course, mat });
       });
     });
-    const college = program ? program.college : "";
+    const college = program ? program.college : (programs[0] && programs[0].college) || "";
     const others = accessible.filter((course) => !programIds.has(course.id));
     const sameCollege = college ? others.filter((course) => course.college === college) : [];
     const suggestions = [...(sameCollege.length ? sameCollege : others)]

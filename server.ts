@@ -704,6 +704,8 @@ interface UserAccount {
   videoProgress?: Record<string, { seconds: number; duration: number; percent: number; completed: boolean; updatedAt: string }>;
   // Accounts created before email verification existed have no flag at all and stay valid.
   emailVerified?: boolean;
+  // Set when the code email could not be delivered and the account was opened anyway.
+  emailUnconfirmed?: boolean;
   verificationCode?: string;
   verificationExpiresAt?: string;
   verificationSentAt?: string;
@@ -1198,6 +1200,26 @@ function issueSignupCode(user: UserAccount): { code: string; mailSent: boolean }
   return { code, mailSent: false };
 }
 
+// The mail provider can refuse the server's IP address, and a student must not lose their
+// registration over that: the account opens as an ordinary student and keeps a flag so the
+// administrator can see the address was never confirmed.
+function activateUnconfirmedSignup(user: UserAccount) {
+  user.emailVerified = true;
+  user.emailUnconfirmed = true;
+  delete user.verificationCode;
+  delete user.verificationExpiresAt;
+  delete user.verificationAttempts;
+  user.activityLog = [
+    ...(user.activityLog || []),
+    {
+      id: "act-" + Date.now(),
+      type: "Activated",
+      detail: "Verification email could not be delivered, so the account was activated without it.",
+      timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+    }
+  ];
+}
+
 function signupCodeMatches(user: UserAccount, code: string): boolean {
   if (!user.verificationCode || !user.verificationExpiresAt) return false;
   if (Date.parse(user.verificationExpiresAt) < Date.now()) return false;
@@ -1411,6 +1433,42 @@ export async function createApp() {
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
     });
+  });
+
+  // Every course page listed for search engines. Built from the live catalog so a new
+  // program is indexed without touching a file, and the paid Evangadi pack stays out.
+  app.get("/sitemap.xml", (_req, res) => {
+    const origin = `${String(_req.headers["x-forwarded-proto"] || "https").split(",")[0]}://${String(_req.headers.host || "wollo-share.vercel.app")}`;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const slug = (value: string) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 70);
+    const urls: Array<{ path: string; priority: string; changefreq: string }> = [
+      { path: "/", priority: "1.0", changefreq: "daily" },
+      { path: "/login", priority: "0.6", changefreq: "monthly" },
+      { path: "/support", priority: "0.5", changefreq: "monthly" }
+    ];
+    for (const course of dbState.coursesData) {
+      if (isEvangadiCourse(course)) continue;
+      const name = slug(course.name);
+      if (!name) continue;
+      urls.push({ path: `/c/${encodeURIComponent(name)}`, priority: "0.8", changefreq: "weekly" });
+    }
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
+        .map(
+          (entry) =>
+            `  <url><loc>${escape(origin + entry.path)}</loc><lastmod>${stamp}</lastmod><changefreq>${entry.changefreq}</changefreq><priority>${entry.priority}</priority></url>`
+        )
+        .join("\n")}\n</urlset>\n`
+    );
   });
 
   app.put("/api/state", (req, res) => {
@@ -2292,7 +2350,8 @@ export async function createApp() {
     const name = String(req.body?.name || "").trim() || "Student Learner";
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = String(req.body?.password || "").trim();
-    const department = String(req.body?.department || "Software Engineering").trim();
+    // New students are Year 1 until they say otherwise, matching the signup form's default.
+    const department = String(req.body?.department || "Freshman (Year 1)").trim();
     const phone = String(req.body?.phone || "").trim();
     const plan = String(req.body?.accountPlan || "unpaid").trim();
     const registeredAt = new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -2356,15 +2415,29 @@ export async function createApp() {
     const { code } = issueSignupCode(user);
     // Awaited: a serverless instance freezes as soon as the response is flushed.
     const delivery = await sendSignupCode(user, code);
+    if (delivery.ok) {
+      saveDatabase(dbState);
+      res.json({
+        ok: true,
+        pendingVerification: true,
+        mailSent: true,
+        email: user.email,
+        message: `We emailed a 6-digit code to ${user.email}. Enter it below to activate the account.`
+      });
+      return;
+    }
+    // The provider can refuse the server's IP address, and a student must not lose their
+    // registration over that. Activate the account as an ordinary student — never staff.
+    activateUnconfirmedSignup(user);
     saveDatabase(dbState);
     res.json({
       ok: true,
-      pendingVerification: true,
+      pendingVerification: false,
+      mailSent: false,
       email: user.email,
-      mailSent: delivery.ok,
-      message: delivery.ok
-        ? `We emailed a 6-digit code to ${user.email}. Enter it below to activate the account.`
-        : "Your account was created, but the verification email could not be sent. Ask the administrator to confirm your account from the admin panel."
+      user: safeUserAccount(user),
+      session: createSignedSessionToken({ id: user.id, name: user.name, email: user.email, role: user.role }),
+      message: "The verification email could not be delivered, so your account was opened as a normal student account."
     });
   });
   app.post("/api/auth/verify-email", async (req, res) => {
@@ -2383,13 +2456,19 @@ export async function createApp() {
       }
       const { code: fresh } = issueSignupCode(target);
       const delivery = await sendSignupCode(target, fresh);
+      if (delivery.ok) {
+        saveDatabase(dbState);
+        res.json({ ok: true, mailSent: true, message: `A new 6-digit code was emailed to ${target.email}.` });
+        return;
+      }
+      activateUnconfirmedSignup(target);
       saveDatabase(dbState);
       res.json({
         ok: true,
-        mailSent: delivery.ok,
-        message: delivery.ok
-          ? `A new 6-digit code was emailed to ${target.email}.`
-          : "The email could not be sent. Ask the administrator to confirm your account."
+        mailSent: false,
+        user: safeUserAccount(target),
+        session: createSignedSessionToken({ id: target.id, name: target.name, email: target.email, role: target.role }),
+        message: "The email still could not be delivered, so your account was opened as a normal student account."
       });
       return;
     }

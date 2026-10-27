@@ -31,8 +31,17 @@ export function isProgramCourse(course) {
   return String((course && course.id) || "").startsWith("prog-");
 }
 
+// Most new students start in Year 1, so the signup forms default to this department and it
+// matches every Common Freshman course instead of one program.
+export const FRESHMAN_DEPARTMENT = "Freshman (Year 1)";
+
+export function isFreshmanDepartment(value) {
+  const needle = normalizeDepartment(value);
+  return needle.includes("freshman") || /(^| )year ?1( |$)/.test(needle);
+}
+
 export function buildDepartmentGroups(coursesData) {
-  const groups = new Map();
+  const groups = new Map([["Common Freshman Courses", [FRESHMAN_DEPARTMENT]]]);
   (coursesData || []).forEach((course) => {
     if (!isProgramCourse(course)) return;
     const college = course.college || "Other programs";
@@ -42,13 +51,21 @@ export function buildDepartmentGroups(coursesData) {
   return Array.from(groups, ([college, programs]) => ({
     college,
     programs: programs.sort((a, b) => a.localeCompare(b))
-  })).sort((a, b) => a.college.localeCompare(b.college));
+  })).sort((a, b) => {
+    // The freshman group always leads; students pick out of it only if they are in a program.
+    if (a.college === "Common Freshman Courses") return -1;
+    if (b.college === "Common Freshman Courses") return 1;
+    return a.college.localeCompare(b.college);
+  });
 }
 
 // Programs that belong to the saved department, best match first.
 export function matchDepartmentPrograms(coursesData, department) {
   const needle = normalizeDepartment(department);
   if (!needle) return [];
+  if (isFreshmanDepartment(needle)) {
+    return (coursesData || []).filter((course) => normalizeDepartment(course.college) === "common freshman courses");
+  }
   const programs = (coursesData || []).filter(isProgramCourse);
   const exact = programs.filter((course) => normalizeDepartment(course.name) === needle);
   if (exact.length) return exact;

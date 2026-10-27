@@ -2,13 +2,16 @@ import React, { useState } from "react";
 import Modal from "./Modal.jsx";
 import DepartmentSelect from "./DepartmentSelect.jsx";
 import { useApp } from "../store/AppContext.jsx";
+import { phoneProblem } from "../lib/utils.js";
+import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 
 export default function QuickRegisterModal() {
   const { gate, closeGate, setGate, register, goLogin, toast, coursesData } = useApp();
   const open = Boolean(gate && gate.type === "register");
-  const [form, setForm] = useState({ name: "", email: "", password: "", department: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   if (!open) return null;
 
@@ -22,17 +25,28 @@ export default function QuickRegisterModal() {
       setError("Select your department / program so we can show your course materials first.");
       return;
     }
+    const phoneError = phoneProblem(form.phone);
+    if (phoneError) {
+      setError(phoneError);
+      return;
+    }
     setBusy(true);
     setError("");
+    setNotice("");
     const res = await register({
       name: form.name.trim() || "Wollo Student",
       email: form.email.trim(),
       password: form.password,
-      department: form.department
+      department: form.department,
+      phone: form.phone.trim()
     });
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Could not create the account.");
+      return;
+    }
+    if (res.pendingVerification) {
+      setNotice(res.message || "We emailed a 6-digit code to your address. Sign in and enter it to finish.");
       return;
     }
     toast(`Account created — welcome, ${res.user ? res.user.name : "student"}!`);
@@ -67,15 +81,35 @@ export default function QuickRegisterModal() {
           value={form.department}
           onChange={(department) => setForm({ ...form, department })}
         />
-        {error ? <p className="text-danger small mb-0">{error}</p> : null}
-        <div className="d-flex justify-content-between gap-2">
-          <button type="button" className="btn btn-outline-secondary" onClick={() => { closeGate(); goLogin(); }}>
-            I already have an account
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? "Creating…" : "Create account"}
-          </button>
+        <div>
+          <input
+            className="form-control"
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="Phone number (e.g. 0912 345 678)"
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+          <p className="form-text small mb-0">Required — the library team uses it to reach you about your uploads.</p>
         </div>
+        {error ? <p className="text-danger small mb-0">{error}</p> : null}
+        {notice ? (
+          <div className="d-flex flex-column gap-2">
+            <p className="small mb-0">{notice}</p>
+            <button type="button" className="btn btn-primary" onClick={() => { closeGate(); goLogin(); }}>
+              Continue to sign in
+            </button>
+          </div>
+        ) : (
+          <div className="d-flex justify-content-between gap-2">
+            <button type="button" className="btn btn-outline-secondary" onClick={() => { closeGate(); goLogin(); }}>
+              I already have an account
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "Creating…" : "Create account"}
+            </button>
+          </div>
+        )}
       </form>
     </Modal>
   );

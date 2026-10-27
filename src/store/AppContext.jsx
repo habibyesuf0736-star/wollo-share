@@ -12,6 +12,7 @@ import {
   writeTabJson,
   removeTabKey
 } from "../lib/storage.js";
+import { LIBRARY_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
 
 const AppContext = createContext(null);
 
@@ -48,9 +49,12 @@ function readStoredSession() {
 // opens the sign-in screen so a refresh or a shared link does not drop back into the library.
 function viewFromLocation() {
   const hash = String(window.location.hash);
-  if (window.location.pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
+  const pathname = String(window.location.pathname);
+  const coursePath = pathname.match(/^\/c\/([^/]+)/);
+  if (coursePath) return { name: "sublist", courseId: null, courseSlug: decodeURIComponent(coursePath[1]) };
+  if (pathname === "/support" || /^#\/support/.test(hash)) return { name: "support" };
+  if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
-  if (/^#\/support/.test(hash)) return { name: "support" };
   const match = hash.match(
     /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics|backup))?/
   );
@@ -331,10 +335,17 @@ export function AppProvider({ children }) {
   }, []);
 
   /* ---------------------------------------------------------------- navigation */
+  // A course gets a real address (/c/<slug>) so a shared or indexed link opens that
+  // program's files instead of dropping the visitor back at the top of the library.
+  const setCoursePath = (slug) => {
+    const next = slug ? `/c/${slug}` : "/";
+    if (window.location.pathname !== next) window.history.pushState(null, "", next);
+  };
   const goLibrary = useCallback(() => {
     clearStaffHash();
     setBrowse({ college: "", courseId: "" });
     setView({ name: "library", courseId: null });
+    if (window.location.pathname !== "/") window.history.pushState(null, "", "/");
   }, []);
   // Keeps the current college/program selection so "back" from a program's
   // materials returns to the year list instead of the top of the library.
@@ -342,16 +353,23 @@ export function AppProvider({ children }) {
     clearStaffHash();
     if (next) setBrowse((prev) => ({ ...prev, ...next }));
     setView({ name: "library", courseId: null });
+    if (window.location.pathname !== "/") window.history.pushState(null, "", "/");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
-  const goSublist = useCallback((courseId, query = "", year = "") => {
-    clearStaffHash();
-    setView({ name: "sublist", courseId, query, year });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const goSublist = useCallback(
+    (courseId, query = "", year = "") => {
+      clearStaffHash();
+      setView({ name: "sublist", courseId, query, year });
+      const course = coursesData.find((item) => item.id === courseId);
+      setCoursePath(course ? courseSlug(course) : "");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    [coursesData]
+  );
   const goLogin = useCallback(() => {
     clearStaffHash();
     setView({ name: "login" });
+    if (window.location.pathname !== "/login") window.history.pushState(null, "", "/login");
   }, []);
   const goAdmin = useCallback((tab) => setView({ name: "admin", tab: tab || "" }), []);
   const goProfile = useCallback(() => {
@@ -363,12 +381,54 @@ export function AppProvider({ children }) {
   // student can come back to their complaint thread without going through the library.
   const goSupport = useCallback(() => {
     setView({ name: "support" });
-    window.history.replaceState(null, "", window.location.pathname + window.location.search + "#/support");
+    if (window.location.pathname !== "/support") window.history.pushState(null, "", "/support");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Editing or pasting an address like "#/admin/materials" or "#/login" routes the running
-  // app too, not just a fresh page load.
+  // A pasted or crawled /c/<slug> address arrives before the catalog is loaded, so the
+  // slug is matched to a course as soon as the library data lands.
+  useEffect(() => {
+    if (view.name !== "sublist" || view.courseId || !view.courseSlug) return;
+    const course = findCourseBySlug(coursesData, view.courseSlug);
+    if (course) setView({ name: "sublist", courseId: course.id, query: "", year: "" });
+    else setView({ name: "library", courseId: null });
+  }, [view, coursesData]);
+
+  // Titles and descriptions follow the page so a crawler and a browser tab both say
+  // what this screen holds.
+  useEffect(() => {
+    if (view.name === "sublist") {
+      const course = coursesData.find((item) => item.id === view.courseId);
+      if (course) {
+        applyPageSeo(seoForCourse(course));
+        return;
+      }
+    }
+    if (view.name === "login") {
+      applyPageSeo({
+        path: "/login",
+        title: `Sign in or create a free student account | ${SITE_NAME} — Wollo University materials`,
+        description: "Register free to download Wollo University lecture notes, slide decks and past exam PDFs shared by other students."
+      });
+      return;
+    }
+    if (view.name === "support") {
+      applyPageSeo({
+        path: "/support",
+        title: `Help & complaints — Wollo Share support team | ${SITE_NAME}`,
+        description: "Report a broken file, a missing course document or a download problem to the Wollo Share support team and follow the answer in your own thread."
+      });
+      return;
+    }
+    if (view.name === "profile" || view.name === "admin") {
+      applyPageSeo({ ...LIBRARY_SEO, noindex: true });
+      return;
+    }
+    applyPageSeo(LIBRARY_SEO);
+  }, [view, coursesData]);
+
+  // Editing or pasting an address like "#/admin/materials" or "/c/math1011" routes the
+  // running app too, not just a fresh page load.
   useEffect(() => {
     const onLocationChange = () => {
       const next = viewFromLocation();
@@ -376,6 +436,8 @@ export function AppProvider({ children }) {
       else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "support") setView({ name: "support" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
+      else if (next.name === "sublist") setView({ name: "sublist", courseId: null, courseSlug: next.courseSlug, query: "", year: "" });
+      else setView({ name: "library", courseId: null });
     };
     window.addEventListener("hashchange", onLocationChange);
     window.addEventListener("popstate", onLocationChange);
@@ -449,7 +511,7 @@ export function AppProvider({ children }) {
       if (res.session) {
         storeSession(res.session);
         if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
-        return { ok: true, user: res.user, signedIn: true };
+        return { ok: true, user: res.user, signedIn: true, mailSent: Boolean(res.mailSent), message: res.message || "" };
       }
       // No session until the 6-digit code is confirmed (or the admin approves it).
       return {
@@ -1311,6 +1373,7 @@ export function AppProvider({ children }) {
     goSupport,
     login,
     register,
+    adoptSession: storeSession,
     verifySignup,
     saveProfile,
     logout,
