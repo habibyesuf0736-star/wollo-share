@@ -152,6 +152,40 @@ export function readSmallFileAsDataUrl(file, limitBytes = 250 * 1024) {
   });
 }
 
+const AVATAR_PIXELS = 256;
+
+// A phone photo arrives at several megabytes, but the profile only ever draws a small
+// square — so the browser crops and compresses it here instead of pasting the original
+// into the one shared state row that also carries the whole library.
+export function readAvatarDataUrl(file) {
+  if (!file) return Promise.reject(new Error("Choose a photo first."));
+  if (!/^image\//.test(file.type || "")) return Promise.reject(new Error("That file is not a photo."));
+  if (file.size > 12 * 1024 * 1024) return Promise.reject(new Error("That photo is larger than 12 MB."));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read that photo."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("That photo could not be opened."));
+      image.onload = () => {
+        const side = Math.min(image.naturalWidth || AVATAR_PIXELS, image.naturalHeight || AVATAR_PIXELS);
+        const sourceX = ((image.naturalWidth || side) - side) / 2;
+        const sourceY = ((image.naturalHeight || side) - side) / 2;
+        const canvas = document.createElement("canvas");
+        canvas.width = AVATAR_PIXELS;
+        canvas.height = AVATAR_PIXELS;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, AVATAR_PIXELS, AVATAR_PIXELS);
+        context.drawImage(image, sourceX, sourceY, side, side, 0, 0, AVATAR_PIXELS, AVATAR_PIXELS);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function typeFromFileName(fileName) {
   const ext = String(fileName || "").split(".").pop().toLowerCase();
   if (ext === "pdf") return "PDF";

@@ -89,6 +89,22 @@ export function updateProfile(details, session) {
   return request("/api/profile", { method: "PATCH", headers: authHeaders(session), body: JSON.stringify(details) });
 }
 
+export function listLoginDevices(session) {
+  return request("/api/account/devices", { headers: authHeaders(session) });
+}
+
+export function revokeLoginDevice(deviceId, session) {
+  return request("/api/account/devices/revoke", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ deviceId })
+  });
+}
+
+export function signOutOtherDevices(session) {
+  return request("/api/account/devices/sign-out-all", { method: "POST", headers: authHeaders(session), body: "{}" });
+}
+
 export function listVerifications(session) {
   return request("/api/admin/verifications", { headers: authHeaders(session) });
 }

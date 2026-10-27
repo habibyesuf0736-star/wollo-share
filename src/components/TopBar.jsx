@@ -109,9 +109,15 @@ export default function TopBar() {
                 title="Open your profile"
                 aria-current={view.name === "profile" ? "page" : undefined}
               >
-                <span className="ws-user-avatar" aria-hidden="true">
-                  {initials(displayName)}
-                </span>
+                {activeUser?.avatarUrl ? (
+                  <span className="ws-user-avatar has-photo">
+                    <img src={activeUser.avatarUrl} alt="" />
+                  </span>
+                ) : (
+                  <span className="ws-user-avatar" aria-hidden="true">
+                    {initials(displayName)}
+                  </span>
+                )}
                 <span className="d-none d-sm-block text-start">
                   <span className="d-block ws-user-name">
                     {displayName}

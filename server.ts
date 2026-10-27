@@ -106,18 +106,78 @@ function decryptVaultSecret(vaultToken: string, contextKey = "default"): string 
   return outBytes.toString("utf8");
 }
 
-function createSignedSessionToken(session: { id: string; name: string; email: string; role: string }) {
+function createSignedSessionToken(session: { id: string; name: string; email: string; role: string }, deviceId = "") {
   const issuedAt = Date.now();
   const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
-  const payloadStr = `${session.id}|${session.email}|${session.role}|${issuedAt}|${expiresAt}`;
+  const serial = deviceId || crypto.randomBytes(16).toString("base64url");
+  const payloadStr = `${session.id}|${session.email}|${session.role}|${issuedAt}|${expiresAt}|${serial}`;
   const payloadHex = utf8ToHex(payloadStr);
   const sig = crypto.createHmac("sha256", SESSION_HMAC_SECRET).update(payloadHex).digest("hex").slice(0, 32);
   return {
     ...session,
     issuedAt,
     expiresAt,
+    deviceId: serial,
     authToken: `wstok.${payloadHex}.${sig}`
   };
+}
+
+const DEVICE_BROWSER: [RegExp, string][] = [
+  [/Edg\//, "Edge"],
+  [/OPR\/|Opera/, "Opera"],
+  [/SamsungBrowser/, "Samsung Internet"],
+  [/Firefox/, "Firefox"],
+  [/Chrome/, "Chrome"],
+  [/Safari/, "Safari"]
+];
+const DEVICE_OS: [RegExp, string][] = [
+  [/Windows/, "Windows"],
+  [/Android/, "Android"],
+  [/iPhone|iPad|iPod/, "iOS"],
+  [/Mac OS X/, "macOS"],
+  [/CrOS/, "Chromebook"],
+  [/Linux/, "Linux"]
+];
+
+function describeDevice(req: express.Request): string {
+  const agent = String(req.get("user-agent") || "");
+  const browser = DEVICE_BROWSER.find(([test]) => test.test(agent))?.[1] || "a browser";
+  const system = DEVICE_OS.find(([test]) => test.test(agent))?.[1] || "an unknown system";
+  return `${browser} on ${system}`;
+}
+
+// Minting the token and recording the screen behind it have to happen together, or a
+// sign-in path can hand out a session the account is never able to see or revoke.
+function issueDeviceSession(
+  account: { id: string; name: string; email: string; role: string },
+  req: express.Request,
+  method: LoginDevice["method"],
+  label?: string
+) {
+  const session = createSignedSessionToken(account);
+  const now = Date.now();
+  dbState.loginDevices = dbState.loginDevices.filter((device) => device.expiresAt > now);
+  dbState.loginDevices.push({
+    id: session.deviceId,
+    accountId: account.id,
+    email: account.email,
+    name: account.name || "",
+    role: account.role,
+    label: String(label || describeDevice(req)).replace(/\s+/g, " ").trim().slice(0, 80),
+    method,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: session.expiresAt
+  });
+  // One account should not be able to grow the shared row by signing in forever.
+  const mine = dbState.loginDevices.filter((device) => device.accountId === account.id);
+  if (mine.length > 12) {
+    const keep = new Set(mine.slice(-12).map((device) => device.id));
+    dbState.loginDevices = dbState.loginDevices.filter(
+      (device) => device.accountId !== account.id || keep.has(device.id)
+    );
+  }
+  saveDatabase(dbState);
+  return session;
 }
 
 function verifyRequestSession(req: express.Request) {
@@ -133,20 +193,27 @@ function verifyRequestSession(req: express.Request) {
   if (!/^[a-f\d]{32}$/i.test(signature)) return null;
   if (!crypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expectedSignature, "hex"))) return null;
 
-  const [id, email, role, issuedAtValue, expiresAtValue] = Buffer.from(payloadHex, "hex").toString("utf8").split("|");
+  const [id, email, role, issuedAtValue, expiresAtValue, serialValue] = Buffer.from(payloadHex, "hex")
+    .toString("utf8")
+    .split("|");
   const issuedAt = Number(issuedAtValue);
   const expiresAt = Number(expiresAtValue);
   if (!id || !email || !role || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return null;
   if (issuedAt > Date.now() + 60_000 || expiresAt <= Date.now() || expiresAt - issuedAt > 24 * 60 * 60 * 1000) return null;
 
+  // A token from before the device list simply has no serial, and it stays usable until
+  // its own expiry — shipping this feature must not sign anybody out.
+  const deviceId = /^[A-Za-z0-9_-]{8,64}$/.test(String(serialValue || "")) ? serialValue : "";
+  if (deviceId && dbState.loginDevices.some((device) => device.id === deviceId && device.revokedAt)) return null;
+
   if (id === "admin-owner") {
     return email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && role === "admin"
-      ? { id, email, role }
+      ? { id, email, role, deviceId }
       : null;
   }
   const user = dbState.usersData.find((account) => account.id === id && account.email.toLowerCase() === email.toLowerCase());
   if (!user || role !== (user.role || "user")) return null;
-  return { id, email, role };
+  return { id, email, role, deviceId };
 }
 
 // Support staff run the review queue, the complaints inbox and the reference materials,
@@ -711,6 +778,8 @@ interface UserAccount {
   verificationSentAt?: string;
   verificationAttempts?: number;
   addedByAdmin?: boolean;
+  // A small data URL the student uploads themselves; Google sign-in may bring a photo too.
+  avatarUrl?: string;
 }
 
 // A complaint or problem a student left for the support team. Staff reply in-thread;
@@ -754,6 +823,7 @@ interface DatabaseSchema {
   customAdminPassword: string;
   passwordRecoveryRequests: PasswordRecoveryRequest[];
   qrLoginRequests: QrLoginRequest[];
+  loginDevices: LoginDevice[];
   materialSubmissions: MaterialSubmission[];
   supportTickets: SupportTicket[];
   mailSettings?: MailSettings;
@@ -808,6 +878,22 @@ interface QrLoginRequest {
   account?: { id: string; email: string; name: string; role: string };
 }
 
+// One signed-in screen. Its id is written into the session token as a serial, so the
+// moment this row is revoked that token stops working — even though its signature,
+// which is what normally proves a session, is still mathematically valid.
+interface LoginDevice {
+  id: string;
+  accountId: string;
+  email: string;
+  name: string;
+  role: string;
+  label: string;
+  method: "password" | "qr" | "google" | "verification";
+  createdAt: string;
+  expiresAt: number;
+  revokedAt?: string;
+}
+
 // A student contribution waiting in the admin review queue. Approving two of them
 // earns the contributor one premium download (see UPLOADS_PER_CREDIT).
 interface MaterialSubmission {
@@ -860,6 +946,7 @@ function buildDefaultDatabase(): DatabaseSchema {
     customAdminPassword: "",
     passwordRecoveryRequests: [],
     qrLoginRequests: [],
+    loginDevices: [],
     materialSubmissions: [],
     supportTickets: [],
     mailSettings: {}
@@ -1015,6 +1102,15 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
       ? raw.qrLoginRequests.filter((request): request is QrLoginRequest =>
           Boolean(request && typeof request.id === "string" && typeof request.expiresAt === "number" &&
             ["pending", "approved", "consumed"].includes(request.status))
+        )
+      : [],
+    // A device row is only useful while the session it names could still be live, so
+    // anything past its own expiry is dropped instead of accumulating in the state row.
+    loginDevices: Array.isArray(raw.loginDevices)
+      ? raw.loginDevices.filter((device): device is LoginDevice =>
+          Boolean(device && typeof device.id === "string" && typeof device.accountId === "string" &&
+            typeof device.expiresAt === "number" && typeof device.label === "string" &&
+            ["password", "qr", "google", "verification"].includes(device.method))
         )
       : [],
     materialSubmissions: Array.isArray(raw.materialSubmissions)
@@ -1535,6 +1631,10 @@ export async function createApp() {
       userRatings: incoming.userRatings || dbState.userRatings,
       customAdminPassword: dbState.customAdminPassword,
       passwordRecoveryRequests: dbState.passwordRecoveryRequests,
+      // Live sign-in codes and open sessions are the server's own business, not the admin
+      // editor's, so a wholesale content save has to carry them over untouched.
+      qrLoginRequests: dbState.qrLoginRequests,
+      loginDevices: dbState.loginDevices,
       materialSubmissions: dbState.materialSubmissions,
       supportTickets: dbState.supportTickets,
       mailSettings: dbState.mailSettings,
@@ -1588,9 +1688,28 @@ export async function createApp() {
       res.status(400).json({ ok: false, error: phoneError });
       return;
     }
+    // The browser sends a resized data URL, so the only real risk is a hand-crafted
+    // megabyte being pasted into the one shared row that holds the whole library.
+    const avatarProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "avatarUrl");
+    const avatarRaw =
+      req.body?.avatarUrl === null || req.body?.avatarUrl === undefined ? "" : String(req.body.avatarUrl).trim();
+    if (avatarProvided && avatarRaw) {
+      if (!/^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=]+$/i.test(avatarRaw)) {
+        res.status(400).json({ ok: false, error: "Choose a PNG, JPEG or WebP photo." });
+        return;
+      }
+      if (avatarRaw.length > 200_000) {
+        res.status(413).json({ ok: false, error: "That photo is too large. Pick a smaller one." });
+        return;
+      }
+    }
     user.name = name.slice(0, 80);
     user.department = department.slice(0, 80) || user.department;
     user.phone = phone.slice(0, 32);
+    if (avatarProvided) {
+      if (avatarRaw) user.avatarUrl = avatarRaw;
+      else delete user.avatarUrl;
+    }
     user.activityLog = [
       ...(user.activityLog || []).slice(-40),
       {
@@ -1602,6 +1721,80 @@ export async function createApp() {
     ];
     saveDatabase(dbState);
     res.json({ ok: true, user: safeUserAccount(user), message: "Profile saved." });
+  });
+
+  // Every screen the account holder is signed in on. A token carries the id of its own
+  // row, so marking that row revoked is what lets a phone kick a library laptop out.
+  function liveDevices(accountId: string) {
+    const now = Date.now();
+    return dbState.loginDevices
+      .filter((device) => device.accountId === accountId && !device.revokedAt && device.expiresAt > now)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }
+
+  app.get("/api/account/devices", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see where your account is active." });
+      return;
+    }
+    res.json({
+      ok: true,
+      devices: liveDevices(session.id).map((device) => ({
+        id: device.id,
+        label: device.label,
+        method: device.method,
+        createdAt: device.createdAt,
+        expiresAt: device.expiresAt,
+        current: device.id === session.deviceId
+      }))
+    });
+  });
+
+  app.post("/api/account/devices/revoke", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to manage your devices." });
+      return;
+    }
+    const deviceId = String(req.body?.deviceId || "");
+    const device = dbState.loginDevices.find((entry) => entry.id === deviceId && entry.accountId === session.id);
+    if (!device) {
+      res.status(404).json({ ok: false, error: "That device is not signed in to your account." });
+      return;
+    }
+    device.revokedAt = new Date().toISOString();
+    const isCurrent = device.id === session.deviceId;
+    saveDatabase(dbState);
+    res.json({
+      ok: true,
+      current: isCurrent,
+      message: isCurrent ? "This device is now signed out." : `${device.label} is signed out.`
+    });
+  });
+
+  app.post("/api/account/devices/sign-out-all", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to manage your devices." });
+      return;
+    }
+    const stamp = new Date().toISOString();
+    let revoked = 0;
+    for (const device of dbState.loginDevices) {
+      if (device.accountId !== session.id || device.revokedAt || device.id === session.deviceId) continue;
+      device.revokedAt = stamp;
+      revoked++;
+    }
+    saveDatabase(dbState);
+    res.json({
+      ok: true,
+      revoked,
+      message: revoked ? `Signed out of ${revoked} other device${revoked > 1 ? "s" : ""}.` : "No other device was signed in."
+    });
   });
 
   app.get("/api/admin/verifications", (req, res) => {
@@ -2456,7 +2649,7 @@ export async function createApp() {
       mailSent: false,
       email: user.email,
       user: safeUserAccount(user),
-      session: createSignedSessionToken({ id: user.id, name: user.name, email: user.email, role: user.role }),
+      session: issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification"),
       message: "The verification email could not be delivered, so your account was opened as a normal student account."
     });
   });
@@ -2487,7 +2680,7 @@ export async function createApp() {
         ok: true,
         mailSent: false,
         user: safeUserAccount(target),
-        session: createSignedSessionToken({ id: target.id, name: target.name, email: target.email, role: target.role }),
+        session: issueDeviceSession({ id: target.id, name: target.name, email: target.email, role: target.role }, req, "verification"),
         message: "The email still could not be delivered, so your account was opened as a normal student account."
       });
       return;
@@ -2530,7 +2723,7 @@ export async function createApp() {
     delete user.verificationAttempts;
     user.lastActiveAt = "Active now";
     saveDatabase(dbState);
-    const session = createSignedSessionToken({ id: user.id, name: user.name, email: user.email, role: user.role });
+    const session = issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification");
     res.json({ ok: true, verified: true, user: safeUserAccount(user), session, message: "Email verified. Welcome to Wollo Share." });
   });
   app.post("/api/auth/google", async (req, res) => {
@@ -2582,12 +2775,16 @@ export async function createApp() {
     if (existing) {
       existing.name = name || existing.name;
       saveDatabase(dbState);
-      const session = createSignedSessionToken({
-        id: existing.id,
-        name: existing.name,
-        email: existing.email,
-        role: existing.role
-      });
+      const session = issueDeviceSession(
+        {
+          id: existing.id,
+          name: existing.name,
+          email: existing.email,
+          role: existing.role
+        },
+        req,
+        "google"
+      );
       res.json({ ok: true, user: safeUserAccount(existing), session, message: "Signed in with Google successfully!" });
       return;
     }
@@ -2624,12 +2821,16 @@ export async function createApp() {
     dbState.usersData.unshift(newUser);
     saveDatabase(dbState);
 
-    const session = createSignedSessionToken({
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role
-    });
+    const session = issueDeviceSession(
+      {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role
+      },
+      req,
+      "google"
+    );
 
     res.json({ ok: true, user: safeUserAccount(newUser), session, message: "Google onboarding completed successfully!" });
   });
@@ -2687,12 +2888,16 @@ export async function createApp() {
 
     if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
       loginRateLimitMap.delete(lowerId);
-      const signedSession = createSignedSessionToken({
-        id: "admin-owner",
-        name: "Habib Yesuf",
-        email: ADMIN_EMAIL,
-        role: "admin"
-      });
+      const signedSession = issueDeviceSession(
+        {
+          id: "admin-owner",
+          name: "Habib Yesuf",
+          email: ADMIN_EMAIL,
+          role: "admin"
+        },
+        req,
+        "password"
+      );
       res.json({ ok: true, session: signedSession });
       return;
     }
@@ -2715,12 +2920,16 @@ export async function createApp() {
         return;
       }
       loginRateLimitMap.delete(lowerId);
-      const signedSession = createSignedSessionToken({
-        id: matchedUser.id,
-        name: matchedUser.name,
-        email: matchedUser.email,
-        role: matchedUser.role || "user"
-      });
+      const signedSession = issueDeviceSession(
+        {
+          id: matchedUser.id,
+          name: matchedUser.name,
+          email: matchedUser.email,
+          role: matchedUser.role || "user"
+        },
+        req,
+        "password"
+      );
       res.json({ ok: true, session: signedSession });
       return;
     }
@@ -2791,7 +3000,14 @@ export async function createApp() {
       res.json({ ok: true, status: "consumed" });
       return;
     }
-    res.json({ ok: true, status: "approved", name: account.name, session: createSignedSessionToken(account) });
+    // The desk named itself when it asked for the code, so that is the label the account
+    // holder revokes later — not the phone that happened to tap confirm.
+    res.json({
+      ok: true,
+      status: "approved",
+      name: account.name,
+      session: issueDeviceSession(account, req, "qr", request.label)
+    });
   });
 
   // The phone reads the code before it approves it: the device label only, never the
