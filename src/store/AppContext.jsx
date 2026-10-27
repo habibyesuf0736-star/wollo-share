@@ -56,7 +56,7 @@ function viewFromLocation() {
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
   const match = hash.match(
-    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|analytics|backup))?/
+    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|mail|analytics|backup))?/
   );
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
 }

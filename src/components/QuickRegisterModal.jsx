@@ -68,7 +68,7 @@ export default function QuickRegisterModal() {
       // clicked is still the thing they finish.
       setPending({ email: res.email || form.email.trim(), code: "" });
       setStage("code");
-      setNotice(res.message || `We emailed a 6-digit code to ${res.email}. Enter it to open your account.`);
+      setNotice("");
       return;
     }
     releaseToNextGate(res.user ? res.user.name : "student");
@@ -125,7 +125,7 @@ export default function QuickRegisterModal() {
         open={open}
         onClose={closeGate}
         title="Enter your verification code"
-        subtitle={`We sent a 6-digit code to ${pending.email}. It keeps ${gate.title ? `“${gate.title}”` : "the library"} unlocked for you.`}
+        subtitle={pending.email}
         size="narrow"
       >
         <form onSubmit={submitCode} className="d-flex flex-column gap-3">
