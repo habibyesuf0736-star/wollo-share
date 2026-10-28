@@ -404,6 +404,59 @@ a {
   color: var(--muted);
 }
 
+/* --- Selects -------------------------------------------------------------
+   The native control stays: keyboard, screen readers and the OS picker all
+   work for free. Only the box and the option rows are themed.
+   The caret strokes repeat the ink hex values because url() cannot read a
+   CSS variable — keep them in step with --muted/--ink-soft/--ink.
+   ----------------------------------------------------------------------- */
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364756e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.7rem center;
+  background-size: 15px 15px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.form-select:hover {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232b3a35' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.form-select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23101a17' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.form-select:disabled {
+  background-color: var(--surface-subtle);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+/* A select whose value is still the empty placeholder reads as unfinished. */
+.form-select option[value=""] {
+  color: var(--muted);
+}
+.form-select optgroup {
+  background-color: var(--surface-subtle);
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.form-select option {
+  background-color: var(--surface);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+.form-select option:checked {
+  background-color: var(--accent-pale);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.form-select option:disabled {
+  color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
 .input-group > .form-control:focus {
   box-shadow: var(--ring);
 }
