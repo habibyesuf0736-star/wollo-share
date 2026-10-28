@@ -209,7 +209,6 @@ export default function LibraryPage() {
     <>
       <div className="ws-section-head">
         <div>
-          <span className="ws-section-kicker">Step 1 of 3</span>
           <h2>Colleges, institutes &amp; schools</h2>
         </div>
         <span className="ws-section-note">
@@ -242,7 +241,10 @@ export default function LibraryPage() {
                 {group.courses.length} {group.courses.length === 1 ? "program" : "programs"} · {group.files}{" "}
                 {group.files === 1 ? "file" : "files"}
               </span>
-              <span className="college-preview">{group.courses.slice(0, 3).map((course) => course.name).join(" · ")}</span>
+              <span className="college-preview">
+                {group.courses.slice(0, 2).map((course) => course.name).join(" · ")}
+                {group.courses.length > 2 ? ` +${group.courses.length - 2} more` : ""}
+              </span>
               <span className="college-open">
                 Browse programs <ArrowRight size={13} aria-hidden="true" />
               </span>
@@ -259,11 +261,10 @@ export default function LibraryPage() {
       <>
         <div className="ws-section-head">
           <div style={{ minWidth: 0 }}>
-            <span className="ws-section-kicker">Step 2 of 3 · Programs</span>
             <h2>{activeCollege.name}</h2>
             <p className="small text-secondary mb-0 mt-1">
               {programs.length} {programs.length === 1 ? "program" : "programs"} · {activeCollege.files}{" "}
-              {activeCollege.files === 1 ? "file" : "files"} — choose a program to see its years.
+              {activeCollege.files === 1 ? "file" : "files"}
             </p>
           </div>
           {canEdit ? (
@@ -313,7 +314,6 @@ export default function LibraryPage() {
         <div className="ws-dept mb-3">
           <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
             <div style={{ minWidth: 0, maxWidth: 760 }}>
-              <span className="ws-section-kicker">Step 3 of 3 · Academic years</span>
               <span className="ws-hero-eyebrow mb-1">{activeCollege.name}</span>
               <h2 className="h4 mt-2 mb-1">{activeCourse.name}</h2>
               <p className="small text-secondary mb-0">{activeCourse.description}</p>
@@ -430,10 +430,7 @@ export default function LibraryPage() {
             </div>
           ) : (
             <div className="dept-empty mt-3">
-              <p className="small text-secondary mb-2">
-                No material carries the “{departmentPanel.label}” department tag yet — contribute one and it shows here
-                for every {departmentPanel.label} student.
-              </p>
+              <p className="small text-secondary mb-2">No files here yet — share one and it appears for your coursemates.</p>
               {departmentPanel.program ? (
                 <button
                   type="button"
@@ -479,7 +476,7 @@ export default function LibraryPage() {
         <div className="row g-2 align-items-end">
           <div className="col-12 col-lg-9">
             <label className="form-label small fw-semibold" htmlFor="librarySearch">
-              Search across every college, program and file
+              Search files
             </label>
             <span className="ws-search">
               <span className="ws-search-icon" aria-hidden="true">
@@ -562,7 +559,7 @@ export default function LibraryPage() {
           {filteredCourses.length === 0 ? (
             <EmptyState
               title="No programs match that search"
-              description="Try a shorter phrase, another file format, or clear the filters and browse by college."
+              description="Try fewer words."
               action={
                 <button type="button" className="btn btn-outline-secondary btn-sm" onClick={clearFilters}>
                   Clear search
@@ -603,10 +600,9 @@ export default function LibraryPage() {
         <section className="card p-3 p-md-4 mt-4">
           <div className="ws-section-head" style={{ marginTop: 0, borderTop: 0 }}>
             <div>
-              <span className="ws-section-kicker">Everything in one place</span>
               <h2>Shared document library</h2>
               <p className="small text-secondary mb-0 mt-1">
-                Every file across {accessible.length} programs — {globalDocs.length} of {totalDocs} shown
+                {globalDocs.length} of {totalDocs} files
               </p>
             </div>
             <div className="d-flex flex-wrap gap-2">
@@ -645,7 +641,7 @@ export default function LibraryPage() {
             {globalDocs.length === 0 ? (
               <EmptyState
                 title="No documents match this search"
-                description="Clear the format or semester filter, or search for a course name instead."
+                description="Change the filters or search a course."
               />
             ) : (
               globalDocs.slice(0, 60).map(({ course, mat }) => (
@@ -653,7 +649,7 @@ export default function LibraryPage() {
               ))
             )}
             {globalDocs.length > 60 ? (
-              <p className="small text-secondary mb-0">Showing the first 60 of {globalDocs.length} matches — refine the search to see more.</p>
+              <p className="small text-secondary mb-0">First 60 of {globalDocs.length} — refine to see more.</p>
             ) : null}
           </div>
         </section>

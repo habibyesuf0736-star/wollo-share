@@ -16,10 +16,9 @@ const AppContext = createContext(null);
 
 export const DEFAULT_TEXTS = {
   siteTitle: "Wollo Share",
-  siteSubtitle: "Wollo University · Student Study & Course Resource Hub",
+  siteSubtitle: "Wollo University course library",
   welcomeTitle: "Every Wollo University course material in one library",
-  welcomeDesc:
-    "Lecture notes, past exams, slides and lab manuals organized by college, program, academic year and semester — from Freshman courses to graduation.",
+  welcomeDesc: "Notes, exams, slides and manuals.",
   footerText: "Wollo Share · Built by Wollo University students, for Wollo University students."
 };
 
@@ -731,9 +730,7 @@ export function AppProvider({ children }) {
         progress,
         requiredCount: UPLOADS_PER_CREDIT,
         sharedCount: totalShared,
-        badgeText: credits > 0
-          ? `Free plan · ${credits} earned download${credits === 1 ? "" : "s"} ready`
-          : "Free plan · share 2 materials to unlock 1 download"
+        badgeText: credits > 0 ? `Free plan · ${credits} download${credits === 1 ? "" : "s"} ready` : "Free plan"
       };
     }
     return {

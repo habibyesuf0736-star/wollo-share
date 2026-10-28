@@ -26,9 +26,7 @@ export default function PlanPromo() {
           style: "banner",
           badge: "Advertisement · Wollo Share Premium",
           title: "Unlock every file — one plan, no counting",
-          text: session
-            ? "Premium 100 Birr a month, 250 Birr a year, or 500 Birr once for lifetime access. Instant downloads, no sponsor spots."
-            : "Premium 100 Birr a month, 250 Birr a year, or 500 Birr once for lifetime access. Create an account to activate a plan.",
+          text: session ? "Unlimited downloads, no sponsor spots." : "Create an account to activate a plan.",
           ctaLabel: "See the plans"
         }}
         onAction={() => setGate({ type: "upgrade", plansOnly: true })}

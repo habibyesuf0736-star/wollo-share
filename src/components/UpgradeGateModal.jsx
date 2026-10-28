@@ -8,21 +8,21 @@ export const PLANS = [
     key: "premium_monthly",
     title: "Premium monthly",
     price: "100 Birr / month",
-    detail: "Unlimited downloads while the subscription is active.",
+    detail: "Unlimited downloads while active.",
     perks: ["No sponsor spots", "Newest uploads first", "Pause any time"]
   },
   {
     key: "premium_annual",
     title: "Premium annual",
     price: "250 Birr / year",
-    detail: "A full year of unlimited downloads at the lowest monthly cost.",
+    detail: "Lowest monthly cost, billed once.",
     perks: ["No sponsor spots", "Every college covered", "Priority review"]
   },
   {
     key: "paid_lifetime",
     title: "Lifetime access",
     price: "500 Birr one-time",
-    detail: "One payment — every current and future material stays unlocked.",
+    detail: "One payment, never expires.",
     perks: ["Never expires", "All future semesters", "No ads, ever"]
   }
 ];
@@ -46,11 +46,7 @@ export default function UpgradeGateModal() {
       open={open}
       onClose={closeGate}
       title={plansOnly ? "Wollo Share Premium" : `Download “${materialName}”`}
-      subtitle={
-        plansOnly
-          ? "Choose a plan and the library team switches your account over."
-          : "Free materials stay open to everyone. Everything else is a premium file — or one you can earn."
-      }
+      subtitle={plansOnly ? "Choose a plan, the team switches you over." : "Buy a plan or earn it."}
       size="wide"
     >
       <div className="d-flex flex-column gap-3">
@@ -64,10 +60,7 @@ export default function UpgradeGateModal() {
               </span>
             </div>
             <h4 className="h5 mt-3 mb-1">Unlock the whole library — no sponsor spots, no counting.</h4>
-            <p className="text-secondary small mb-3">
-              Premium and lifetime accounts download every file instantly. Free accounts watch a 10 second spot and spend
-              one earned credit per file.
-            </p>
+            <p className="text-secondary small mb-3">Premium downloads instantly. Free waits 10 seconds.</p>
             <div className="row g-2 g-md-3">
               {PLANS.map((plan) => (
                 <div key={plan.key} className="col-12 col-md-4">
@@ -90,8 +83,7 @@ export default function UpgradeGateModal() {
               ))}
             </div>
             <div className="alert alert-light border small mt-3 mb-0">
-              <strong>How to activate:</strong> send your account email to the library team and they switch this account to
-              the plan you choose. The download you just requested starts automatically the moment the plan is active.
+              <strong>How to activate:</strong> email the team your account email and they switch you over.
             </div>
           </div>
         </div>
@@ -100,15 +92,11 @@ export default function UpgradeGateModal() {
           <div className="card-body p-3 p-md-4">
             <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
               <div>
-                <span className="ws-section-kicker">Earn it instead</span>
                 <h5 className="h6 mt-1 mb-1">
                   <Gift size={15} className="me-1 align-text-bottom" aria-hidden="true" />
                   Share {required} materials, download {required === 1 ? "" : "one"} free
                 </h5>
-                <p className="small text-secondary mb-0">
-                  Every document you send goes to the administrator's review queue. Two approved uploads earn you one
-                  download — duplicates never count.
-                </p>
+                <p className="small text-secondary mb-0">Only approved, new files count.</p>
               </div>
               <div className="text-md-end">
                 <div className="h4 mb-0">
@@ -143,8 +131,7 @@ export default function UpgradeGateModal() {
               {credits > 0 ? (
                 <span className="small text-success">
                   <Check size={13} className="me-1 align-text-bottom" aria-hidden="true" />
-                  You have {credits} earned download{credits === 1 ? "" : "s"} ready — your file will start after the
-                  sponsor spot.
+                  {credits} download{credits === 1 ? "" : "s"} ready.
                 </span>
               ) : null}
               {pending > 0 ? (

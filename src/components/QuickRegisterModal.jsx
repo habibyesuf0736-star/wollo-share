@@ -34,7 +34,7 @@ export default function QuickRegisterModal() {
       return;
     }
     if (!form.department) {
-      setError("Select your department / program so we can show your course materials first.");
+      setError("Select your department.");
       return;
     }
     const phoneError = phoneProblem(form.phone);
@@ -100,7 +100,6 @@ export default function QuickRegisterModal() {
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
           />
-          <p className="form-text small mb-0">Required — the library team uses it to reach you about your uploads.</p>
         </div>
         {error ? <p className="text-danger small mb-0">{error}</p> : null}
         <div className="d-flex justify-content-between gap-2">

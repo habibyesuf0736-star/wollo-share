@@ -62,7 +62,7 @@ export default function EmailVerifyBanner() {
     if (res.session) {
       // The provider refused the mailbox, so the server finished the account instead.
       adoptSession(res.session);
-      toast("Your email could not be confirmed, but the account is fully open.");
+      toast("Not confirmed — your account stays open.");
       hide();
       return;
     }
@@ -73,7 +73,7 @@ export default function EmailVerifyBanner() {
     <div className="banner info mb-3">
       <form onSubmit={confirm} className="d-flex flex-wrap align-items-center gap-2" style={{ width: "100%" }}>
         <span className="flex-grow-1" style={{ minWidth: 180 }}>
-          <BadgeCheck size={16} aria-hidden="true" /> Confirm your email — we sent a 6-digit code to <strong>{email}</strong>.
+          <BadgeCheck size={16} aria-hidden="true" /> Confirm your email: code sent to <strong>{email}</strong>.
         </span>
         <div className="ws-field-icon" style={{ width: 132 }}>
           <KeyRound size={15} aria-hidden="true" />

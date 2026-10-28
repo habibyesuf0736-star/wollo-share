@@ -46,7 +46,6 @@ export default function LoginPage() {
     register,
     adoptSession,
     goLibrary,
-    pageTexts,
     toast,
     goAdmin,
     goSupport,
@@ -259,7 +258,7 @@ export default function LoginPage() {
       const res = await requestRecovery(recovery.email);
       setBusy(false);
       if (res && res.ok) {
-        setNotice(res.message || "A recovery code was emailed to that address if the account exists. It expires in 30 minutes.");
+        setNotice(res.message || "If the account exists, a code is on its way.");
         setRecovery({ ...recovery, stage: "code" });
       } else {
         setError((res && res.error) || "Recovery request failed.");
@@ -300,11 +299,7 @@ export default function LoginPage() {
 
       <div className="ws-auth">
         <aside className="ws-auth-aside">
-          <span className="ws-hero-eyebrow" style={{ background: "rgba(255,255,255,.14)", borderColor: "rgba(255,255,255,.28)", color: "#fff" }}>
-            Wollo University · {pageTexts.siteTitle || "Wollo Share"}
-          </span>
           <h1>One account for the whole library</h1>
-          <p>Notes, slides, lab manuals and past exams for every program — in one place.</p>
         </aside>
 
         <section className="ws-auth-form">
@@ -334,8 +329,7 @@ export default function LoginPage() {
           {tab === "signin" && twoFactor.identifier ? (
             <form onSubmit={submitSignInCode} className="d-flex flex-column gap-3">
               <p className="small text-secondary mb-0">
-                Step 2 of 2 — we emailed a 6-digit code to <strong>{twoFactor.email}</strong>. It expires in{" "}
-                {twoFactor.minutesLeft} minutes.
+                Code sent to <strong>{twoFactor.email}</strong>. Expires in {twoFactor.minutesLeft} minutes.
               </p>
               <div>
                 <label className="form-label small fw-semibold mb-0" htmlFor="signinCode">
@@ -436,10 +430,7 @@ export default function LoginPage() {
 
           {tab === "qr" ? (
             <div className="d-flex flex-column align-items-center gap-3 text-center">
-              <p className="small text-secondary mb-0">
-                Use the phone you already signed in to Wollo Share with. Open its camera, point it at this code and
-                confirm — this screen signs itself in.
-              </p>
+              <p className="small text-secondary mb-0">Scan with the phone you signed in on.</p>
               {qr.status === "waiting" && qr.url ? (
                 <div
                   className="d-inline-block p-3"
@@ -472,9 +463,7 @@ export default function LoginPage() {
               <button type="button" className="btn btn-primary" onClick={() => setQrNonce((n) => n + 1)}>
                 {qr.status === "waiting" ? "New code" : qr.status === "error" ? "Try again" : "Show a new code"}
               </button>
-              <p className="form-text small mb-0">
-                Only approve a code you asked for — confirming hands your account to that computer for a day.
-              </p>
+              <p className="form-text small mb-0">Only scan codes you asked for.</p>
             </div>
           ) : null}
 
@@ -515,7 +504,6 @@ export default function LoginPage() {
                     <Phone size={16} aria-hidden="true" />
                     <input className="form-control" inputMode="tel" value={signup.phone} onChange={(e) => setSignup({ ...signup, phone: e.target.value })} placeholder="+251 …" />
                   </div>
-                  <p className="form-text small mb-0">Required — the library team uses it to reach you.</p>
                 </div>
                 <div className="col-12">
                   <label className="form-label small fw-semibold" htmlFor="signupDepartment">
@@ -531,27 +519,20 @@ export default function LoginPage() {
                       className="form-select"
                     />
                   </div>
-                  <p className="form-text small mb-0">Used to suggest courses and show your department's materials first.</p>
+                  <p className="form-text small mb-0">Shows your courses first.</p>
                 </div>
               </div>
               <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
                 {busy ? <Sparkles size={16} aria-hidden="true" /> : <BookOpenCheck size={16} aria-hidden="true" />}
                 {busy ? "Creating account…" : "Create free account"}
               </button>
-              <p className="form-text small mb-0">
-                The account opens straight away and we send <strong>one</strong> email: a 6-digit code. Enter it in the
-                "Confirm your email" bar once you are inside. You will not get a second code for signing in while that
-                one is still valid, and if the mail never arrives your password opens the account by itself.
-              </p>
+              <p className="form-text small mb-0">We email one 6-digit code. Enter it in the "Confirm your email" bar inside.</p>
             </form>
           ) : null}
 
           {tab === "recovery" ? (
             <form onSubmit={submitRecovery} className="d-flex flex-column gap-3">
-              <p className="small text-secondary">
-                Passwords are stored hashed and never shown. Enter your account email and we send a one-time recovery
-                code to that inbox — it is never displayed on this page. The code expires in 30 minutes.
-              </p>
+              <p className="small text-secondary">We email a one-time code that expires in 30 minutes.</p>
               <div>
                 <label className="form-label small fw-semibold mb-0">Account email</label>
                 <div className="ws-field-icon">
@@ -561,10 +542,6 @@ export default function LoginPage() {
               </div>
               {recovery.stage === "code" ? (
                 <>
-                  <p className="small text-secondary mb-0">
-                    Step 2 of 2 — the reset stays open until you enter the code and a new password. Signing in with your
-                    old password brings you back here.
-                  </p>
                   <div>
                     <label className="form-label small fw-semibold mb-0">Recovery code</label>
                     <div className="ws-field-icon">

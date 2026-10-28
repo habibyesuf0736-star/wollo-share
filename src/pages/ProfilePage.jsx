@@ -169,9 +169,6 @@ export default function ProfilePage() {
         <AnnouncementBanner />
         <div className="card p-4 mx-auto" style={{ maxWidth: 520 }}>
           <h1 className="h4 mb-2">Sign in to view your profile</h1>
-          <p className="text-secondary small mb-3">
-            Your profile keeps your program, contact details and contribution history together.
-          </p>
           <button type="button" className="btn btn-primary" onClick={goLogin}>
             Go to sign in
           </button>
@@ -294,9 +291,7 @@ export default function ProfilePage() {
                       ) : null}
                       <input ref={photoInput} type="file" accept="image/*" className="d-none" onChange={pickPhoto} />
                     </div>
-                    <p className="form-text small mb-0">
-                      Cropped to a square and kept under 100 KB — a phone photo stays a phone photo.
-                    </p>
+                    <p className="form-text small mb-0">Square, under 100 KB.</p>
                   </div>
                   <div className="col-12">
                     <label className="form-label small fw-semibold">Full name</label>
@@ -329,7 +324,6 @@ export default function ProfilePage() {
                         placeholder="09xx xxx xxx"
                       />
                     </div>
-                    <p className="form-text small mb-0">Required — the library team uses it to reach you.</p>
                   </div>
                   <div className="col-12">
                     <label className="form-label small fw-semibold">Email (used to sign in)</label>
@@ -337,9 +331,7 @@ export default function ProfilePage() {
                       <Mail size={16} aria-hidden="true" />
                       <input className="form-control" value={session.email || ""} readOnly disabled />
                     </div>
-                    <p className="small text-secondary mb-0 mt-1">
-                      Ask the administrator to change the email on your account.
-                    </p>
+                    <p className="small text-secondary mb-0 mt-1">Ask the administrator to change this.</p>
                   </div>
                 </div>
 
@@ -417,10 +409,7 @@ export default function ProfilePage() {
               </div>
             ) : null}
             {devicesState === "ready" && !devices.length ? (
-              <p className="small text-secondary mb-0">
-                This screen signed in before devices were tracked. Sign out once and come back — from then on every
-                screen holding your account is listed here and can be kicked out remotely.
-              </p>
+              <p className="small text-secondary mb-0">Sign out once to list your devices.</p>
             ) : null}
             {devices.length ? (
               <>

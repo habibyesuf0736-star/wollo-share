@@ -69,7 +69,7 @@ export default function SublistPage() {
       <div className="ws-page">
         <EmptyState
           title="Course not found"
-          description="This course may have been removed from the library."
+          description="May have been removed."
           action={
             <button type="button" className="btn btn-primary btn-sm" onClick={goLibrary}>
               Back to library
@@ -210,14 +210,14 @@ export default function SublistPage() {
           <strong>{materials.length}</strong> {materials.length === 1 ? "document" : "documents"}
           {year !== "All" || semester !== "All" ? ` · ${year === "All" ? "All years" : year} · ${semester === "All" ? "both semesters" : semester}` : ""}
         </span>
-        <span className="small text-secondary mono">{getCourseSemesterEntries(course).length} semesters mapped</span>
+        <span className="small text-secondary mono">{getCourseSemesterEntries(course).length} semesters</span>
       </div>
 
       <div className="d-flex flex-column gap-2 material-stack">
         {materials.length === 0 ? (
           <EmptyState
             title="No materials in this selection yet"
-            description={canEdit ? "Add the first lecture note, exam or slide deck for this semester." : "Students and lecturers have not uploaded files here — try another semester or category."}
+            description={canEdit ? "Add the first file for this semester." : "Nothing here yet. Try another filter."}
             action={
               canEdit ? (
                 <button

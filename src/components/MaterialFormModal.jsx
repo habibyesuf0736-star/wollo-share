@@ -97,7 +97,6 @@ export default function MaterialFormModal({ open, onClose, courseId, materialId,
       open={open}
       onClose={onClose}
       title={materialId ? "Edit material" : `Add material to ${course.name}`}
-      subtitle="Files under 250 KB are stored inline; larger uploads keep a placeholder record."
     >
       <form onSubmit={submit} className="d-flex flex-column gap-3">
         <div className="row g-3">

@@ -51,7 +51,7 @@ function ComplaintComposer({ onSent }) {
   const submit = async (event) => {
     event.preventDefault();
     if (form.message.trim().length < 10) {
-      setError("Tell the support team what happened — at least a full sentence.");
+      setError("Describe the problem in a sentence.");
       return;
     }
     setError("");
@@ -214,7 +214,6 @@ function StudentSupport() {
     return (
       <div className="card p-4 text-center mx-auto" style={{ maxWidth: 560 }}>
         <h2 className="h5">Sign in to reach the support team</h2>
-        <p className="text-secondary small">Complaints are answered in your account thread, so the team can find your course and file.</p>
         <button type="button" className="btn btn-primary btn-sm" onClick={goLogin}>
           Sign in
         </button>
@@ -228,10 +227,7 @@ function StudentSupport() {
     <div className="d-flex flex-column gap-3">
       <div className="banner info" role="status">
         <LifeBuoy size={15} aria-hidden="true" />
-        <span>
-          Something broken, missing or wrong? Leave your complaint or problem here — the Wollo Share support team answers in this
-          thread and fixes the library.
-        </span>
+        <span>Describe the problem — we reply here.</span>
       </div>
       <ComplaintComposer onSent={merge} />
       <div>
@@ -246,7 +242,7 @@ function StudentSupport() {
           <EmptyState
             icon={<Inbox size={24} />}
             title="No complaints yet"
-            description="Send the support team a note above and it will appear here with their reply."
+            description="Your threads show here."
           />
         ) : null}
       </div>
@@ -884,13 +880,10 @@ export default function SupportPage() {
     <div className="ws-page">
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
-          <span className="ws-section-kicker">Wollo Share · support</span>
           <h1 className="h3 mb-1">{staffMode ? "Support team panel" : "Help & complaints"}</h1>
-          <p className="small text-secondary mb-0">
-            {staffMode
-              ? "Everything here is saved to the shared Wollo Share database."
-              : "Leave your complaints and problems here — the support team answers in this thread."}
-          </p>
+          {staffMode ? (
+            <p className="small text-secondary mb-0">Everything here is saved to the shared Wollo Share database.</p>
+          ) : null}
         </div>
         <div className="d-flex gap-2">
           {staffMode ? (

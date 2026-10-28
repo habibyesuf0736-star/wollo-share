@@ -84,8 +84,7 @@ export default function DeviceLoginPage({ qrId }) {
               <ShieldCheck size={18} aria-hidden="true" /> This sign-in code is no longer valid
             </h1>
             <p className="small text-secondary mb-3">
-              Codes last two minutes and work once. On the other screen choose <strong>Show a new code</strong> and scan
-              again.
+              Choose <strong>Show a new code</strong> on the other screen and scan again.
             </p>
             <button type="button" className="btn btn-outline-secondary btn-sm" onClick={goLibrary}>
               Back to the library
@@ -97,9 +96,8 @@ export default function DeviceLoginPage({ qrId }) {
               <MonitorSmartphone size={18} aria-hidden="true" /> Sign this computer in?
             </h1>
             <p className="small text-secondary mb-0">
-              {preview.label ? <>Matching <strong>{preview.label}</strong></> : "Another screen"} asked Wollo Share for a
-              sign-in code. Confirming gives it your account for 24 hours — as{" "}
-              <strong>{session.name || session.email}</strong>.
+              {preview.label ? <>Matching <strong>{preview.label}</strong></> : "Another screen"} — sign in for 24 hours as{" "}
+              <strong>{session.name || session.email}</strong>?
             </p>
             {error ? (
               <div className="banner warn" role="alert">
@@ -119,8 +117,7 @@ export default function DeviceLoginPage({ qrId }) {
               <KeyRound size={18} aria-hidden="true" /> Sign in here first
             </h1>
             <p className="small text-secondary mb-0">
-              You scanned a sign-in code from {preview.label ? <strong>{preview.label}</strong> : "another screen"}, but
-              this device is not signed in. Enter your account and we sign both screens in at once.
+              Sign in here to approve {preview.label ? <strong>{preview.label}</strong> : "that screen"}.
             </p>
             <div>
               <label className="form-label small fw-semibold" htmlFor="deviceId">

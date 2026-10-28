@@ -100,7 +100,7 @@ export default function VideoPlayerModal() {
               }
             },
             onError: () => {
-              if (!cancelled) setError("This video cannot be played here. Ask the administrator to check the lesson link.");
+              if (!cancelled) setError("This video will not play here.");
             }
           }
         });
@@ -333,7 +333,7 @@ export default function VideoPlayerModal() {
               ← Previous lesson
             </button>
             <span className="small text-secondary">
-              {session ? "Progress saves to your account automatically." : "Sign in to save your progress across devices."}
+              {session ? "Progress saves automatically." : "Sign in to save progress."}
               {savedAt ? ` Last saved ${savedAt}.` : ""}
             </span>
             <button
@@ -345,9 +345,6 @@ export default function VideoPlayerModal() {
               Next lesson →
             </button>
           </div>
-          <p className="small text-secondary mt-1 mb-0">
-            Shortcuts: Space play/pause · ← → 10s · ↑ ↓ volume · M mute · F full screen
-          </p>
         </div>
 
         <div className="col-12 col-lg-4">

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { formatFileSize, readSmallFileAsDataUrl, typeFromFileName } from "../lib/utils.js";
 
-export default function FileInput({ onFile, hint = "PDF, PPT, DOC, XLS, video up to 250 KB is stored inline" }) {
+export default function FileInput({ onFile, hint = "PDF, PPT, DOC, XLS or video · 250 KB max" }) {
   const [fileName, setFileName] = useState("");
 
   return (

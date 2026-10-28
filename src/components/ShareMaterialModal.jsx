@@ -84,7 +84,7 @@ export default function ShareMaterialModal() {
       return;
     }
     if (!course) {
-      setError("Pick a course from the list — start typing its name and choose one.");
+      setError("Pick a course.");
       return;
     }
     if (!form.name.trim() && !file) {
@@ -112,7 +112,7 @@ export default function ShareMaterialModal() {
     }
     setForm({ name: "", type: "PDF", size: "2.0 MB", url: "" });
     setFile(null);
-    toast("Sent to the administrator — it counts toward your next download as soon as it is approved.");
+    toast("Sent for review.");
     closeGate();
   };
 
@@ -121,11 +121,11 @@ export default function ShareMaterialModal() {
       open={open}
       onClose={closeGate}
       title="Share a study material"
-      subtitle="Every submission is checked by an administrator before it joins the library."
+      subtitle="An admin checks each upload."
     >
       {!session ? (
         <div className="text-center py-4">
-          <p className="text-secondary">Sign in with your student account to contribute documents to the library.</p>
+          <p className="text-secondary">Sign in to contribute.</p>
           <button type="button" className="btn btn-primary" onClick={() => { closeGate(); goLogin(); }}>
             Go to sign in
           </button>
@@ -133,9 +133,8 @@ export default function ShareMaterialModal() {
       ) : (
         <form onSubmit={submit} className="d-flex flex-column gap-3">
           <div className="review-note">
-            <strong>Earn your download:</strong> {downloadStatus.progress || 0} of {downloadStatus.requiredCount || 2}{" "}
-            approved uploads counted so far. When the administrator publishes your second one, the file you asked for
-            starts downloading automatically.
+            <strong>Upload 2, unlock 1 download:</strong> {downloadStatus.progress || 0} of{" "}
+            {downloadStatus.requiredCount || 2} approved.
           </div>
 
           {mySubmissions.length ? (
@@ -175,7 +174,7 @@ export default function ShareMaterialModal() {
                 className="form-control"
                 list="share-course-options"
                 autoComplete="off"
-                placeholder="Type your course name, or pick one from the list"
+                placeholder="Course name"
                 value={courseQuery}
                 onChange={(e) => {
                   setCourseQuery(e.target.value);
@@ -193,9 +192,7 @@ export default function ShareMaterialModal() {
                     <CheckCircle2 size={13} className="text-success" aria-hidden="true" />
                     {course.name}
                   </span>
-                ) : (
-                  "Choose a course the document belongs to."
-                )}
+                ) : null}
               </div>
             </div>
             <div className="col-12">

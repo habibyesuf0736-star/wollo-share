@@ -1,27 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, Download, Lock, Sparkles, Timer, Zap } from "lucide-react";
+import { Lock, Sparkles, Timer, Zap } from "lucide-react";
 import Modal from "./Modal.jsx";
 import { AD_SECONDS, useApp } from "../store/AppContext.jsx";
 
 const SPOTS = [
-  {
-    brand: "Wollo Share Premium",
-    headline: "Every lecture note, exam and slide deck — no waiting.",
-    lines: ["Unlimited downloads", "Newest semester uploads first", "Cancel any time"],
-    price: "from 100 Birr"
-  },
-  {
-    brand: "Wollo Share Premium",
-    headline: "Your department's past exams, one click away.",
-    lines: ["Skip the sponsor slot", "Lifetime access available", "Fresh material weekly"],
-    price: "one-time 500 Birr"
-  },
-  {
-    brand: "Wollo Share Premium",
-    headline: "Study at 2am without counting downloads.",
-    lines: ["Unlimited premium files", "Works on your phone", "Instant activation"],
-    price: "100 Birr / month"
-  }
+  { brand: "Wollo Share Premium", headline: "Every note, exam and slide — no waiting.", price: "from 100 Birr" },
+  { brand: "Wollo Share Premium", headline: "Your department's past exams, one click away.", price: "one-time 500 Birr" },
+  { brand: "Wollo Share Premium", headline: "Study at 2am without counting downloads.", price: "100 Birr / month" }
 ];
 
 function pad(value) {
@@ -68,7 +53,6 @@ export default function AdGateModal() {
       open={open}
       onClose={closeGate}
       title="A quick word before your file"
-      subtitle="Free and unpaid accounts unlock the download centre with a short sponsor spot."
       size="narrow"
     >
       <div className="ad-break card card-body p-0 overflow-hidden">
@@ -86,14 +70,6 @@ export default function AdGateModal() {
           </div>
           <span className="ws-section-kicker">{spot.brand}</span>
           <h4 className="h5 mt-1 mb-2">{spot.headline}</h4>
-          <ul className="list-unstyled d-flex flex-wrap justify-content-center gap-2 mb-2">
-            {spot.lines.map((line) => (
-              <li key={line} className="small d-flex align-items-center gap-1">
-                <BadgeCheck size={14} className="text-success" aria-hidden="true" />
-                {line}
-              </li>
-            ))}
-          </ul>
           <span className="badge rounded-pill text-bg-light border">{spot.price}</span>
         </div>
 
@@ -110,16 +86,7 @@ export default function AdGateModal() {
             <div className="progress-bar w-100" style={{ width: `${percent}%`, transition: "width .25s linear" }} />
           </div>
           <p className="small text-secondary text-center mt-2 mb-0">
-            {left > 0 ? (
-              <>
-                Your download of <strong>{gate.title}</strong> starts automatically in {left}s
-              </>
-            ) : (
-              <>
-                <Download size={13} className="me-1 align-text-bottom" aria-hidden="true" />
-                Starting your download…
-              </>
-            )}
+            {left > 0 ? <>Your download starts in {left}s</> : <>Starting your download…</>}
           </p>
         </div>
       </div>
@@ -129,11 +96,10 @@ export default function AdGateModal() {
         <div>
           {downloadStatus.plan === "unpaid" ? (
             <>
-              Free plan: this spot used <strong>1 earned download</strong>. You now have{" "}
-              <strong>{downloadStatus.credits}</strong> left — share 2 more materials to earn another.
+              1 credit used · <strong>{downloadStatus.credits}</strong> left.
             </>
           ) : (
-            <>You are on the free plan. Premium members never see this spot.</>
+            <>Premium members never see this spot.</>
           )}
         </div>
       </div>
