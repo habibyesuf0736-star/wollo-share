@@ -1384,20 +1384,19 @@ function issueSignupCode(user: UserAccount): { code: string; mailSent: boolean }
 }
 
 // The mail provider can refuse the server's IP address, and a student must not lose their
-// registration over that: the account opens as an ordinary student and keeps a flag so the
-// administrator can see the address was never confirmed.
-function activateUnconfirmedSignup(user: UserAccount) {
-  user.emailVerified = true;
+// registration over that: the account opens as an ordinary student. It stays awaiting
+// verification with its code alive, so "Resend" or the administrator can still finish the
+// job — an address is never marked verified because a send failed.
+function keepPendingAfterMailFailure(user: UserAccount) {
+  user.emailVerified = false;
   user.emailUnconfirmed = true;
-  delete user.verificationCode;
-  delete user.verificationExpiresAt;
-  delete user.verificationAttempts;
+  user.verificationExpiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MS).toISOString();
   user.activityLog = [
     ...(user.activityLog || []),
     {
       id: "act-" + Date.now(),
-      type: "Activated",
-      detail: "Verification email could not be delivered, so the account was activated without it.",
+      type: "Awaiting verification",
+      detail: "Opened as a normal student account — the verification email could not be delivered, so the code stays available for a resend.",
       timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
     }
   ];
@@ -2037,6 +2036,7 @@ export async function createApp() {
       return;
     }
     user.emailVerified = true;
+    delete user.emailUnconfirmed;
     delete user.verificationCode;
     delete user.verificationExpiresAt;
     delete user.verificationAttempts;
@@ -2834,17 +2834,17 @@ export async function createApp() {
       return;
     }
     // The provider can refuse the server's IP address, and a student must not lose their
-    // registration over that. Activate the account as an ordinary student — never staff.
-    activateUnconfirmedSignup(user);
+    // registration over that. The account still opens as an ordinary student.
+    keepPendingAfterMailFailure(user);
     saveDatabase(dbState);
     res.json({
       ok: true,
-      pendingVerification: false,
+      pendingVerification: true,
       mailSent: false,
       email: user.email,
       user: safeUserAccount(user),
       session: issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification"),
-      message: "The verification email could not be delivered, so your account was opened as a normal student account."
+      message: `Your account is open, but the code did not reach ${user.email}. Press "Resend" in the "Confirm your email" bar, or sign in with your password.`
     });
   });
   app.post("/api/auth/verify-email", async (req, res) => {
@@ -2884,14 +2884,13 @@ export async function createApp() {
         res.json({ ok: true, mailSent: true, message: `A new 6-digit code was emailed to ${target.email}.` });
         return;
       }
-      activateUnconfirmedSignup(target);
+      keepPendingAfterMailFailure(target);
       saveDatabase(dbState);
       res.json({
         ok: true,
         mailSent: false,
         user: safeUserAccount(target),
-        session: issueDeviceSession({ id: target.id, name: target.name, email: target.email, role: target.role }, req, "verification"),
-        message: "The email still could not be delivered, so your account was opened as a normal student account."
+        message: `The email still could not be delivered, so ${target.email} stays unverified. Press "Resend" again later or ask the administrator to confirm it.`
       });
       return;
     }
@@ -2941,6 +2940,8 @@ export async function createApp() {
       return;
     }
     user.emailVerified = true;
+    // The mailbox just produced the code, so the earlier "never delivered" flag is stale.
+    delete user.emailUnconfirmed;
     delete user.verificationCode;
     delete user.verificationExpiresAt;
     delete user.verificationAttempts;

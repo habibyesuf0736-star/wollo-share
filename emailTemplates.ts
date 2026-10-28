@@ -150,7 +150,7 @@ export function signupCodeEmail(input: {
     `Hi ${name},`,
     "",
     `Your Wollo Share verification code is ${input.code}.`,
-    `Enter it on the sign-in page to activate ${input.email}.`,
+    `Enter it in the "Confirm your email" bar inside Wollo Share to verify ${input.email}.`,
     `It expires in ${input.minutesLeft} minutes.`,
     "If you did not create this account, ignore this email.",
     "",

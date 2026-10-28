@@ -471,26 +471,51 @@ export default function LoginPage() {
             <form onSubmit={submitRegister} className="d-flex flex-column gap-3">
               <div className="row g-2">
                 <div className="col-12 col-sm-6">
-                  <label className="form-label small fw-semibold">Full name</label>
+                  <label className="form-label small fw-semibold" htmlFor="signupName">
+                    Full name
+                  </label>
                   <div className="ws-field-icon">
                     <User size={16} aria-hidden="true" />
-                    <input className="form-control" value={signup.name} onChange={(e) => setSignup({ ...signup, name: e.target.value })} placeholder="Abebe Kebede" />
+                    <input
+                      id="signupName"
+                      className="form-control"
+                      name="name"
+                      autoComplete="name"
+                      value={signup.name}
+                      onChange={(e) => setSignup({ ...signup, name: e.target.value })}
+                      placeholder="Abebe Kebede"
+                    />
                   </div>
                 </div>
                 <div className="col-12 col-sm-6">
-                  <label className="form-label small fw-semibold">Student email</label>
+                  <label className="form-label small fw-semibold" htmlFor="signupEmail">
+                    Student email
+                  </label>
                   <div className="ws-field-icon">
                     <Mail size={16} aria-hidden="true" />
-                    <input className="form-control" type="email" value={signup.email} onChange={(e) => setSignup({ ...signup, email: e.target.value })} placeholder="you@student.wollogu.edu.et" />
+                    <input
+                      id="signupEmail"
+                      className="form-control"
+                      type="email"
+                      name="email"
+                      autoComplete="email"
+                      value={signup.email}
+                      onChange={(e) => setSignup({ ...signup, email: e.target.value })}
+                      placeholder="you@student.wollogu.edu.et"
+                    />
                   </div>
                 </div>
                 <div className="col-12 col-sm-6">
-                  <label className="form-label small fw-semibold">Password</label>
+                  <label className="form-label small fw-semibold" htmlFor="signupPassword">
+                    Password
+                  </label>
                   <div className="ws-field-icon">
                     <Lock size={16} aria-hidden="true" />
                     <input
+                      id="signupPassword"
                       className="form-control"
                       type="password"
+                      name="password"
                       autoComplete="new-password"
                       value={signup.password}
                       onChange={(e) => setSignup({ ...signup, password: e.target.value })}
@@ -499,10 +524,21 @@ export default function LoginPage() {
                   </div>
                 </div>
                 <div className="col-12 col-sm-6">
-                  <label className="form-label small fw-semibold">Phone number</label>
+                  <label className="form-label small fw-semibold" htmlFor="signupPhone">
+                    Phone number
+                  </label>
                   <div className="ws-field-icon">
                     <Phone size={16} aria-hidden="true" />
-                    <input className="form-control" inputMode="tel" value={signup.phone} onChange={(e) => setSignup({ ...signup, phone: e.target.value })} placeholder="+251 …" />
+                    <input
+                      id="signupPhone"
+                      className="form-control"
+                      name="phone"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={signup.phone}
+                      onChange={(e) => setSignup({ ...signup, phone: e.target.value })}
+                      placeholder="+251 …"
+                    />
                   </div>
                 </div>
                 <div className="col-12">

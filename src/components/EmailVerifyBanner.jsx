@@ -8,7 +8,7 @@ const DISMISSED_KEY = "wollo_email_confirm_bar_v1";
 // The account opens the moment it is created, so the emailed code is confirmed from here —
 // inside the library — instead of holding the student on the sign-in screen.
 export default function EmailVerifyBanner() {
-  const { activeUser, session, studentPreview, verifySignup, adoptSession, toast } = useApp();
+  const { activeUser, session, studentPreview, verifySignup, toast } = useApp();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -57,13 +57,6 @@ export default function EmailVerifyBanner() {
     setBusy(false);
     if (!res || res.ok !== true) {
       setNotice((res && res.error) || "Could not resend the code.");
-      return;
-    }
-    if (res.session) {
-      // The provider refused the mailbox, so the server finished the account instead.
-      adoptSession(res.session);
-      toast("Not confirmed — your account stays open.");
-      hide();
       return;
     }
     setNotice(res.mailSent ? "A fresh code is on its way." : res.message || "A new code was requested.");
