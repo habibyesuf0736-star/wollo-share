@@ -40,13 +40,25 @@ export default function UpgradeGateModal() {
   const pending = mySubmissions.filter((s) => s.status === "pending").length;
   const rejected = mySubmissions.filter((s) => s.status === "rejected" && s.decidedBy !== "automatic-duplicate-guard");
   const percent = Math.min(100, Math.round((progress / required) * 100));
+  const waitLine =
+    downloadPolicy.mode === "premium"
+      ? "Premium downloads instantly. The library is closed to free accounts right now."
+      : downloadPolicy.adSeconds > 0
+      ? `Premium downloads instantly. Free waits ${downloadPolicy.adSeconds} seconds.`
+      : "Premium downloads instantly. Free spends one download credit.";
 
   return (
     <Modal
       open={open}
       onClose={closeGate}
       title={plansOnly ? "Wollo Share Premium" : `Download “${materialName}”`}
-      subtitle={plansOnly ? "Choose a plan, the team switches you over." : "Buy a plan or earn it."}
+      subtitle={
+        plansOnly
+          ? "Choose a plan, the team switches you over."
+          : downloadPolicy.mode === "premium"
+          ? "Only a Premium plan opens a file right now."
+          : "Buy a plan or earn it."
+      }
       size="wide"
     >
       <div className="d-flex flex-column gap-3">
@@ -60,7 +72,7 @@ export default function UpgradeGateModal() {
               </span>
             </div>
             <h4 className="h5 mt-3 mb-1">Unlock the whole library — no sponsor spots, no counting.</h4>
-            <p className="text-secondary small mb-3">Premium downloads instantly. Free waits 10 seconds.</p>
+            <p className="text-secondary small mb-3">{waitLine}</p>
             <div className="row g-2 g-md-3">
               {PLANS.map((plan) => (
                 <div key={plan.key} className="col-12 col-md-4">
@@ -99,6 +111,10 @@ export default function UpgradeGateModal() {
           </div>
         </div>
 
+        {/* While the administrator keeps the library premium-only there is no credit to
+            earn and no credit to spend, so the share-for-downloads card would promise a
+            door that does not open. */}
+        {downloadPolicy.mode === "premium" ? null : (
         <div className="card earn-card">
           <div className="card-body p-3 p-md-4">
             <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -160,10 +176,11 @@ export default function UpgradeGateModal() {
             ) : null}
           </div>
         </div>
+        )}
 
         <div className="d-flex justify-content-end gap-2">
           <button type="button" className="btn btn-outline-secondary" onClick={closeGate}>
-            Keep browsing free materials
+            {downloadPolicy.mode === "premium" ? "Not now" : "Keep browsing free materials"}
           </button>
         </div>
       </div>

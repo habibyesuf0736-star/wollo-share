@@ -1250,6 +1250,19 @@ function downloadPolicy(): DownloadPolicy {
   return normalizeDownloadPolicy(dbState.downloadPolicy);
 }
 
+// A monthly or annual plan is only live while its expiry is in the future. normalizeDatabase
+// folds a lapsed plan away when the row is read, but the in-memory copy still carries the old
+// value between saves, so every access decision has to check the date itself.
+function planIsLive(user: { accountPlan?: string; subscriptionExpiry?: string | null }): boolean {
+  const plan = String(user.accountPlan || "unpaid");
+  if (!PAID_PLANS.includes(plan)) return false;
+  if (plan === "premium_monthly" || plan === "premium_annual") {
+    const expiry = Date.parse(String(user.subscriptionExpiry || ""));
+    return Number.isFinite(expiry) && expiry > Date.now();
+  }
+  return true;
+}
+
 // Evangadi sells its own course pack, so it is never part of a student's library.
 function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
   return String(course.id || "") === "course-evangadi" || /evangadi/i.test(String(course.name || ""));
@@ -1840,6 +1853,12 @@ export async function createApp() {
         ...existing,
         ...safeUpdates,
         role: existing.role,
+        // The download ledger belongs to the server: authorize and the credit endpoint
+        // move it, and an admin tab holding a pre-spend copy must not write it back.
+        downloadCredits: existing.downloadCredits,
+        unpaidCurrentUploadProgress: existing.unpaidCurrentUploadProgress,
+        sharedMaterialsCount: existing.sharedMaterialsCount,
+        downloadsCount: existing.downloadsCount,
         password: existing.password,
         passwordHash: existing.passwordHash,
         passwordVault: existing.passwordVault
@@ -1901,12 +1920,15 @@ export async function createApp() {
     }
     const name = String(req.body?.name ?? user.name).trim();
     const department = String(req.body?.department ?? user.department ?? "").trim();
+    // A phone-only edit (a Google account saving its photo) must not be rejected over the
+    // number it never had; the rule fires when the student actually submits one.
+    const phoneSupplied = Object.prototype.hasOwnProperty.call(req.body || {}, "phone");
     const phone = String(req.body?.phone ?? user.phone ?? "").trim();
     if (name.length < 2) {
       res.status(400).json({ ok: false, error: "Enter your full name." });
       return;
     }
-    const phoneError = phoneProblem(phone);
+    const phoneError = phoneSupplied ? phoneProblem(phone) : "";
     if (phoneError) {
       res.status(400).json({ ok: false, error: phoneError });
       return;
@@ -1928,7 +1950,7 @@ export async function createApp() {
     }
     user.name = name.slice(0, 80);
     user.department = department.slice(0, 80) || user.department;
-    user.phone = phone.slice(0, 32);
+    if (phoneSupplied) user.phone = phone.slice(0, 32);
     if (avatarProvided) {
       if (avatarRaw) user.avatarUrl = avatarRaw;
       else delete user.avatarUrl;
@@ -2799,7 +2821,9 @@ export async function createApp() {
     // New students are Year 1 until they say otherwise, matching the signup form's default.
     const department = String(req.body?.department || "Freshman (Year 1)").trim();
     const phone = String(req.body?.phone || "").trim();
-    const plan = String(req.body?.accountPlan || "unpaid").trim();
+    // Signup never hands out a paid plan: only the administrator's own routes may set one,
+    // so a crafted register request cannot buy its way into unlimited downloads.
+    const plan = "unpaid";
     const registeredAt = new Date().toISOString().slice(0, 16).replace("T", " ");
 
     // Accounts live in one shared document, so unbounded signup is an outage and a
@@ -2853,17 +2877,10 @@ export async function createApp() {
       department,
       phone: phone.slice(0, 32),
       accountPlan: plan,
-      paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
+      paymentStatus: "unpaid",
       downloadOnlyAccount: false,
       amountPaidBirr: planPriceBirr(plan),
-      category:
-        plan === "paid_lifetime"
-          ? "Paid 500 Birr · Lifetime VIP"
-          : plan === "premium_annual"
-          ? "Premium Annual · 250 Birr · 1 Year"
-          : plan === "premium_monthly"
-          ? "Premium Monthly · 100 Birr"
-          : "Unpaid · Pending 2 Uploads",
+      category: "Unpaid · Pending 2 Uploads",
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: "Active now",
@@ -3757,6 +3774,7 @@ export async function createApp() {
       sharedMaterialsCount: Number(user.sharedMaterialsCount) || 0,
       unpaidCurrentUploadProgress: Number(user.unpaidCurrentUploadProgress) || 0,
       downloadCredits: Number(user.downloadCredits) || 0,
+      downloadsCount: Number(user.downloadsCount) || 0,
       uploadsPerCredit: policy.uploadsPerCredit,
       downloadMode: policy.mode,
       adSeconds: policy.adSeconds
@@ -4379,7 +4397,7 @@ export async function createApp() {
     const material = course ? (course.materials || []).find((m) => m.id === String(req.body?.materialId || "")) : null;
     const policy = downloadPolicy();
     const plan = String(user.accountPlan || "unpaid");
-    const premium = PAID_PLANS.includes(plan);
+    const premium = planIsLive(user);
 
     let allowed = premium;
     let reason = "";
@@ -4394,7 +4412,9 @@ export async function createApp() {
       else reason = "You have no downloads left — share a material or pick a plan.";
     }
     if (!allowed) {
-      res.json({ ok: true, allowed: false, reason, ...submissionCreditState(user) });
+      // A refusal is a refusal, not a successful answer: the status keeps a client that
+      // reached this endpoint through any other path from treating it as a pass.
+      res.status(403).json({ ok: false, allowed: false, reason, ...submissionCreditState(user) });
       return;
     }
 

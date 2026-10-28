@@ -100,7 +100,7 @@ export default function AdGateModal() {
             <>Premium members never see this spot.</>
           ) : downloadStatus.plan === "unpaid" && downloadPolicy.mode === "credits" ? (
             <>
-              1 credit used · <strong>{downloadStatus.credits}</strong> left.
+              Costs 1 credit · <strong>{Math.max(0, downloadStatus.credits - 1)}</strong> left after this.
             </>
           ) : (
             <>No downloads were used.</>

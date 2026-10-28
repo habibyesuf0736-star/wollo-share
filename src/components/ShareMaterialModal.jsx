@@ -133,8 +133,8 @@ export default function ShareMaterialModal() {
       ) : (
         <form onSubmit={submit} className="d-flex flex-column gap-3">
           <div className="review-note">
-            <strong>Upload 2, unlock 1 download:</strong> {downloadStatus.progress || 0} of{" "}
-            {downloadStatus.requiredCount || 2} approved.
+            <strong>Approved uploads unlock downloads:</strong> {downloadStatus.progress || 0} of{" "}
+            {downloadStatus.requiredCount || 2} toward your next one.
           </div>
 
           {mySubmissions.length ? (

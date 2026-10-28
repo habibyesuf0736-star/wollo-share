@@ -385,9 +385,17 @@ export function AppProvider({ children }) {
           setAppearanceSettings({ ...DEFAULT_APPEARANCE, ...res.appearanceSettings });
         if (res.userRatings && typeof res.userRatings === "object")
           setUserRatings((prev) => ({ ...prev, ...res.userRatings }));
-        // The gate rules always come from the server: a locally cached policy could
-        // hand a student downloads the administrator has since closed.
-        if (res.downloadPolicy) setDownloadPolicy(normalizeDownloadPolicy(res.downloadPolicy));
+      }
+      // The gate rules always come from the server: a locally cached policy could
+      // hand a student downloads the administrator has since closed. Students cannot edit
+      // them, so a pending local change is no reason to keep theirs; only an admin tab with
+      // unsaved edits (or a replay we just performed, whose answer predates it) holds back.
+      if (
+        res.downloadPolicy &&
+        !replayed &&
+        (session?.role !== "admin" || !hasLocalMutationRef.current)
+      ) {
+        setDownloadPolicy(normalizeDownloadPolicy(res.downloadPolicy));
       }
       if (!cancelled) setBooting(false);
     })();
@@ -829,6 +837,7 @@ export function AppProvider({ children }) {
               ? {
                   ...u,
                   downloadCredits: Number(res.downloadCredits) || 0,
+                  downloadsCount: Number(res.downloadsCount) || Number(u.downloadsCount) || 0,
                   unpaidCurrentUploadProgress: Number(res.unpaidCurrentUploadProgress) || 0,
                   sharedMaterialsCount: Number(res.sharedMaterialsCount) || 0
                 }
@@ -874,7 +883,10 @@ export function AppProvider({ children }) {
   // whatever the answer carries — including an administrator who just changed the mode.
   const adoptLedger = useCallback(
     (res) => {
-      if (!res || res.ok === false) return;
+      // A refusal is an answer too. The server marks a denial `ok: false`, but its body
+      // still carries the policy and the ledger, so dropping it would leave the student
+      // on the copy from before the administrator closed the library or moved their credits.
+      if (!res) return;
       if (res.downloadMode) {
         setDownloadPolicy((prev) =>
           normalizeDownloadPolicy({
@@ -886,12 +898,16 @@ export function AppProvider({ children }) {
         );
       }
       if (!activeUser || studentPreview) return;
+      // Only a real ledger answer may rewrite the numbers; an error body without them
+      // would otherwise zero out credits the student still holds.
+      if (res.downloadCredits === undefined && res.downloadsCount === undefined) return;
       commitUsers((prev) =>
         prev.map((u) =>
           u.id === activeUser.id
             ? {
                 ...u,
                 downloadCredits: Number(res.downloadCredits) || 0,
+                downloadsCount: Number(res.downloadsCount) || Number(u.downloadsCount) || 0,
                 unpaidCurrentUploadProgress: Number(res.unpaidCurrentUploadProgress) || 0,
                 sharedMaterialsCount: Number(res.sharedMaterialsCount) || 0
               }
@@ -910,14 +926,15 @@ export function AppProvider({ children }) {
       const mat = course ? (course.materials || []).find((m) => m.id === materialId) : null;
       if (!mat) return false;
 
-      const needsAuthorisation = session && activeUser && !studentPreview && !mat.free && !downloadStatus.premium;
+      const needsAuthorisation = Boolean(session && activeUser && !studentPreview);
       if (needsAuthorisation) {
         const res = await api.authorizeDownload({ courseId, materialId }, session.authToken).catch(() => null);
         adoptLedger(res);
-        // Refused: out of credits, or the library is closed to this plan now. An outage
-        // answers with nothing at all, and a student who was allowed a moment ago is not
-        // punished for the server being unreachable.
-        if (res && res.ok !== false && res.allowed !== true) {
+        // Refused: out of credits, or the library is closed to this plan now. A free file
+        // and a premium account are allowed too, so the same call also stops a plan the
+        // administrator took back. Only a request that got no answer at all falls through —
+        // a student who was allowed a moment ago is not punished for an outage.
+        if (res && res.allowed !== true) {
           pendingDownloadRef.current = null;
           removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
           setGate({ type: "upgrade", courseId, materialId, sideMaterialId, title: mat.name || "Study Material" });
@@ -941,12 +958,10 @@ export function AppProvider({ children }) {
       triggerBrowserDownload(href, (sideMat || mat).name || "wollo-share-material");
 
       if (session && activeUser && !studentPreview) {
+        // The download count itself comes back on the authorize answer; adding one here too
+        // would report every file twice.
         commitUsers((prev) =>
-          prev.map((u) =>
-            u.id === activeUser.id
-              ? { ...u, downloadsCount: (Number(u.downloadsCount) || 0) + 1, lastActiveAt: "Active now" }
-              : u
-          )
+          prev.map((u) => (u.id === activeUser.id ? { ...u, lastActiveAt: "Active now" } : u))
         );
       }
       pendingDownloadRef.current = null;
@@ -954,7 +969,7 @@ export function AppProvider({ children }) {
       toast(`Downloading "${(sideMat || mat).name}"`);
       return true;
     },
-    [adoptLedger, activeUser, commitUsers, coursesData, downloadStatus.premium, session, studentPreview, toast]
+    [adoptLedger, activeUser, commitUsers, coursesData, session, studentPreview, toast]
   );
 
   const requestDownload = useCallback(
