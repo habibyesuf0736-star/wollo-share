@@ -592,22 +592,24 @@ export function AppProvider({ children }) {
     async (details) => {
       const res = await api.registerAccount(details);
       if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Registration failed." };
-      if (res.session) {
-        storeSession(res.session);
-        if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
-        return { ok: true, user: res.user, signedIn: true, mailSent: Boolean(res.mailSent), message: res.message || "" };
-      }
-      // No session until the 6-digit code is confirmed (or the admin approves it).
+      if (!res.session)
+        return { ok: true, signedIn: false, email: res.email || details.email, message: res.message || "Account created — sign in to open the library." };
+      // The account opens immediately; the emailed code is confirmed afterwards from the
+      // "Confirm your email" bar rather than holding the student outside the library.
+      const saved = await settleSession(res.session);
+      if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
       return {
         ok: true,
-        signedIn: false,
+        user: res.user,
+        session: saved,
+        signedIn: true,
         pendingVerification: Boolean(res.pendingVerification),
         email: res.email || details.email,
         mailSent: Boolean(res.mailSent),
-        message: res.message
+        message: res.message || ""
       };
     },
-    [storeSession]
+    [settleSession]
   );
 
   const verifySignup = useCallback(
@@ -615,19 +617,13 @@ export function AppProvider({ children }) {
       const res = await api.verifyEmail(email, code);
       if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Verification failed." };
       if (res.session) {
-        const saved = storeSession(res.session);
-        hasLocalMutationRef.current = false;
+        const saved = await settleSession(res.session);
         if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
-        const state = await fetchServerState(saved.authToken);
-        if (state && state.ok !== false) {
-          if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
-          if (state.userRatings) setUserRatings((prev) => ({ ...prev, ...state.userRatings }));
-        }
-        return { ok: true, signedIn: true };
+        return { ok: true, signedIn: true, session: saved };
       }
       return { ok: true, signedIn: false, message: res.message };
     },
-    [fetchServerState, storeSession]
+    [settleSession]
   );
 
   const saveProfile = useCallback(async (details) => {

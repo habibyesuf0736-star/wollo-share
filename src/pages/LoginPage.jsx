@@ -18,7 +18,7 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
-import { completeRecovery, pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
+import { completeRecovery, pollQrLogin, requestRecovery, startQrLogin } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 import { SITE_ORIGIN } from "../lib/seo.js";
@@ -44,7 +44,6 @@ export default function LoginPage() {
     signInWithCode,
     resendSignInCode,
     register,
-    verifySignup,
     adoptSession,
     goLibrary,
     pageTexts,
@@ -61,8 +60,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [signin, setSignin] = useState({ identifier: "", password: "" });
   const [signup, setSignup] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
-  const [signupStage, setSignupStage] = useState("form");
-  const [pending, setPending] = useState({ email: "", code: "", mailSent: false, message: "" });
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
   const [twoFactor, setTwoFactor] = useState({ identifier: "", email: "", code: "", minutesLeft: 10 });
   const [qr, setQr] = useState({ id: "", url: "", status: "idle", secondsLeft: 0, error: "" });
@@ -241,60 +238,12 @@ export default function LoginPage() {
       setError(res.error || "Registration failed.");
       return;
     }
-    if (res.pendingVerification) {
-      setPending({ email: res.email, code: "", mailSent: res.mailSent, message: res.message || "" });
-      setSignupStage("code");
-      setNotice(res.message || "");
-      return;
-    }
-    toast("Account created — you are signed in.");
-    if (res.message && !res.mailSent) setNotice(res.message);
-    goLibrary();
-  };
-
-  const submitVerify = async (event) => {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    if (pending.code.replace(/\D/g, "").length !== 6) {
-      setError("Enter the 6-digit code from your email.");
-      return;
-    }
-    setBusy(true);
-    const res = await verifySignup(pending.email, pending.code);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error || "Verification failed.");
-      return;
-    }
-    setSignupStage("form");
-    setPending({ email: "", code: "", mailSent: false, message: "" });
-    toast("Email verified — you are signed in.");
-    goLibrary();
-  };
-
-  const submitResend = async () => {
-    setError("");
-    setNotice("");
-    setBusy(true);
-    const res = await resendVerificationCode(pending.email);
-    setBusy(false);
-    if (!res || res.ok !== true) {
-      setError((res && res.error) || "Could not resend the code.");
-      return;
-    }
-    if (res.session) {
-      // Email delivery is refused by the provider, so the server opened the account as an
-      // ordinary student instead of leaving the visitor stuck on this screen.
-      adoptSession(res.session);
-      setSignupStage("form");
-      setPending({ email: "", code: "", mailSent: false, message: "" });
-      toast("Signed in — your email could not be confirmed, but the library is open.");
-      goLibrary();
-      return;
-    }
-    setPending({ ...pending, mailSent: Boolean(res.mailSent) });
-    setNotice(res.message || "A new code was requested. If email is unavailable, the administrator can confirm your account.");
+    // The account opens immediately — the emailed code is confirmed inside the library,
+    // from the "Confirm your email" bar, instead of holding a new student outside it.
+    toast(res.signedIn ? "Account created — you are signed in." : "Account created — sign in to open the library.");
+    if (res.message) setNotice(res.message);
+    if (res.signedIn) goLibrary();
+    else setTab("signin");
   };
 
   const submitRecovery = async (event) => {
@@ -529,63 +478,7 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          {tab === "register" && signupStage === "code" ? (
-            <form onSubmit={submitVerify} className="d-flex flex-column gap-3">
-              <p className="small text-secondary mb-0">
-                {pending.mailSent ? (
-                  <>
-                    We emailed a <strong>6-digit code</strong> to <strong>{pending.email}</strong>. It expires in 30 minutes.
-                  </>
-                ) : (
-                  <>
-                    Email delivery is unavailable right now, so no code could be sent. Ask the administrator to confirm{" "}
-                    <strong>{pending.email}</strong> from the admin panel, then sign in with your password.
-                  </>
-                )}
-              </p>
-              <div>
-                <label className="form-label small fw-semibold mb-0" htmlFor="signupCode">
-                  Verification code
-                </label>
-                <div className="ws-field-icon">
-                  <KeyRound size={16} aria-hidden="true" />
-                  <input
-                    id="signupCode"
-                    className="form-control"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    placeholder="123456"
-                    value={pending.code}
-                    onChange={(e) => setPending({ ...pending, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
-                  />
-                </div>
-              </div>
-              <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
-                {busy ? "Verifying…" : "Verify and sign in"}
-                {busy ? null : <BadgeCheck size={16} aria-hidden="true" />}
-              </button>
-              <div className="d-flex gap-3 flex-wrap align-items-center">
-                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={submitResend} disabled={busy}>
-                  Resend code
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-link btn-sm p-0"
-                  onClick={() => {
-                    setSignupStage("form");
-                    setPending({ email: "", code: "", mailSent: false, message: "" });
-                    setError("");
-                    setNotice("");
-                  }}
-                >
-                  Use a different email
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          {tab === "register" && signupStage !== "code" ? (
+          {tab === "register" ? (
             <form onSubmit={submitRegister} className="d-flex flex-column gap-3">
               <div className="row g-2">
                 <div className="col-12 col-sm-6">
@@ -612,7 +505,7 @@ export default function LoginPage() {
                       autoComplete="new-password"
                       value={signup.password}
                       onChange={(e) => setSignup({ ...signup, password: e.target.value })}
-                      placeholder="At least 4 characters"
+                      placeholder="At least 8 characters"
                     />
                   </div>
                 </div>
@@ -646,8 +539,9 @@ export default function LoginPage() {
                 {busy ? "Creating account…" : "Create free account"}
               </button>
               <p className="form-text small mb-0">
-                We send a 6-digit verification code to your email. If it does not arrive, just sign in with your
-                password — that verifies the account — or ask the administrator to confirm it from the admin panel.
+                The account opens straight away and we send <strong>one</strong> email: a 6-digit code. Enter it in the
+                "Confirm your email" bar once you are inside. You will not get a second code for signing in while that
+                one is still valid, and if the mail never arrives your password opens the account by itself.
               </p>
             </form>
           ) : null}

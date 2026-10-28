@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
+import EmailVerifyBanner from "../components/EmailVerifyBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
 import UserAvatar from "../components/UserAvatar.jsx";
 import { listLoginDevices, revokeLoginDevice, signOutOtherDevices } from "../lib/api.js";
@@ -211,6 +212,7 @@ export default function ProfilePage() {
   return (
     <div className="ws-page">
       <AnnouncementBanner />
+      <EmailVerifyBanner />
 
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div className="d-flex align-items-center gap-3">

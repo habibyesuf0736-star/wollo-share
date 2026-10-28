@@ -261,6 +261,7 @@ function safeUserAccount(user: UserAccount) {
     signInCode: _signInCode,
     signInCodeExpiresAt: _signInCodeExpiresAt,
     signInCodeAttempts: _signInCodeAttempts,
+    signInCodeSentAt: _signInCodeSentAt,
     ...safeUser
   } = user;
   return safeUser;
@@ -809,6 +810,7 @@ interface UserAccount {
   signInCode?: string;
   signInCodeExpiresAt?: string;
   signInCodeAttempts?: number;
+  signInCodeSentAt?: string;
   addedByAdmin?: boolean;
   // A small data URL the student uploads themselves; Google sign-in may bring a photo too.
   avatarUrl?: string;
@@ -1448,6 +1450,7 @@ async function sendSignupCode(user: UserAccount, code: string): Promise<{ ok: bo
 // leaked code is a short-lived key rather than a permanent door.
 const SIGNIN_CODE_TTL_MS = 10 * 60 * 1000;
 const SIGNIN_CODE_MAX_ATTEMPTS = 6;
+const SIGNIN_CODE_REUSE_MS = 4 * 60 * 1000;
 
 function issueSignInCode(user: UserAccount): string {
   const code = sixDigitCode();
@@ -1461,6 +1464,7 @@ function clearSignInCode(user: UserAccount) {
   delete user.signInCode;
   delete user.signInCodeExpiresAt;
   delete user.signInCodeAttempts;
+  delete user.signInCodeSentAt;
 }
 
 function pendingSignInCode(user: UserAccount): boolean {
@@ -1475,7 +1479,14 @@ function signInCodeMatches(user: UserAccount, code: string): boolean {
 // Returns false when the provider refuses the mail. The caller then finishes the sign-in on
 // the password alone: a mailbox that will not accept our IP must not lock a student out of
 // their own account, and the administrator can see the attempt in the activity log.
-async function emailSignInCode(user: UserAccount): Promise<boolean> {
+async function emailSignInCode(user: UserAccount, force = false): Promise<boolean> {
+  // A student who signs in twice in a row — a mistyped code, a page reload — must not get a
+  // second message for the same step, so a code that has barely gone out is resent as is.
+  // The "Resend code" button forces a fresh one because that click is the request itself.
+  const sentAgo = Date.parse(String(user.signInCodeSentAt || ""));
+  if (!force && pendingSignInCode(user) && Number.isFinite(sentAgo) && Date.now() - sentAgo < SIGNIN_CODE_REUSE_MS) {
+    return true;
+  }
   const code = issueSignInCode(user);
   const delivery = await sendMail({
     to: user.email,
@@ -1491,6 +1502,7 @@ async function emailSignInCode(user: UserAccount): Promise<boolean> {
     clearSignInCode(user);
     return false;
   }
+  user.signInCodeSentAt = new Date().toISOString();
   return true;
 }
 
@@ -2813,7 +2825,9 @@ export async function createApp() {
         pendingVerification: true,
         mailSent: true,
         email: user.email,
-        message: `We emailed a 6-digit code to ${user.email}. Enter it below to activate the account.`
+        user: safeUserAccount(user),
+        session: issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification"),
+        message: `Your account is open — we emailed a 6-digit code to ${user.email}. Enter it whenever you see the "Confirm your email" bar to verify the address.`
       });
       return;
     }
@@ -3144,12 +3158,19 @@ export async function createApp() {
     );
 
     if (matchedUser) {
-      const verifiedNow = verifyAccountAtSignIn(matchedUser);
+      // A student who registered minutes ago already has a live confirmation code in their
+      // inbox and the "Confirm your email" bar is waiting for it inside the library, so this
+      // sign-in sends no second email and spends no code that has not been used yet.
+      const awaitingSignupCode =
+        matchedUser.emailVerified === false &&
+        Boolean(matchedUser.verificationCode) &&
+        Date.parse(String(matchedUser.verificationExpiresAt || "")) > Date.now();
+      const verifiedNow = awaitingSignupCode ? false : verifyAccountAtSignIn(matchedUser);
       loginRateLimitMap.delete(attemptKey);
 
       // The password proves they hold the credential; the code proves they can read the
       // mailbox. Both are required before this screen hands out a session.
-      if (await emailSignInCode(matchedUser)) {
+      if (!awaitingSignupCode && (await emailSignInCode(matchedUser))) {
         saveDatabase(dbState);
         res.json({
           ok: true,
@@ -3176,7 +3197,11 @@ export async function createApp() {
         session: signedSession,
         verifiedNow,
         codeSkipped: true,
-        message: verifiedNow ? "Your account is verified — you are signed in." : ""
+        message: awaitingSignupCode
+          ? 'Signed in. Enter the code we already emailed in the "Confirm your email" bar to finish verifying.'
+          : verifiedNow
+          ? "Your account is verified — you are signed in."
+          : ""
       });
       return;
     }
@@ -3316,7 +3341,7 @@ export async function createApp() {
       });
       return;
     }
-    const delivered = await emailSignInCode(user);
+    const delivered = await emailSignInCode(user, true);
     saveDatabase(dbState);
     res.json({
       ok: true,

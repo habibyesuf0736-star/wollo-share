@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ArrowRight, LibraryBig, Search, Sparkles, Upload, X } from "lucide-react";
 import { useApp, DEFAULT_TEXTS } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
+import EmailVerifyBanner from "../components/EmailVerifyBanner.jsx";
 import AdSlot from "../components/AdSlot.jsx";
 import PlanPromo from "../components/PlanPromo.jsx";
 import CourseCard from "../components/CourseCard.jsx";
@@ -353,6 +354,7 @@ export default function LibraryPage() {
   return (
     <div className="ws-page">
       <AnnouncementBanner />
+      <EmailVerifyBanner />
 
       <section className="ws-hero">
         <h1 className="ws-hero-title">
