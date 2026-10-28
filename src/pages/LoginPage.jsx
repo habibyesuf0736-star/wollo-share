@@ -18,7 +18,7 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
-import { completeRecovery, pollQrLogin, requestRecovery, startQrLogin } from "../lib/api.js";
+import { completeRecovery, pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 import { SITE_ORIGIN } from "../lib/seo.js";
@@ -44,6 +44,7 @@ export default function LoginPage() {
     signInWithCode,
     resendSignInCode,
     register,
+    verifySignup,
     adoptSession,
     goLibrary,
     toast,
@@ -59,6 +60,11 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [signin, setSignin] = useState({ identifier: "", password: "" });
   const [signup, setSignup] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
+  // Signup stops on the code step: the account only opens once the address answers.
+  const [signupStage, setSignupStage] = useState("form");
+  const [signupCode, setSignupCode] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [signupMailSent, setSignupMailSent] = useState(true);
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
   const [twoFactor, setTwoFactor] = useState({ identifier: "", email: "", code: "", minutesLeft: 10 });
   const [qr, setQr] = useState({ id: "", url: "", status: "idle", secondsLeft: 0, error: "" });
@@ -237,12 +243,47 @@ export default function LoginPage() {
       setError(res.error || "Registration failed.");
       return;
     }
-    // The account opens immediately — the emailed code is confirmed inside the library,
-    // from the "Confirm your email" bar, instead of holding a new student outside it.
-    toast(res.signedIn ? "Account created — you are signed in." : "Account created — sign in to open the library.");
-    if (res.message) setNotice(res.message);
-    if (res.signedIn) goLibrary();
-    else setTab("signin");
+    // The account is created but not opened: the student confirms the address with the
+    // emailed code first, and only then is signed in and taken to the library.
+    setPendingEmail(res.email || signup.email.trim());
+    setSignupMailSent(res.mailSent !== false);
+    setSignupCode("");
+    setSignupStage("verify");
+    setNotice("");
+  };
+
+  const submitSignupCode = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (signupCode.length !== 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setBusy(true);
+    const res = await verifySignup(pendingEmail, signupCode);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error || "That code did not work.");
+      return;
+    }
+    toast("Email confirmed — welcome to Wollo Share.");
+    setSignupStage("form");
+    setSignupCode("");
+    setSignup({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
+    goLibrary();
+  };
+
+  const resendSignupCode = async () => {
+    setError("");
+    setBusy(true);
+    const res = await resendVerificationCode(pendingEmail);
+    setBusy(false);
+    if (!res || res.ok !== true) {
+      setError((res && res.error) || "Could not resend the code.");
+      return;
+    }
+    setSignupMailSent(Boolean(res.mailSent));
+    setNotice(res.mailSent ? "A fresh code is on its way." : res.message || "The email could not be delivered.");
   };
 
   const submitRecovery = async (event) => {
@@ -335,20 +376,17 @@ export default function LoginPage() {
                 <label className="form-label small fw-semibold mb-0" htmlFor="signinCode">
                   Sign-in code
                 </label>
-                <div className="ws-field-icon">
-                  <KeyRound size={16} aria-hidden="true" />
-                  <input
-                    id="signinCode"
-                    className="form-control"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    autoFocus
-                    maxLength={6}
-                    placeholder="123456"
-                    value={twoFactor.code}
-                    onChange={(e) => setTwoFactor({ ...twoFactor, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
-                  />
-                </div>
+                <input
+                  id="signinCode"
+                  className="form-control ws-code-input"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={6}
+                  placeholder="123456"
+                  value={twoFactor.code}
+                  onChange={(e) => setTwoFactor({ ...twoFactor, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                />
               </div>
               <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
                 {busy ? "Checking…" : "Verify and sign in"}
@@ -467,7 +505,7 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          {tab === "register" ? (
+          {tab === "register" && signupStage === "form" ? (
             <form onSubmit={submitRegister} className="d-flex flex-column gap-3">
               <div className="row g-2">
                 <div className="col-12 col-sm-6">
@@ -562,7 +600,68 @@ export default function LoginPage() {
                 {busy ? <Sparkles size={16} aria-hidden="true" /> : <BookOpenCheck size={16} aria-hidden="true" />}
                 {busy ? "Creating account…" : "Create free account"}
               </button>
-              <p className="form-text small mb-0">We email one 6-digit code. Enter it in the "Confirm your email" bar inside.</p>
+              <p className="form-text small mb-0">We email a 6-digit code — enter it next to open your account.</p>
+            </form>
+          ) : null}
+
+          {tab === "register" && signupStage === "verify" ? (
+            <form onSubmit={submitSignupCode} className="d-flex flex-column gap-3">
+              <p className="small text-secondary mb-0">
+                Code sent to <strong>{pendingEmail}</strong>. Enter the 6 digits to open your account.
+              </p>
+              <div>
+                <label className="form-label small fw-semibold" htmlFor="signupCode">
+                  Confirmation code
+                </label>
+                <input
+                  id="signupCode"
+                  className="form-control ws-code-input"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={6}
+                  placeholder="123456"
+                  value={signupCode}
+                  onChange={(e) => setSignupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                />
+              </div>
+              {!signupMailSent ? (
+                <p className="small text-secondary mb-0">
+                  The code did not reach that mailbox. Resend it, or sign in with the password you chose.
+                </p>
+              ) : null}
+              <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
+                {busy ? "Checking…" : "Verify and open my account"}
+                {busy ? null : <BadgeCheck size={16} aria-hidden="true" />}
+              </button>
+              <div className="d-flex flex-wrap gap-3 align-items-center">
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={resendSignupCode} disabled={busy}>
+                  Resend code
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0"
+                  onClick={() => {
+                    setSignupStage("form");
+                    setSignupCode("");
+                    setError("");
+                    setNotice("");
+                    setSignup({ ...signup, email: pendingEmail });
+                  }}
+                >
+                  Change the address
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0"
+                  onClick={() => {
+                    setSignin({ identifier: pendingEmail, password: "" });
+                    switchTab("signin");
+                  }}
+                >
+                  Already confirmed? Sign in
+                </button>
+              </div>
             </form>
           ) : null}
 

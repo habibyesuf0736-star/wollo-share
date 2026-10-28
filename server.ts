@@ -2911,7 +2911,7 @@ export async function createApp() {
         email: user.email,
         user: safeUserAccount(user),
         session: issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification"),
-        message: `Your account is open — we emailed a 6-digit code to ${user.email}. Enter it whenever you see the "Confirm your email" bar to verify the address.`
+        message: `We emailed a 6-digit code to ${user.email}. Enter it on the "Confirm your email" step to open the account.`
       });
       return;
     }
@@ -2926,7 +2926,7 @@ export async function createApp() {
       email: user.email,
       user: safeUserAccount(user),
       session: issueDeviceSession({ id: user.id, name: user.name, email: user.email, role: user.role }, req, "verification"),
-      message: `Your account is open, but the code did not reach ${user.email}. Press "Resend" in the "Confirm your email" bar, or sign in with your password.`
+      message: `The code did not reach ${user.email}. Press "Resend" on the "Confirm your email" step, or sign in with your password.`
     });
   });
   app.post("/api/auth/verify-email", async (req, res) => {

@@ -1,12 +1,12 @@
 import React, { useState } from "react";
-import { BadgeCheck, KeyRound, X } from "lucide-react";
+import { BadgeCheck, X } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import { resendVerificationCode } from "../lib/api.js";
 
 const DISMISSED_KEY = "wollo_email_confirm_bar_v1";
 
-// The account opens the moment it is created, so the emailed code is confirmed from here —
-// inside the library — instead of holding the student on the sign-in screen.
+// Signup now asks for the code before it opens the library. This bar covers the other
+// doors — an account added by the administrator, or one whose code was never entered.
 export default function EmailVerifyBanner() {
   const { activeUser, session, studentPreview, verifySignup, toast } = useApp();
   const [code, setCode] = useState("");
@@ -68,19 +68,17 @@ export default function EmailVerifyBanner() {
         <span className="flex-grow-1" style={{ minWidth: 180 }}>
           <BadgeCheck size={16} aria-hidden="true" /> Confirm your email: code sent to <strong>{email}</strong>.
         </span>
-        <div className="ws-field-icon" style={{ width: 132 }}>
-          <KeyRound size={15} aria-hidden="true" />
-          <input
-            className="form-control form-control-sm"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            aria-label="Email confirmation code"
-            maxLength={6}
-            placeholder="123456"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-          />
-        </div>
+        <input
+          className="form-control form-control-sm ws-code-input"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          aria-label="Email confirmation code"
+          maxLength={6}
+          placeholder="123456"
+          style={{ maxWidth: 132 }}
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        />
         <button type="submit" className="btn btn-sm btn-primary" disabled={busy}>
           Confirm
         </button>

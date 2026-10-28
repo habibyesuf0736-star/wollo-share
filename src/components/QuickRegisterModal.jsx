@@ -2,29 +2,49 @@ import React, { useState } from "react";
 import Modal from "./Modal.jsx";
 import DepartmentSelect from "./DepartmentSelect.jsx";
 import { useApp } from "../store/AppContext.jsx";
+import { resendVerificationCode } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 
+const EMPTY_FORM = { name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" };
+
 export default function QuickRegisterModal() {
-  const { gate, closeGate, setGate, register, goLogin, toast, coursesData } = useApp();
+  const { gate, closeGate, setGate, register, verifySignup, goLogin, toast, coursesData } = useApp();
   const open = Boolean(gate && gate.type === "register");
-  const [form, setForm] = useState({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [stage, setStage] = useState("form");
+  const [code, setCode] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [mailSent, setMailSent] = useState(true);
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   if (!open) return null;
 
-  // The student is now a signed-in member of the library, so hand them back to whatever
-  // gate their download hit next instead of dropping them at the top of the site.
+  const reset = () => {
+    setForm(EMPTY_FORM);
+    setStage("form");
+    setCode("");
+    setPendingEmail("");
+    setNotice("");
+    setError("");
+  };
+
+  const close = () => {
+    reset();
+    closeGate();
+  };
+
+  // Only after the address answers does the student land back on the download they wanted.
   const releaseToNextGate = (name) => {
-    toast(`Account created — welcome, ${name}!`);
+    toast(`Email confirmed — welcome, ${name}!`);
     if (gate.materialId) {
       setGate({ type: "upgrade", courseId: gate.courseId, materialId: gate.materialId, sideMaterialId: gate.sideMaterialId, title: gate.title });
     } else {
       closeGate();
     }
-    setForm({ name: "", email: "", password: "", department: FRESHMAN_DEPARTMENT, phone: "" });
-    setError("");
+    reset();
   };
 
   const submit = async (event) => {
@@ -56,61 +76,118 @@ export default function QuickRegisterModal() {
       setError(res.error || "Could not create the account.");
       return;
     }
-    if (!res.signedIn) {
-      toast(res.message || "Account created — sign in to continue.");
-      closeGate();
-      goLogin();
+    setPendingEmail(res.email || form.email.trim());
+    setMailSent(res.mailSent !== false);
+    setCode("");
+    setNotice("");
+    setStage("verify");
+  };
+
+  const submitCode = async (event) => {
+    event.preventDefault();
+    if (code.length !== 6) {
+      setError("Enter the 6-digit code from your email.");
       return;
     }
-    // The emailed 6-digit code is confirmed after sign-in, from the library's
-    // "Confirm your email" bar, so the download they clicked is never blocked by it.
-    releaseToNextGate(res.user ? res.user.name : "student");
+    setBusy(true);
+    setError("");
+    const res = await verifySignup(pendingEmail, code);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error || "That code did not work.");
+      return;
+    }
+    releaseToNextGate(form.name.trim() || (res.session && res.session.name) || "student");
+  };
+
+  const resend = async () => {
+    setError("");
+    setBusy(true);
+    const res = await resendVerificationCode(pendingEmail);
+    setBusy(false);
+    if (!res || res.ok !== true) {
+      setError((res && res.error) || "Could not resend the code.");
+      return;
+    }
+    setMailSent(Boolean(res.mailSent));
+    setNotice(res.mailSent ? "A fresh code is on its way." : res.message || "The email could not be delivered.");
   };
 
   return (
     <Modal
       open={open}
-      onClose={closeGate}
-      title="Create your free student account"
-      subtitle={gate.title ? `“${gate.title}” is reserved for registered Wollo Share students.` : "Registration is free and unlocks the shared library."}
+      onClose={close}
+      title={stage === "verify" ? "Confirm your email" : "Create your free student account"}
+      subtitle={
+        stage === "verify"
+          ? `Code sent to ${pendingEmail}.`
+          : gate.title
+          ? `“${gate.title}” is reserved for registered Wollo Share students.`
+          : "Registration is free and unlocks the shared library."
+      }
       size="narrow"
     >
-      <form onSubmit={submit} className="d-flex flex-column gap-3">
-        <input className="form-control" placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input className="form-control" type="email" placeholder="Student email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <input
-          className="form-control"
-          type="password"
-          placeholder="Choose a password (min 8 characters)"
-          autoComplete="new-password"
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-        />
-        <DepartmentSelect
-          coursesData={coursesData}
-          value={form.department}
-          onChange={(department) => setForm({ ...form, department })}
-        />
-        <div>
+      {stage === "verify" ? (
+        <form onSubmit={submitCode} className="d-flex flex-column gap-3">
+          <input
+            className="form-control ws-code-input"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            maxLength={6}
+            placeholder="123456"
+            aria-label="Email confirmation code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          />
+          {!mailSent ? (
+            <p className="small text-secondary mb-0">The code did not reach that mailbox. Resend it, or sign in with the password you chose.</p>
+          ) : null}
+          {notice ? <p className="small text-secondary mb-0">{notice}</p> : null}
+          {error ? <p className="text-danger small mb-0">{error}</p> : null}
+          <div className="d-flex justify-content-between gap-2">
+            <button type="button" className="btn btn-outline-secondary" onClick={resend} disabled={busy}>
+              Resend code
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "Checking…" : "Verify and continue"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={submit} className="d-flex flex-column gap-3">
+          <input className="form-control" placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input className="form-control" type="email" placeholder="Student email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <input
             className="form-control"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="Phone number (e.g. 0912 345 678)"
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            type="password"
+            placeholder="Choose a password (min 8 characters)"
+            autoComplete="new-password"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
-        </div>
-        {error ? <p className="text-danger small mb-0">{error}</p> : null}
-        <div className="d-flex justify-content-between gap-2">
-          <button type="button" className="btn btn-outline-secondary" onClick={() => { closeGate(); goLogin(); }}>
-            I already have an account
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? "Creating…" : "Create account"}
-          </button>
-        </div>
-      </form>
+          <DepartmentSelect coursesData={coursesData} value={form.department} onChange={(department) => setForm({ ...form, department })} />
+          <div>
+            <input
+              className="form-control"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="Phone number (e.g. 0912 345 678)"
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
+          </div>
+          {error ? <p className="text-danger small mb-0">{error}</p> : null}
+          <div className="d-flex justify-content-between gap-2">
+            <button type="button" className="btn btn-outline-secondary" onClick={() => { close(); goLogin(); }}>
+              I already have an account
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? "Creating…" : "Create account"}
+            </button>
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }

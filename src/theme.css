@@ -1979,6 +1979,23 @@ a {
 .ws-field-icon .form-select {
   padding-left: 40px;
 }
+
+/* Six digits read as one code, not as running text. */
+.ws-code-input {
+  max-width: 168px;
+  text-align: center;
+  text-indent: 0.32em;
+  letter-spacing: 0.32em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 1.05rem;
+}
+.ws-code-input::placeholder {
+  letter-spacing: 0.32em;
+  font-weight: 500;
+  color: var(--muted);
+  opacity: 0.55;
+}
 .ws-field-icon:has(.ws-pw-toggle) .form-control {
   padding-right: 96px;
 }

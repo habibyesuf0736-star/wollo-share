@@ -653,24 +653,18 @@ export function AppProvider({ children }) {
     async (details) => {
       const res = await api.registerAccount(details);
       if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Registration failed." };
-      if (!res.session)
-        return { ok: true, signedIn: false, email: res.email || details.email, message: res.message || "Account created — sign in to open the library." };
-      // The account opens immediately; the emailed code is confirmed afterwards from the
-      // "Confirm your email" bar rather than holding the student outside the library.
-      const saved = await settleSession(res.session);
-      if (res.user) setUsersData((prev) => [res.user, ...prev.filter((u) => u.id !== res.user.id)]);
+      // The account exists, but it is not opened here: no session is stored until the
+      // emailed code is confirmed, so a reload cannot slip past the code step.
       return {
         ok: true,
         user: res.user,
-        session: saved,
-        signedIn: true,
-        pendingVerification: Boolean(res.pendingVerification),
+        pendingVerification: true,
         email: res.email || details.email,
         mailSent: Boolean(res.mailSent),
         message: res.message || ""
       };
     },
-    [settleSession]
+    []
   );
 
   const verifySignup = useCallback(
