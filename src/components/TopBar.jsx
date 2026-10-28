@@ -29,6 +29,7 @@ export default function TopBar() {
     goSupport,
     goLogin,
     goProfile,
+    goPremium,
     view,
     downloadStatus,
     setGate
@@ -60,6 +61,14 @@ export default function TopBar() {
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setGate({ type: "share", courseId: view.courseId || "" })}>
             <Upload size={15} className="me-1 align-text-bottom" aria-hidden="true" />
             Share material
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${view.name === "premium" ? "btn-primary" : "btn-outline-secondary"}`}
+            onClick={goPremium}
+          >
+            <Crown size={15} className="me-1 align-text-bottom" aria-hidden="true" />
+            Premium
           </button>
           {session ? (
             <button

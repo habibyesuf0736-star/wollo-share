@@ -709,7 +709,8 @@ const DEFAULT_TEXTS = {
   welcomeTitle: "Course Materials Library",
   welcomeDesc: "Course notes, slides, past exams and lab manuals — by college, year & semester.",
   coursesHeading: "Courses & Study Materials",
-  footerText: "Wollo Share · University Course Materials Library"
+  footerText: "Wollo Share · University Course Materials Library",
+  premiumPayment: ""
 };
 
 const DEFAULT_APPEARANCE = {
@@ -1732,6 +1733,7 @@ export async function createApp() {
     const urls: Array<{ path: string; priority: string; changefreq: string }> = [
       { path: "/", priority: "1.0", changefreq: "daily" },
       { path: "/login", priority: "0.6", changefreq: "monthly" },
+      { path: "/premium", priority: "0.9", changefreq: "weekly" },
       { path: "/support", priority: "0.5", changefreq: "monthly" }
     ];
     for (const course of dbState.coursesData) {

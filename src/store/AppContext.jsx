@@ -10,7 +10,7 @@ import {
   removeKey,
   takeTabJson
 } from "../lib/storage.js";
-import { LIBRARY_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
+import { LIBRARY_SEO, PREMIUM_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
 
 const AppContext = createContext(null);
 
@@ -19,7 +19,8 @@ export const DEFAULT_TEXTS = {
   siteSubtitle: "Wollo University course library",
   welcomeTitle: "Every Wollo University course material in one library",
   welcomeDesc: "Notes, exams, slides and manuals.",
-  footerText: "Wollo Share · Built by Wollo University students, for Wollo University students."
+  footerText: "Wollo Share · Built by Wollo University students, for Wollo University students.",
+  premiumPayment: ""
 };
 
 export const DEFAULT_APPEARANCE = {
@@ -56,6 +57,7 @@ function viewFromLocation() {
   const authorizePath = pathname.match(/^\/authorize\/([A-Za-z0-9_-]{8,64})/);
   if (authorizePath) return { name: "deviceLogin", qrId: authorizePath[1] };
   if (pathname === "/support" || /^#\/support/.test(hash)) return { name: "support" };
+  if (pathname === "/premium" || /^#\/premium/.test(hash)) return { name: "premium" };
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
   const match = hash.match(
@@ -77,13 +79,8 @@ function clearStaffHash() {
 function decodeTokenPayload(token) {
   try {
     const parts = String(token).split(".");
-    if (parts.length !== 3 || parts[0] !== "wstok") return null;
-    const raw = decodeURIComponent(
-      atob(parts[1])
-        .split("")
-        .map((c) => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
-        .join("")
-    );
+    if (parts.length !== 3 || parts[0] !== "wstok" || !/^[a-f\d]+$/i.test(parts[1])) return null;
+    const raw = decodeURIComponent(parts[1].replace(/.{2}/g, (byte) => `%${byte}`));
     const [id, email, role] = raw.split("|");
     return { id, email, role };
   } catch {
@@ -405,6 +402,13 @@ export function AppProvider({ children }) {
     if (window.location.pathname !== "/support") window.history.pushState(null, "", "/support");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+  // The pricing page is public and crawlable, so a customer can be sent a link and buy
+  // without ever signing in first.
+  const goPremium = useCallback(() => {
+    setView({ name: "premium" });
+    if (window.location.pathname !== "/premium") window.history.pushState(null, "", "/premium");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   // A pasted or crawled /c/<slug> address arrives before the catalog is loaded, so the
   // slug is matched to a course as soon as the library data lands.
@@ -441,6 +445,10 @@ export function AppProvider({ children }) {
       });
       return;
     }
+    if (view.name === "premium") {
+      applyPageSeo(PREMIUM_SEO);
+      return;
+    }
     if (view.name === "deviceLogin") {
       applyPageSeo({
         path: "/authorize",
@@ -466,6 +474,7 @@ export function AppProvider({ children }) {
       else if (next.name === "deviceLogin") setView({ name: "deviceLogin", qrId: next.qrId });
       else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "support") setView({ name: "support" });
+      else if (next.name === "premium") setView({ name: "premium" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
       else if (next.name === "sublist") setView({ name: "sublist", courseId: null, courseSlug: next.courseSlug, query: "", year: "" });
       else setView({ name: "library", courseId: null });
@@ -1448,6 +1457,7 @@ export function AppProvider({ children }) {
     goAdmin,
     goProfile,
     goSupport,
+    goPremium,
     login,
     signInWithCode,
     resendSignInCode,

@@ -82,3 +82,10 @@ export const LIBRARY_SEO = {
   description:
     "Free Wollo University student library: download lecture notes, slide decks, past exam PDFs, lab manuals and assignment solutions by college, program, year and semester — from Common Freshman courses to graduation."
 };
+
+export const PREMIUM_SEO = {
+  path: "/premium",
+  title: `Premium plans & prices — ${SITE_NAME}`,
+  description:
+    "Wollo Share Premium plans from 100 Birr a month, 250 Birr a year or 500 Birr for lifetime access: unlimited Wollo University downloads with no sponsor spot. Choose a plan and the team switches your account over the same day."
+};

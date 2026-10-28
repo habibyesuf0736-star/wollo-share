@@ -56,7 +56,7 @@ function hoursLeft(expiresAt) {
 }
 
 export default function ProfilePage() {
-  const { session, activeUser, downloadStatus, saveProfile, goLogin, goLibrary, mySubmissions, syncCredits, toast, logout, coursesData } = useApp();
+  const { session, activeUser, downloadStatus, saveProfile, goLogin, goLibrary, goPremium, mySubmissions, syncCredits, toast, logout, coursesData } = useApp();
   const [form, setForm] = useState({ name: "", department: "", phone: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -393,6 +393,16 @@ export default function ProfilePage() {
                 <strong>{activeUser?.lastActiveAt || "—"}</strong>
               </li>
             </ul>
+            {downloadStatus.premium ? null : (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary mt-3 d-inline-flex align-items-center gap-1"
+                onClick={goPremium}
+              >
+                <Crown size={14} aria-hidden="true" />
+                Plans &amp; payment
+              </button>
+            )}
           </div>
 
           <div className="card p-3 mb-3">

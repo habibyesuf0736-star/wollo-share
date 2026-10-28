@@ -8,7 +8,7 @@ const PAID_PLAN_KEYS = new Set(PLANS.map((plan) => plan.key));
 // Shown where the Evangadi pack used to sit: students never see that pack, they see the
 // paid plans advertised instead.
 export default function PlanPromo() {
-  const { isAdmin, session, activeUser, setGate } = useApp();
+  const { isAdmin, session, activeUser, goPremium } = useApp();
   if (isAdmin) return null;
 
   const onPaidPlan = Boolean(
@@ -29,7 +29,7 @@ export default function PlanPromo() {
           text: session ? "Unlimited downloads, no sponsor spots." : "Create an account to activate a plan.",
           ctaLabel: "See the plans"
         }}
-        onAction={() => setGate({ type: "upgrade", plansOnly: true })}
+        onAction={goPremium}
       />
     </div>
   );

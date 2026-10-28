@@ -1,10 +1,10 @@
 import React from "react";
 import { useApp } from "../store/AppContext.jsx";
-import { ArrowUp, GraduationCap, Heart, LibraryBig, MapPin, Upload } from "lucide-react";
+import { ArrowUp, Crown, GraduationCap, Heart, LibraryBig, MapPin, Upload } from "lucide-react";
 import universityEmblem from "../assets/images/wollo-university-emblem.jpg";
 
 export default function Footer() {
-  const { pageTexts, stats, goLibrary, goLogin, setGate, view, session } = useApp();
+  const { pageTexts, stats, goLibrary, goLogin, goPremium, setGate, view, session } = useApp();
 
   return (
     <footer className="ws-footer mt-5">
@@ -52,6 +52,15 @@ export default function Footer() {
                 My library
               </button>
             ) : null}
+            <button
+              type="button"
+              className="btn btn-link p-0 text-start"
+              style={{ color: "inherit", fontSize: "inherit" }}
+              onClick={goPremium}
+            >
+              <Crown size={14} className="me-1 align-text-bottom" aria-hidden="true" />
+              Premium plans
+            </button>
             <button
               type="button"
               className="btn btn-link p-0 text-start"

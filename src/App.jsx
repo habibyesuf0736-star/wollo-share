@@ -16,6 +16,7 @@ import LoginPage from "./pages/LoginPage.jsx";
 import DeviceLoginPage from "./pages/DeviceLoginPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import SupportPage from "./pages/SupportPage.jsx";
+import PremiumPage from "./pages/PremiumPage.jsx";
 import universityEmblem from "./assets/images/wollo-university-emblem.jpg";
 
 function Shell() {
@@ -45,6 +46,7 @@ function Shell() {
           {view.name === "deviceLogin" ? <DeviceLoginPage key={view.qrId} qrId={view.qrId} /> : null}
           {view.name === "profile" ? <ProfilePage /> : null}
           {view.name === "support" ? <SupportPage /> : null}
+          {view.name === "premium" ? <PremiumPage /> : null}
           {view.name === "admin" ? <AdminPage /> : null}
           {view.name === "library" ? <LibraryPage /> : null}
         </ErrorBoundary>

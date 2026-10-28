@@ -41,6 +41,7 @@ export default function AdminAppearance() {
     footerText: "",
     welcomeTitle: "",
     welcomeDesc: "",
+    premiumPayment: "",
     primaryColor: "#1d624f",
     fontSize: "16px",
     fontStyle: "sans",
@@ -57,6 +58,7 @@ export default function AdminAppearance() {
       footerText: pageTexts.footerText || "",
       welcomeTitle: pageTexts.welcomeTitle || "",
       welcomeDesc: pageTexts.welcomeDesc || "",
+      premiumPayment: pageTexts.premiumPayment || "",
       primaryColor: appearanceSettings.primaryColor || "#1d624f",
       fontSize: appearanceSettings.fontSize || "16px",
       fontStyle: appearanceSettings.fontStyle || "sans",
@@ -73,7 +75,8 @@ export default function AdminAppearance() {
       siteSubtitle: brand.siteSubtitle,
       footerText: brand.footerText,
       welcomeTitle: brand.welcomeTitle,
-      welcomeDesc: brand.welcomeDesc
+      welcomeDesc: brand.welcomeDesc,
+      premiumPayment: brand.premiumPayment
     });
     commitAppearance({
       primaryColor: brand.primaryColor,
@@ -160,6 +163,17 @@ export default function AdminAppearance() {
             <div className="col-12">
               <label className="form-label small fw-semibold">Footer text</label>
               <input className="form-control" value={brand.footerText} onChange={(e) => setBrand({ ...brand, footerText: e.target.value })} />
+            </div>
+            <div className="col-12">
+              <label className="form-label small fw-semibold">Premium payment note</label>
+              <textarea
+                className="form-control"
+                rows={2}
+                placeholder="Telebirr 1000 1234 5678 · Wollo Share"
+                value={brand.premiumPayment}
+                onChange={(e) => setBrand({ ...brand, premiumPayment: e.target.value })}
+              />
+              <p className="form-text">Shows on the Premium page. Leave empty and it says payment comes from the team.</p>
             </div>
             <div className="col-4">
               <label className="form-label small fw-semibold">Accent colour</label>

@@ -28,7 +28,7 @@ export const PLANS = [
 ];
 
 export default function UpgradeGateModal() {
-  const { gate, closeGate, setGate, downloadStatus, mySubmissions, session } = useApp();
+  const { gate, closeGate, setGate, downloadStatus, mySubmissions, session, goPremium } = useApp();
   const open = Boolean(gate && gate.type === "upgrade");
   if (!open) return null;
 
@@ -82,8 +82,19 @@ export default function UpgradeGateModal() {
                 </div>
               ))}
             </div>
-            <div className="alert alert-light border small mt-3 mb-0">
-              <strong>How to activate:</strong> email the team your account email and they switch you over.
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3">
+              <span className="small text-secondary">The team replies with the payment details.</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary d-inline-flex align-items-center gap-1"
+                onClick={() => {
+                  closeGate();
+                  goPremium();
+                }}
+              >
+                <Sparkles size={14} aria-hidden="true" />
+                Plans &amp; payment
+              </button>
             </div>
           </div>
         </div>
