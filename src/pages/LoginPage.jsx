@@ -4,7 +4,6 @@ import {
   ArrowRight,
   BadgeCheck,
   BookOpenCheck,
-  Download,
   Eye,
   EyeOff,
   GraduationCap,
@@ -13,10 +12,7 @@ import {
   Mail,
   Phone,
   QrCode,
-  ShieldCheck,
   Sparkles,
-  Star,
-  Upload,
   User
 } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
@@ -43,7 +39,21 @@ function deviceLabel() {
 }
 
 export default function LoginPage() {
-  const { login, register, verifySignup, adoptSession, goLibrary, stats, pageTexts, toast, goAdmin, goSupport, isAdmin, coursesData } = useApp();
+  const {
+    login,
+    signInWithCode,
+    resendSignInCode,
+    register,
+    verifySignup,
+    adoptSession,
+    goLibrary,
+    pageTexts,
+    toast,
+    goAdmin,
+    goSupport,
+    isAdmin,
+    coursesData
+  } = useApp();
   const [tab, setTab] = useState("signin");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -54,6 +64,7 @@ export default function LoginPage() {
   const [signupStage, setSignupStage] = useState("form");
   const [pending, setPending] = useState({ email: "", code: "", mailSent: false, message: "" });
   const [recovery, setRecovery] = useState({ email: "", code: "", newPassword: "", stage: "request" });
+  const [twoFactor, setTwoFactor] = useState({ identifier: "", email: "", code: "", minutesLeft: 10 });
   const [qr, setQr] = useState({ id: "", url: "", status: "idle", secondsLeft: 0, error: "" });
   const [qrNonce, setQrNonce] = useState(0);
 
@@ -137,6 +148,12 @@ export default function LoginPage() {
     const res = await login({ identifier: signin.identifier.trim(), password: signin.password });
     setBusy(false);
     if (!res.ok) {
+      if (res.twoFactor) {
+        setError("");
+        setNotice(res.message || "We emailed you a 6-digit code to finish signing in.");
+        setTwoFactor({ identifier: res.identifier || signin.identifier.trim(), email: res.email, code: "", minutesLeft: res.minutesLeft || 10 });
+        return;
+      }
       setError(res.error || "Unable to sign in.");
       if (res.needsRecovery) {
         setRecovery({ email: res.email || signin.identifier.trim(), code: "", newPassword: "", stage: "code" });
@@ -144,11 +161,55 @@ export default function LoginPage() {
       }
       return;
     }
+    setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
     if (res.verifiedNow) toast("Account verified — welcome back.");
+    else if (res.codeSkipped) toast(res.message || "Signed in — the code email was unavailable.");
     else toast(`Welcome back, ${res.session.name || res.session.email}`);
     if (res.session.role === "admin") goAdmin();
     else if (res.session.role === "support") goSupport();
     else goLibrary();
+  };
+
+  const submitSignInCode = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (twoFactor.code.length !== 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setBusy(true);
+    const res = await signInWithCode({ identifier: twoFactor.identifier, code: twoFactor.code });
+    setBusy(false);
+    if (!res.ok) {
+      if (res.expired) {
+        setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
+        setNotice("That sign-in code expired. Enter your password again to get a new one.");
+      } else {
+        setError(res.error || "That code did not work.");
+      }
+      return;
+    }
+    toast(`Welcome back, ${res.session.name || res.session.email}`);
+    if (res.session.role === "admin") goAdmin();
+    else if (res.session.role === "support") goSupport();
+    else goLibrary();
+  };
+
+  const resendSignIn = async () => {
+    setError("");
+    setBusy(true);
+    const res = await resendSignInCode(twoFactor.identifier);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error || "Could not resend the code.");
+      return;
+    }
+    if (res.codeInvalidated) {
+      setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
+      setNotice(res.message || "Enter your password again to get a new code.");
+      return;
+    }
+    setNotice(res.message || "A new code is on its way.");
   };
 
   const submitRegister = async (event) => {
@@ -281,6 +342,7 @@ export default function LoginPage() {
     setError("");
     setNotice("");
     if (key !== "register") setSignupStage("form");
+    if (key !== "signin") setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
   };
 
   return (
@@ -293,52 +355,7 @@ export default function LoginPage() {
             Wollo University · {pageTexts.siteTitle || "Wollo Share"}
           </span>
           <h1>One account for the whole library</h1>
-          <p>
-            Sign in to download materials, rate documents, keep your contribution history and unlock paid or assigned
-            courses across every college.
-          </p>
-
-          <div className="mt-4">
-            <div className="ws-auth-feature">
-              <Download size={16} aria-hidden="true" />
-              <span>Unlimited downloads for your own program — notes, slides, lab manuals and past exams.</span>
-            </div>
-            <div className="ws-auth-feature">
-              <Star size={16} aria-hidden="true" />
-              <span>Rate every document so the next cohort sees the best material first.</span>
-            </div>
-            <div className="ws-auth-feature">
-              <Upload size={16} aria-hidden="true" />
-              <span>Share your own files and build up your contributor balance.</span>
-            </div>
-            <div className="ws-auth-feature">
-              <ShieldCheck size={16} aria-hidden="true" />
-              <span>Passwords are hashed, recovery codes are one-time and expire in 30 minutes.</span>
-            </div>
-          </div>
-
-          <div className="ws-auth-stat">
-            <span>
-              <strong>{stats.courses}</strong>
-              <em>Programs</em>
-            </span>
-            <span>
-              <strong>{stats.files}</strong>
-              <em>Files</em>
-            </span>
-            <span>
-              <strong>{stats.colleges.length}</strong>
-              <em>Colleges</em>
-            </span>
-            <span>
-              <strong>{stats.avgRating}★</strong>
-              <em>Avg rating</em>
-            </span>
-          </div>
-
-          <p className="small mb-0 mt-3" style={{ color: "rgba(255,255,255,.72)" }}>
-            Unpaid students send 2 documents to earn each download · Premium from 100 Birr, lifetime access 500 Birr.
-          </p>
+          <p>Notes, slides, lab manuals and past exams for every program — in one place.</p>
         </aside>
 
         <section className="ws-auth-form">
@@ -365,7 +382,55 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          {tab === "signin" ? (
+          {tab === "signin" && twoFactor.identifier ? (
+            <form onSubmit={submitSignInCode} className="d-flex flex-column gap-3">
+              <p className="small text-secondary mb-0">
+                Step 2 of 2 — we emailed a 6-digit code to <strong>{twoFactor.email}</strong>. It expires in{" "}
+                {twoFactor.minutesLeft} minutes.
+              </p>
+              <div>
+                <label className="form-label small fw-semibold mb-0" htmlFor="signinCode">
+                  Sign-in code
+                </label>
+                <div className="ws-field-icon">
+                  <KeyRound size={16} aria-hidden="true" />
+                  <input
+                    id="signinCode"
+                    className="form-control"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    maxLength={6}
+                    placeholder="123456"
+                    value={twoFactor.code}
+                    onChange={(e) => setTwoFactor({ ...twoFactor, code: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+                  />
+                </div>
+              </div>
+              <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
+                {busy ? "Checking…" : "Verify and sign in"}
+                {busy ? null : <BadgeCheck size={16} aria-hidden="true" />}
+              </button>
+              <div className="d-flex gap-3 flex-wrap align-items-center">
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={resendSignIn} disabled={busy}>
+                  Resend code
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0"
+                  onClick={() => {
+                    setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
+                    setError("");
+                    setNotice("");
+                  }}
+                >
+                  Use a different account
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {tab === "signin" && !twoFactor.identifier ? (
             <form onSubmit={submitSignIn} className="d-flex flex-column gap-3">
               <div>
                 <label className="form-label small fw-semibold" htmlFor="loginId">

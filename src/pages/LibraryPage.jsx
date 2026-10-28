@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ArrowRight, Building2, FolderDown, GraduationCap, LibraryBig, LifeBuoy, Search, Sparkles, Star, Upload, X } from "lucide-react";
+import { ArrowRight, LibraryBig, Search, Sparkles, Upload, X } from "lucide-react";
 import { useApp, DEFAULT_TEXTS } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import AdSlot from "../components/AdSlot.jsx";
@@ -65,12 +65,10 @@ export default function LibraryPage() {
     canEdit,
     pageTexts,
     appearanceSettings,
-    stats,
     browse,
     goBrowse,
     goSublist,
     goLogin,
-    goSupport,
     moveCourse,
     deleteCourse,
     updateCourse,
@@ -90,7 +88,7 @@ export default function LibraryPage() {
   const [courseModal, setCourseModal] = useState({ open: false, courseId: null });
   const [confirm, setConfirm] = useState({ open: false, courseId: null });
 
-  const modules = appearanceSettings.modules || { stats: true, topics: true, docs: true };
+  const modules = appearanceSettings.modules || { topics: true, docs: true };
   const activeQuery = query.trim().toLowerCase();
 
   const accessible = useMemo(() => coursesData.filter(canSeeCourse), [canSeeCourse, coursesData]);
@@ -357,11 +355,10 @@ export default function LibraryPage() {
       <AnnouncementBanner />
 
       <section className="ws-hero">
-        <span className="ws-hero-eyebrow">Wollo University · Student study & course resource hub</span>
         <h1 className="ws-hero-title">
           {splitHeroTitle(pageTexts.welcomeTitle || DEFAULT_TEXTS.welcomeTitle)}
         </h1>
-        <p className="lead">{pageTexts.welcomeDesc}</p>
+        <p className="lead">{pageTexts.siteSubtitle || DEFAULT_TEXTS.siteSubtitle}</p>
 
         <div className="d-flex flex-wrap gap-2 mt-3">
           <button type="button" className="btn btn-sm btn-primary" onClick={() => setGate({ type: "share", courseId: "" })}>
@@ -370,36 +367,12 @@ export default function LibraryPage() {
           <a className="btn btn-sm btn-outline-secondary" href="#ws-colleges">
             <LibraryBig size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Browse by college
           </a>
-          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={goSupport}>
-            <LifeBuoy size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Something wrong? Tell support
-          </button>
           {session && !studentPreview ? null : (
             <button type="button" className="btn btn-sm btn-soft" onClick={goLogin}>
               <Sparkles size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Create free account
             </button>
           )}
         </div>
-
-        {modules.stats ? (
-          <ul className="ws-hero-stats d-none d-md-flex">
-            <li>
-              <GraduationCap size={14} aria-hidden="true" />
-              <strong>{stats.courses}</strong> Programs
-            </li>
-            <li>
-              <FolderDown size={14} aria-hidden="true" />
-              <strong>{stats.files}</strong> Study files
-            </li>
-            <li>
-              <Star size={14} aria-hidden="true" />
-              <strong>{stats.avgRating} ★</strong> Avg. rating
-            </li>
-            <li>
-              <Building2 size={14} aria-hidden="true" />
-              <strong>{stats.colleges.length}</strong> Colleges
-            </li>
-          </ul>
-        ) : null}
       </section>
 
       <AdSlot placement="hero" />

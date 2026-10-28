@@ -50,6 +50,20 @@ export function login(identifier, password) {
   });
 }
 
+export function verifySignInCode(identifier, code) {
+  return request("/api/auth/two-factor/verify", {
+    method: "POST",
+    body: JSON.stringify({ identifier, code })
+  });
+}
+
+export function resendSignInCode(identifier) {
+  return request("/api/auth/two-factor/resend", {
+    method: "POST",
+    body: JSON.stringify({ identifier })
+  });
+}
+
 export function registerAccount(details) {
   return request("/api/auth/register", { method: "POST", body: JSON.stringify(details) });
 }

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { encryptVaultSecret, hashPassword } from "./auth-crypto.ts";
 import { configureMail, mailStatus, sendMail, activeMailProvider, effectiveMailConfig, normalizeMailSecret, type MailConfig } from "./mail.ts";
-import { recoveryCodeEmail, recoveryRequestNoticeEmail, signupCodeEmail, testEmailMessage } from "./emailTemplates.ts";
+import { recoveryCodeEmail, recoveryRequestNoticeEmail, signInCodeEmail, signupCodeEmail, testEmailMessage } from "./emailTemplates.ts";
 import crypto from "crypto";
 import express from "express";
 import fs from "fs";
@@ -125,9 +125,14 @@ function decryptVaultSecret(vaultToken: string, contextKey = "default"): string 
   return outBytes.toString("utf8");
 }
 
+// A student should not have to re-sign-in every time they power their machine on, so a
+// session is good for a year of use. The serial baked in below is the LoginDevice id, which
+// keeps "sign out everywhere" and the per-device revoke working as the real expiry.
+const SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
 function createSignedSessionToken(session: { id: string; name: string; email: string; role: string }, deviceId = "") {
   const issuedAt = Date.now();
-  const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
+  const expiresAt = issuedAt + SESSION_TTL_MS;
   const serial = deviceId || crypto.randomBytes(16).toString("base64url");
   const payloadStr = `${session.id}|${session.email}|${session.role}|${issuedAt}|${expiresAt}|${serial}`;
   const payloadHex = utf8ToHex(payloadStr);
@@ -218,7 +223,7 @@ function verifyRequestSession(req: express.Request) {
   const issuedAt = Number(issuedAtValue);
   const expiresAt = Number(expiresAtValue);
   if (!id || !email || !role || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return null;
-  if (issuedAt > Date.now() + 60_000 || expiresAt <= Date.now() || expiresAt - issuedAt > 24 * 60 * 60 * 1000) return null;
+  if (issuedAt > Date.now() + 60_000 || expiresAt <= Date.now() || expiresAt - issuedAt > SESSION_TTL_MS + 60_000) return null;
 
   // A token from before the device list simply has no serial, and it stays usable until
   // its own expiry — shipping this feature must not sign anybody out.
@@ -253,6 +258,9 @@ function safeUserAccount(user: UserAccount) {
     verificationExpiresAt: _verificationExpiresAt,
     verificationAttempts: _verificationAttempts,
     verificationSentAt: _verificationSentAt,
+    signInCode: _signInCode,
+    signInCodeExpiresAt: _signInCodeExpiresAt,
+    signInCodeAttempts: _signInCodeAttempts,
     ...safeUser
   } = user;
   return safeUser;
@@ -796,6 +804,11 @@ interface UserAccount {
   verificationExpiresAt?: string;
   verificationSentAt?: string;
   verificationAttempts?: number;
+  // The second sign-in step: emailed after the password matches, and thrown away as soon as
+  // it is used. Kept apart from the signup code so neither can be spent on the other.
+  signInCode?: string;
+  signInCodeExpiresAt?: string;
+  signInCodeAttempts?: number;
   addedByAdmin?: boolean;
   // A small data URL the student uploads themselves; Google sign-in may bring a photo too.
   avatarUrl?: string;
@@ -1315,6 +1328,8 @@ const recoveryRequestRateLimitMap = new Map<string, { count: number; windowStart
 const qrStartRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 const signupRequestRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
 const codeRateLimitMap = new Map<string, { count: number; windowStartedAt: number }>();
+// Wrong codes typed from one network, so guessing 100000..999999 costs the attacker a wait.
+const twoFactorRateLimitMap = new Map<string, { failedCount: number; lockedUntil: number }>();
 
 const LOGIN_IP_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_IP_MAX_FAILURES = 25;
@@ -1427,6 +1442,56 @@ async function sendSignupCode(user: UserAccount, code: string): Promise<{ ok: bo
   if (delivery.ok) user.verificationSentAt = new Date().toISOString();
   else console.error("Signup verification email failed:", delivery.error);
   return { ok: delivery.ok, error: delivery.error };
+}
+
+// The second sign-in step lives for ten minutes and dies after six wrong guesses, so a
+// leaked code is a short-lived key rather than a permanent door.
+const SIGNIN_CODE_TTL_MS = 10 * 60 * 1000;
+const SIGNIN_CODE_MAX_ATTEMPTS = 6;
+
+function issueSignInCode(user: UserAccount): string {
+  const code = sixDigitCode();
+  user.signInCode = hashPassword(code, `signin:${user.id}`);
+  user.signInCodeExpiresAt = new Date(Date.now() + SIGNIN_CODE_TTL_MS).toISOString();
+  user.signInCodeAttempts = 0;
+  return code;
+}
+
+function clearSignInCode(user: UserAccount) {
+  delete user.signInCode;
+  delete user.signInCodeExpiresAt;
+  delete user.signInCodeAttempts;
+}
+
+function pendingSignInCode(user: UserAccount): boolean {
+  return Boolean(user.signInCode && user.signInCodeExpiresAt && Date.parse(user.signInCodeExpiresAt) > Date.now());
+}
+
+function signInCodeMatches(user: UserAccount, code: string): boolean {
+  if (!pendingSignInCode(user)) return false;
+  return hashPassword(code, `signin:${user.id}`) === user.signInCode;
+}
+
+// Returns false when the provider refuses the mail. The caller then finishes the sign-in on
+// the password alone: a mailbox that will not accept our IP must not lock a student out of
+// their own account, and the administrator can see the attempt in the activity log.
+async function emailSignInCode(user: UserAccount): Promise<boolean> {
+  const code = issueSignInCode(user);
+  const delivery = await sendMail({
+    to: user.email,
+    ...signInCodeEmail({
+      name: user.name,
+      email: user.email,
+      code,
+      minutesLeft: Math.round(SIGNIN_CODE_TTL_MS / 60000)
+    })
+  });
+  if (!delivery.ok) {
+    console.error("Sign-in code email failed:", delivery.error);
+    clearSignInCode(user);
+    return false;
+  }
+  return true;
 }
 
 const MAIL_PROVIDER_LABEL: Record<string, string> = {
@@ -2979,7 +3044,7 @@ export async function createApp() {
     res.json({ ok: true, user: safeUserAccount(newUser), session, message: "Google onboarding completed successfully!" });
   });
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const identifier = String(req.body?.identifier || "").trim();
     const password = String(req.body?.password || "");
@@ -3053,6 +3118,8 @@ export async function createApp() {
       return;
     }
 
+    // The administrator is not sent a code: their account has no row of its own to hold it,
+    // and a refused mailbox would lock the owner out of the panel they use to fix the mail.
     if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
       loginRateLimitMap.delete(attemptKey);
       const signedSession = issueDeviceSession(
@@ -3079,6 +3146,21 @@ export async function createApp() {
     if (matchedUser) {
       const verifiedNow = verifyAccountAtSignIn(matchedUser);
       loginRateLimitMap.delete(attemptKey);
+
+      // The password proves they hold the credential; the code proves they can read the
+      // mailbox. Both are required before this screen hands out a session.
+      if (await emailSignInCode(matchedUser)) {
+        saveDatabase(dbState);
+        res.json({
+          ok: true,
+          twoFactor: true,
+          email: matchedUser.email,
+          minutesLeft: Math.round(SIGNIN_CODE_TTL_MS / 60000),
+          message: `We emailed a 6-digit code to ${matchedUser.email}. Enter it to finish signing in.`
+        });
+        return;
+      }
+
       const signedSession = issueDeviceSession(
         {
           id: matchedUser.id,
@@ -3093,6 +3175,7 @@ export async function createApp() {
         ok: true,
         session: signedSession,
         verifiedNow,
+        codeSkipped: true,
         message: verifiedNow ? "Your account is verified — you are signed in." : ""
       });
       return;
@@ -3114,6 +3197,135 @@ export async function createApp() {
     ipFailureRateLimitMap.set(clientIp, ipWindow);
 
     res.status(401).json({ ok: false, error: "Invalid username/email or password." });
+  });
+
+  // The second half of a password sign-in. There is no session yet, so the identifier comes
+  // back with the code and the only thing that unlocks a session is the digits matching.
+  app.post("/api/auth/two-factor/verify", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase() || "anonymous";
+    const code = String(req.body?.code || "").replace(/\D/g, "");
+    const clientIp = requestClientIp(req);
+    const attemptKey = `${clientIp}|${identifier}`;
+    const now = Date.now();
+
+    const blocked = twoFactorRateLimitMap.get(attemptKey);
+    if (blocked && blocked.lockedUntil > now) {
+      res.status(429).json({
+        ok: false,
+        error: `Too many wrong codes from your network. Wait ${Math.ceil((blocked.lockedUntil - now) / 1000)}s or sign in again.`
+      });
+      return;
+    }
+    pruneRateMap(twoFactorRateLimitMap, 60 * 60 * 1000);
+
+    const user = dbState.usersData.find(
+      (account) => account.email.toLowerCase() === identifier || account.name.toLowerCase() === identifier
+    );
+    if (!user || !pendingSignInCode(user)) {
+      res.status(401).json({
+        ok: false,
+        expired: true,
+        error: "That sign-in code is finished. Sign in with your password and we will send a fresh one."
+      });
+      return;
+    }
+    if (code.length !== 6) {
+      res.status(401).json({ ok: false, error: "Enter the six digits we emailed you." });
+      return;
+    }
+
+    user.signInCodeAttempts = Number(user.signInCodeAttempts || 0) + 1;
+    const prevFailed = (blocked?.failedCount || 0) + 1;
+    if (!signInCodeMatches(user, code)) {
+      twoFactorRateLimitMap.set(attemptKey, {
+        failedCount: prevFailed,
+        lockedUntil: prevFailed >= 8 ? now + 5 * 60 * 1000 : 0
+      });
+      if (user.signInCodeAttempts >= SIGNIN_CODE_MAX_ATTEMPTS) {
+        clearSignInCode(user);
+        saveDatabase(dbState);
+        res.status(429).json({
+          ok: false,
+          expired: true,
+          error: "Too many wrong codes, so this one was thrown away. Sign in with your password for a new code."
+        });
+        return;
+      }
+      saveDatabase(dbState);
+      res.status(401).json({
+        ok: false,
+        error: `That code does not match. ${SIGNIN_CODE_MAX_ATTEMPTS - user.signInCodeAttempts} tries left before it is discarded.`
+      });
+      return;
+    }
+
+    clearSignInCode(user);
+    twoFactorRateLimitMap.delete(attemptKey);
+    // Reading the mailbox is the proof that was missing, so the address counts as confirmed.
+    const mailboxWasUnconfirmed = user.emailVerified === false || user.emailUnconfirmed === true;
+    user.emailVerified = true;
+    user.emailUnconfirmed = false;
+    user.activityLog = [
+      ...(user.activityLog || []).slice(-40),
+      {
+        id: "act-" + Date.now(),
+        type: "Signed in",
+        detail: mailboxWasUnconfirmed
+          ? "Signed in with password and an emailed code — the address is now confirmed."
+          : "Signed in with password and an emailed code.",
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      }
+    ];
+    const session = issueDeviceSession(
+      { id: user.id, name: user.name, email: user.email, role: user.role || "user" },
+      req,
+      "verification"
+    );
+    saveDatabase(dbState);
+    res.json({ ok: true, session, message: "Welcome back — that code confirmed your email." });
+  });
+
+  app.post("/api/auth/two-factor/resend", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase() || "anonymous";
+    const clientIp = requestClientIp(req);
+    const resendKey = `${clientIp}|${identifier}`;
+    const now = Date.now();
+    pruneRateMap(codeRateLimitMap, 10 * 60 * 1000);
+    const window = codeRateLimitMap.get(resendKey);
+    if (!window || now - window.windowStartedAt >= 10 * 60 * 1000) {
+      codeRateLimitMap.set(resendKey, { count: 1, windowStartedAt: now });
+    } else if (window.count >= 3) {
+      res.status(429).json({ ok: false, error: "Too many codes requested. Please wait a few minutes." });
+      return;
+    } else {
+      window.count++;
+    }
+
+    const user = dbState.usersData.find(
+      (account) => account.email.toLowerCase() === identifier || account.name.toLowerCase() === identifier
+    );
+    // Same answer whether the sign-in is still open or long gone: this route is reachable
+    // without a session, so it must not become a way to test which addresses exist.
+    if (!user || !pendingSignInCode(user)) {
+      res.json({
+        ok: true,
+        mailSent: false,
+        message: "If that sign-in is still open, a fresh code is on its way. Otherwise sign in with your password again."
+      });
+      return;
+    }
+    const delivered = await emailSignInCode(user);
+    saveDatabase(dbState);
+    res.json({
+      ok: true,
+      mailSent: delivered,
+      codeInvalidated: !delivered,
+      message: delivered
+        ? `A fresh 6-digit code is on its way to ${user.email}.`
+        : "The email service refused the message, so that code was dropped. Sign in with your password again."
+    });
   });
 
   // Sign in on a second screen: the desk asks for a code, prints it as a QR and polls,

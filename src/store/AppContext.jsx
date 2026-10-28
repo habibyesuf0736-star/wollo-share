@@ -8,9 +8,7 @@ import {
   readNumber,
   writeNumber,
   removeKey,
-  readTabJson,
-  writeTabJson,
-  removeTabKey
+  takeTabJson
 } from "../lib/storage.js";
 import { LIBRARY_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
 
@@ -30,7 +28,7 @@ export const DEFAULT_APPEARANCE = {
   fontSize: "16px",
   fontStyle: "sans",
   logoUrl: "",
-  modules: { stats: true, topics: true, docs: true }
+  modules: { topics: true, docs: true }
 };
 
 const BANNER_DISMISSED_KEY = "wollo_announcement_dismissed_v1";
@@ -40,9 +38,12 @@ export const UPLOADS_PER_CREDIT = 2;
 // Non-premium accounts watch this many seconds of the sponsor slot first.
 export const AD_SECONDS = 10;
 
-// Sessions live in sessionStorage, matching the key the legacy app used.
+// The session lives in localStorage and the token behind it lasts a year, so a student who
+// signs in once stays signed in through closing the browser or restarting the machine.
 function readStoredSession() {
-  return readTabJson(STORAGE_KEYS.CURRENT_SESSION, null);
+  const stored = readJson(STORAGE_KEYS.CURRENT_SESSION, null);
+  if (stored) return stored;
+  return takeTabJson(STORAGE_KEYS.CURRENT_SESSION);
 }
 
 // "#/admin/materials" opens straight into that workspace section, and "#/login" or "/login"
@@ -309,7 +310,7 @@ export function AppProvider({ children }) {
       let res = await fetchServerState(session ? session.authToken : null);
       if (res && res.status === 401) {
         setSession(null);
-        removeTabKey(STORAGE_KEYS.CURRENT_SESSION);
+        removeKey(STORAGE_KEYS.CURRENT_SESSION);
         res = await fetchServerState(null);
       }
       if (cancelled) return;
@@ -506,22 +507,16 @@ export function AppProvider({ children }) {
   const storeSession = useCallback((next) => {
     const normalized = normalizeSession(next);
     setSession(normalized);
-    if (normalized) writeTabJson(STORAGE_KEYS.CURRENT_SESSION, normalized);
-    else removeTabKey(STORAGE_KEYS.CURRENT_SESSION);
+    if (normalized) writeJson(STORAGE_KEYS.CURRENT_SESSION, normalized);
+    else removeKey(STORAGE_KEYS.CURRENT_SESSION);
     return normalized;
   }, []);
 
-  const login = useCallback(
-    async ({ identifier, password }) => {
-      const res = await api.login(identifier, password);
-      if (!res || res.ok !== true || !res.session)
-        return {
-          ok: false,
-          needsRecovery: Boolean(res && res.needsRecovery),
-          email: res && res.email,
-          error: (res && res.error) || "Sign in failed."
-        };
-      const saved = storeSession(res.session);
+  // Loading the account's own slice of shared state right after a sign-in keeps the library,
+  // the credits and the profile photo correct on the very first paint.
+  const settleSession = useCallback(
+    async (rawSession) => {
+      const saved = storeSession(rawSession);
       hasLocalMutationRef.current = false;
       const state = await fetchServerState(saved.authToken);
       if (state && state.ok !== false) {
@@ -529,10 +524,69 @@ export function AppProvider({ children }) {
         if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
         if (state.userRatings) setUserRatings((prev) => ({ ...prev, ...state.userRatings }));
       }
-      return { ok: true, session: saved, verifiedNow: Boolean(res.verifiedNow), message: res.message || "" };
+      return saved;
     },
     [storeSession]
   );
+
+  const login = useCallback(
+    async ({ identifier, password }) => {
+      const res = await api.login(identifier, password);
+      if (res && res.ok === true && res.twoFactor) {
+        return {
+          ok: false,
+          twoFactor: true,
+          identifier,
+          email: res.email || identifier,
+          minutesLeft: res.minutesLeft || 10,
+          message: res.message || ""
+        };
+      }
+      if (!res || res.ok !== true || !res.session)
+        return {
+          ok: false,
+          needsRecovery: Boolean(res && res.needsRecovery),
+          email: res && res.email,
+          error: (res && res.error) || "Sign in failed."
+        };
+      const saved = await settleSession(res.session);
+      return {
+        ok: true,
+        session: saved,
+        verifiedNow: Boolean(res.verifiedNow),
+        codeSkipped: Boolean(res.codeSkipped),
+        message: res.message || ""
+      };
+    },
+    [settleSession]
+  );
+
+  // The emailed half of a sign-in: no session exists until these six digits match.
+  const signInWithCode = useCallback(
+    async ({ identifier, code }) => {
+      const res = await api.verifySignInCode(identifier, code);
+      if (!res || res.ok !== true || !res.session)
+        return {
+          ok: false,
+          expired: Boolean(res && res.expired),
+          error: (res && res.error) || "That code did not work."
+        };
+      const saved = await settleSession(res.session);
+      return { ok: true, session: saved, message: res.message || "" };
+    },
+    [settleSession]
+  );
+
+  const resendSignInCode = useCallback(async (identifier) => {
+    const res = await api.resendSignInCode(identifier);
+    return {
+      ok: Boolean(res && res.ok),
+      mailSent: Boolean(res && res.mailSent),
+      codeInvalidated: Boolean(res && res.codeInvalidated),
+      error: (res && res.error) || "",
+      message: (res && res.message) || ""
+    };
+  }, []);
 
   const register = useCallback(
     async (details) => {
@@ -1402,6 +1456,8 @@ export function AppProvider({ children }) {
     goProfile,
     goSupport,
     login,
+    signInWithCode,
+    resendSignInCode,
     register,
     adoptSession: storeSession,
     verifySignup,

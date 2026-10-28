@@ -59,28 +59,16 @@ export function removeKey(key) {
   }
 }
 
-export function readTabJson(key, fallback) {
+// Sessions used to live in sessionStorage, so restarting the machine signed the student out.
+// Reading the old copy once — and dropping it as we read — lets a browser that is already
+// signed in move across to localStorage without signing in again.
+export function takeTabJson(key) {
   try {
     const raw = sessionStorage.getItem(key);
-    if (!raw) return fallback;
+    if (!raw) return null;
+    sessionStorage.removeItem(key);
     return JSON.parse(raw);
   } catch {
-    return fallback;
-  }
-}
-
-export function writeTabJson(key, value) {
-  try {
-    sessionStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* ignore */
-  }
-}
-
-export function removeTabKey(key) {
-  try {
-    sessionStorage.removeItem(key);
-  } catch {
-    /* ignore */
+    return null;
   }
 }

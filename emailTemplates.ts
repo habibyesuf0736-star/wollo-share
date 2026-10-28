@@ -178,6 +178,46 @@ export function signupCodeEmail(input: {
   };
 }
 
+export function signInCodeEmail(input: {
+  name: string;
+  email: string;
+  code: string;
+  minutesLeft: number;
+}): RenderedEmail {
+  const name = input.name || "there";
+  const subject = `${input.code} is your Wollo Share sign-in code`;
+  const text = [
+    `Hi ${name},`,
+    "",
+    `Your Wollo Share sign-in code is ${input.code}.`,
+    "Enter it on the sign-in page to finish signing in.",
+    `It expires in ${input.minutesLeft} minutes.`,
+    "If you did not try to sign in, your password still works — change it and ignore this email.",
+    "",
+    "Wollo Share · Wollo University course materials library"
+  ].join("\n");
+
+  const bodyHtml = [
+    `<p style="margin:0 0 16px 0;">Hi ${escapeHtml(name)},</p>`,
+    `<p style="margin:0 0 4px 0;">Enter this code to finish signing in to <strong style="color:${BRAND.ink};">${escapeHtml(input.email)}</strong>.</p>`,
+    codeBlock(input.code),
+    `<p style="margin:0 0 6px 0;font-size:14px;color:${BRAND.muted};">Expires in ${input.minutesLeft} minutes</p>`,
+    divider(),
+    `<p style="margin:0;font-size:13px;line-height:21px;color:${BRAND.body};">Nobody at Wollo Share will ever ask you for this code. If you did not sign in yourself, change your password.</p>`
+  ].join("");
+
+  return {
+    subject,
+    text,
+    html: layout({
+      preheader: `Your Wollo Share sign-in code expires in ${input.minutesLeft} minutes.`,
+      title: "Finish signing in",
+      bodyHtml,
+      footerNote: "Sent because someone signed in with this address and the correct password."
+    })
+  };
+}
+
 export function recoveryRequestNoticeEmail(input: {
   name: string;
   email: string;

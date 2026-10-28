@@ -40,16 +40,16 @@
   --primary-hover: var(--accent-strong);
   --primary-soft: var(--accent-soft);
 
-  --radius-xl: 22px;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 9px;
-  --shadow-xs: 0 1px 2px rgba(16, 40, 32, 0.05);
-  --shadow-sm: 0 1px 2px rgba(16, 40, 32, 0.05), 0 6px 18px -10px rgba(16, 40, 32, 0.16);
-  --shadow-md: 0 2px 6px rgba(16, 40, 32, 0.06), 0 18px 40px -20px rgba(16, 40, 32, 0.28);
-  --shadow-lg: 0 30px 70px -28px rgba(11, 33, 26, 0.4);
-  --shadow-accent: 0 10px 26px -12px var(--accent-glow);
-  --ring: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent);
+  --radius-xl: 14px;
+  --radius-lg: 11px;
+  --radius-md: 9px;
+  --radius-sm: 7px;
+  --shadow-xs: none;
+  --shadow-sm: 0 1px 2px rgba(16, 40, 32, 0.05);
+  --shadow-md: 0 1px 2px rgba(16, 40, 32, 0.05);
+  --shadow-lg: 0 2px 10px -6px rgba(11, 33, 26, 0.22);
+  --shadow-accent: none;
+  --ring: 0 0 0 2px color-mix(in srgb, var(--green) 26%, transparent);
 
   --ease: cubic-bezier(0.22, 0.68, 0.36, 1);
 
@@ -89,40 +89,12 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  line-height: 1.6;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Ambient wash behind everything */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  background:
-    radial-gradient(62rem 42rem at 6% -12%, color-mix(in srgb, var(--green) 13%, transparent), transparent 62%),
-    radial-gradient(46rem 32rem at 98% 2%, color-mix(in srgb, var(--lime) 30%, transparent), transparent 60%),
-    radial-gradient(58rem 44rem at 50% 112%, color-mix(in srgb, var(--green) 9%, transparent), transparent 66%);
-}
-
-/* Hairline grid so large empty areas never look flat */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image:
-    linear-gradient(to right, rgba(16, 40, 32, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(16, 40, 32, 0.035) 1px, transparent 1px);
-  background-size: 68px 68px;
-  mask-image: radial-gradient(80% 60% at 50% 0%, #000 20%, transparent 78%);
-}
-
 ::selection {
-  background: color-mix(in srgb, var(--green) 22%, transparent);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
   color: var(--ink);
 }
 
@@ -169,27 +141,24 @@ a {
 
 /* ---------- Layout shell ---------- */
 .ws-page {
-  width: min(100%, 1240px);
+  width: min(100%, 1160px);
   margin: 0 auto;
-  padding: clamp(18px, 3vw, 34px) clamp(14px, 4vw, 32px) 64px;
+  padding: clamp(14px, 2.2vw, 22px) clamp(12px, 3.4vw, 24px) 44px;
 }
 
 .ws-topline {
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 10px 30px -26px rgba(16, 40, 32, 0.5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
 
 .ws-inner-top {
-  width: min(100%, 1240px);
+  width: min(100%, 1160px);
   margin: 0 auto;
-  padding: 12px clamp(14px, 4vw, 32px);
+  padding: 9px clamp(12px, 3.4vw, 24px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
@@ -348,14 +317,11 @@ a {
   --bs-btn-disabled-bg: var(--accent-pale);
   --bs-btn-disabled-border-color: var(--accent-pale);
   --bs-btn-disabled-color: color-mix(in srgb, var(--accent) 55%, #ffffff);
-  background-image: linear-gradient(180deg, color-mix(in oklab, var(--accent) 84%, #ffffff), var(--accent) 62%);
-  border-radius: 10px;
-  box-shadow: var(--shadow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border-radius: 9px;
 }
 .btn-primary:hover:not(:disabled) {
-  background-image: linear-gradient(180deg, color-mix(in oklab, var(--accent) 92%, #ffffff), var(--accent-strong) 66%);
-  transform: translateY(-1px);
-  box-shadow: 0 14px 30px -14px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+  background-image: none;
+  box-shadow: none;
 }
 
 .btn-outline-secondary {
@@ -368,40 +334,37 @@ a {
   --bs-btn-active-border-color: var(--accent-line);
   --bs-btn-active-color: var(--accent-strong);
   background: var(--surface);
-  border-radius: 10px;
-  box-shadow: var(--shadow-xs);
+  border-radius: 9px;
 }
 .btn-outline-secondary:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  transform: none;
+  box-shadow: none;
 }
 
 .btn-soft {
   background: var(--accent-soft);
   color: var(--accent-strong);
   border: 1px solid var(--accent-line);
-  border-radius: 10px;
+  border-radius: 9px;
   font-weight: 650;
 }
 .btn-soft:hover {
   background: var(--accent);
   color: var(--accent-on);
   border-color: var(--accent);
-  box-shadow: var(--shadow-accent);
 }
 
 .btn-coral {
   background: var(--coral-soft);
   color: var(--danger);
   border: 1px solid color-mix(in srgb, var(--coral) 32%, transparent);
-  border-radius: 10px;
+  border-radius: 9px;
   font-weight: 650;
 }
 .btn-coral:hover {
   background: var(--coral);
   color: #fff;
   border-color: var(--coral);
-  box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--coral) 60%, transparent);
 }
 
 .btn-link {
@@ -418,12 +381,11 @@ a {
 .form-control,
 .form-select {
   border-color: var(--line);
-  border-radius: 10px;
-  min-height: 44px;
+  border-radius: 9px;
+  min-height: 40px;
   color: var(--ink);
-  background-color: var(--surface-raised);
-  box-shadow: inset 0 1px 2px rgba(16, 40, 32, 0.035);
-  transition: border-color 0.16s var(--ease), box-shadow 0.16s var(--ease), background 0.16s var(--ease);
+  background-color: var(--surface);
+  transition: border-color 0.16s var(--ease), box-shadow 0.16s var(--ease);
 }
 .form-control::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
@@ -456,35 +418,22 @@ a {
 /* ---------- Hero / intro ---------- */
 .ws-hero {
   position: relative;
-  padding: clamp(26px, 4vw, 46px) 0 20px;
-}
-.ws-hero::before {
-  content: "";
-  position: absolute;
-  top: -40px;
-  right: -60px;
-  width: 340px;
-  height: 340px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--green) 13%, transparent), transparent 68%);
-  filter: blur(2px);
+  padding: clamp(18px, 2.6vw, 28px) 0 14px;
 }
 
 .ws-hero-eyebrow {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10.5px;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent-strong);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, transparent), var(--accent-soft));
+  background: var(--accent-soft);
   border: 1px solid var(--accent-line);
   border-radius: 999px;
-  padding: 6px 13px 6px 11px;
+  padding: 4px 11px 4px 9px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  box-shadow: var(--shadow-xs);
 }
 .ws-hero-eyebrow::before {
   content: "";
@@ -497,74 +446,22 @@ a {
 
 .ws-hero h1 {
   font-family: "Space Grotesk", sans-serif;
-  font-size: clamp(38px, 5.4vw, 62px);
+  font-size: clamp(26px, 3.4vw, 38px);
   font-weight: 700;
-  line-height: 1.03;
-  letter-spacing: -0.042em;
-  margin: 18px 0 14px;
-  max-width: 16ch;
+  line-height: 1.1;
+  letter-spacing: -0.032em;
+  margin: 12px 0 8px;
+  max-width: 22ch;
   color: var(--ink);
-  background: linear-gradient(
-    112deg,
-    var(--ink) 0%,
-    var(--ink-soft) 40%,
-    color-mix(in srgb, var(--accent) 68%, var(--ink)) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 .ws-hero h1 .ws-accent {
-  position: relative;
-  z-index: 0;
   color: var(--accent);
-  background: linear-gradient(112deg, var(--accent) 0%, color-mix(in srgb, var(--lime) 62%, var(--accent)) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.ws-hero h1 .ws-accent::after {
-  content: "";
-  position: absolute;
-  left: -0.02em;
-  right: -0.02em;
-  bottom: 0.05em;
-  z-index: -1;
-  height: 0.17em;
-  border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--lime) 85%, transparent), color-mix(in srgb, var(--accent) 34%, transparent));
 }
 
 .ws-hero p.lead {
   color: var(--muted);
-  font-size: clamp(15px, 1.4vw, 17.5px);
+  font-size: clamp(14px, 1.2vw, 16px);
   max-width: 62ch;
-}
-
-.ws-hero-stats {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 22px;
-  margin: 20px 0 0;
-  padding: 11px 0 0;
-  border-top: 1px solid var(--line);
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.ws-hero-stats li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ws-hero-stats li svg {
-  opacity: 0.55;
-}
-.ws-hero-stats strong {
-  color: var(--ink);
-  font-size: 14.5px;
-  font-weight: 700;
 }
 
 /* section headings inside the page */
@@ -1878,87 +1775,39 @@ a {
 /* ---------- Auth ---------- */
 .ws-auth {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-sm);
 }
 .ws-auth-aside {
   position: relative;
   overflow: hidden;
-  padding: clamp(24px, 3.4vw, 38px);
+  padding: clamp(20px, 2.6vw, 28px);
   color: #fff;
-  background: linear-gradient(160deg, var(--accent-deep), var(--accent) 55%, color-mix(in oklab, var(--accent) 62%, #86d3ae));
-}
-.ws-auth-aside::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1.5px);
-  background-size: 16px 16px;
-  opacity: 0.32;
-  mask-image: linear-gradient(150deg, #000, transparent 68%);
+  background: var(--accent-deep);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .ws-auth-aside > * {
   position: relative;
 }
 .ws-auth-aside h1 {
-  font-size: clamp(26px, 3vw, 36px);
+  font-size: clamp(21px, 2.2vw, 26px);
   color: #fff;
-  margin: 14px 0 10px;
+  margin: 12px 0 8px;
 }
 .ws-auth-aside p {
-  color: rgba(255, 255, 255, 0.86);
-}
-.ws-auth-feature {
-  display: flex;
-  gap: 11px;
-  align-items: flex-start;
-  padding: 10px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
-  font-size: 13.5px;
-  color: rgba(255, 255, 255, 0.92);
-}
-.ws-auth-feature svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--lime);
-}
-.ws-auth-stat {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 18px;
-}
-.ws-auth-stat span {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 9px 14px;
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(4px);
-}
-.ws-auth-stat strong {
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 20px;
-  line-height: 1.1;
-}
-.ws-auth-stat em {
-  font-style: normal;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
 }
 .ws-auth-form {
-  padding: clamp(22px, 3vw, 34px);
-  background: linear-gradient(180deg, var(--surface), var(--surface-raised));
+  padding: clamp(18px, 2.4vw, 26px);
+  background: var(--surface);
 }
 .ws-segmented {
   display: flex;

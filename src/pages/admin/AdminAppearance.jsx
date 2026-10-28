@@ -211,7 +211,6 @@ export default function AdminAppearance() {
             <label className="form-label small fw-semibold mb-2">Page sections</label>
             <div className="d-flex flex-wrap gap-3">
               {[
-                ["stats", "Statistics strip"],
                 ["topics", "Topic filter chips"],
                 ["docs", "Shared document search"]
               ].map(([key, label]) => (
