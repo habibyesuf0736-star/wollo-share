@@ -120,7 +120,9 @@ export default function QuickRegisterModal() {
       title={stage === "verify" ? "Confirm your email" : "Create your free student account"}
       subtitle={
         stage === "verify"
-          ? `Code sent to ${pendingEmail}.`
+          ? mailSent
+            ? `Code sent to ${pendingEmail}.`
+            : `The code did not reach ${pendingEmail}.`
           : gate.title
           ? `“${gate.title}” is reserved for registered Wollo Share students.`
           : "Registration is free and unlocks the shared library."
@@ -141,7 +143,20 @@ export default function QuickRegisterModal() {
             onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
           />
           {!mailSent ? (
-            <p className="small text-secondary mb-0">The code did not reach that mailbox. Resend it, or sign in with the password you chose.</p>
+            <p className="small text-secondary mb-0">
+              Your account and password are ready. Resend the code, or{" "}
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0 align-baseline"
+                onClick={() => {
+                  close();
+                  goLogin();
+                }}
+              >
+                sign in with your password
+              </button>
+              .
+            </p>
           ) : null}
           {notice ? <p className="small text-secondary mb-0">{notice}</p> : null}
           {error ? <p className="text-danger small mb-0">{error}</p> : null}

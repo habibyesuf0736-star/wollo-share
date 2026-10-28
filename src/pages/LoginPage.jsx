@@ -607,7 +607,16 @@ export default function LoginPage() {
           {tab === "register" && signupStage === "verify" ? (
             <form onSubmit={submitSignupCode} className="d-flex flex-column gap-3">
               <p className="small text-secondary mb-0">
-                Code sent to <strong>{pendingEmail}</strong>. Enter the 6 digits to open your account.
+                {signupMailSent ? (
+                  <>
+                    Code sent to <strong>{pendingEmail}</strong>. Enter the 6 digits to open your account.
+                  </>
+                ) : (
+                  <>
+                    The code did not reach <strong>{pendingEmail}</strong>. Your account and password are ready —
+                    resend the code, or sign in with your password.
+                  </>
+                )}
               </p>
               <div>
                 <label className="form-label small fw-semibold" htmlFor="signupCode">
@@ -625,11 +634,6 @@ export default function LoginPage() {
                   onChange={(e) => setSignupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 />
               </div>
-              {!signupMailSent ? (
-                <p className="small text-secondary mb-0">
-                  The code did not reach that mailbox. Resend it, or sign in with the password you chose.
-                </p>
-              ) : null}
               <button type="submit" className="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2" disabled={busy}>
                 {busy ? "Checking…" : "Verify and open my account"}
                 {busy ? null : <BadgeCheck size={16} aria-hidden="true" />}
@@ -659,7 +663,7 @@ export default function LoginPage() {
                     switchTab("signin");
                   }}
                 >
-                  Already confirmed? Sign in
+                  {signupMailSent ? "Already confirmed? Sign in" : "Sign in with my password"}
                 </button>
               </div>
             </form>
