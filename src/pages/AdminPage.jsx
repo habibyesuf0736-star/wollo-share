@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BarChart3, DatabaseBackup, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Palette, Users } from "lucide-react";
+import { BarChart3, DatabaseBackup, Download, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Palette, Users } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import * as api from "../lib/api.js";
 import AdminCommandBar from "../components/AdminCommandBar.jsx";
@@ -8,6 +8,7 @@ import AdminCourses from "./admin/AdminCourses.jsx";
 import AdminMaterials from "./admin/AdminMaterials.jsx";
 import AdminSubmissions from "./admin/AdminSubmissions.jsx";
 import AdminAppearance from "./admin/AdminAppearance.jsx";
+import AdminDownloads from "./admin/AdminDownloads.jsx";
 import AdminUsers from "./admin/AdminUsers.jsx";
 import AdminMail from "./admin/AdminMail.jsx";
 import AdminAnalytics from "./admin/AdminAnalytics.jsx";
@@ -18,6 +19,7 @@ const TABS = [
   ["reviews", "Material reviews", Inbox],
   ["courses", "Courses", GraduationCap],
   ["materials", "Materials", FolderOpen],
+  ["downloads", "Downloads", Download],
   ["appearance", "Branding & ads", Palette],
   ["users", "Students", Users],
   ["mail", "Email delivery", Mail],
@@ -170,6 +172,7 @@ export default function AdminPage() {
       {tab === "reviews" ? <AdminSubmissions /> : null}
       {tab === "courses" ? <AdminCourses /> : null}
       {tab === "materials" ? <AdminMaterials /> : null}
+      {tab === "downloads" ? <AdminDownloads onNavigate={selectTab} /> : null}
       {tab === "appearance" ? <AdminAppearance /> : null}
       {tab === "users" ? <AdminUsers /> : null}
       {tab === "mail" ? <AdminMail /> : null}

@@ -28,7 +28,7 @@ export const PLANS = [
 ];
 
 export default function UpgradeGateModal() {
-  const { gate, closeGate, setGate, downloadStatus, mySubmissions, session, goPremium } = useApp();
+  const { gate, closeGate, setGate, downloadStatus, downloadPolicy, mySubmissions, session, goPremium } = useApp();
   const open = Boolean(gate && gate.type === "upgrade");
   if (!open) return null;
 

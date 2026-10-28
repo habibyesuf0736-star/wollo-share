@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Minus, Plus } from "lucide-react";
 import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
@@ -6,13 +7,20 @@ import DepartmentSelect from "../../components/DepartmentSelect.jsx";
 import { approveVerification, createStudentAccount, listVerifications, shareVerificationCode } from "../../lib/api.js";
 import { phoneProblem } from "../../lib/utils.js";
 
-const PLANS = [
-  ["unpaid", "Unpaid (2 uploads per download)"],
-  ["premium_monthly", "Premium monthly · 100 Birr"],
-  ["premium_annual", "Premium annual · 250 Birr"],
-  ["paid_lifetime", "Paid 500 Birr · Lifetime"],
-  ["paid_download_only", "Paid · Download-only"]
-];
+const PLAN_LABELS = {
+  unpaid: "Unpaid · earns downloads by sharing",
+  free_unlimited: "Free · unlimited downloads",
+  premium_monthly: "Premium monthly · 100 Birr",
+  premium_annual: "Premium annual · 250 Birr",
+  paid_lifetime: "Paid 500 Birr · Lifetime",
+  paid_download_only: "Paid · Download-only"
+};
+
+// Kept in the same order the dropdown shows it, with the grants that cost nothing last so a
+// careless click cannot hand out unlimited downloads.
+const PLANS = ["unpaid", "premium_monthly", "premium_annual", "paid_lifetime", "paid_download_only", "free_unlimited"];
+
+const PAID = ["premium_monthly", "premium_annual", "paid_lifetime", "paid_download_only"];
 
 const EMPTY_STUDENT_FORM = { name: "", email: "", password: "", department: "", phone: "", accountPlan: "unpaid" };
 
@@ -21,25 +29,35 @@ const roleOf = (user) => user.role || "user";
 const planOf = (user) =>
   user.accountPlan || (user.downloadOnlyAccount ? "paid_download_only" : user.paymentStatus === "paid" ? "paid_lifetime" : "unpaid");
 
+const categoryOf = (plan) => {
+  if (plan === "paid_lifetime") return "Paid 500 Birr · Lifetime VIP";
+  if (plan === "paid_download_only") return "Paid 500 Birr · Download-Only";
+  if (plan === "premium_annual") return "Premium Annual · 250 Birr · 1 Year";
+  if (plan === "premium_monthly") return "Premium Monthly · 100 Birr";
+  if (plan === "free_unlimited") return "Free · unlimited downloads";
+  return "Unpaid · Pending Uploads";
+};
+
 // The Students page leads with these instead of a plan dropdown: paid vs free is what the
 // library gates on, while the role split keeps admins and support staff out of the student list.
 const CATEGORIES = [
   ["all", "All accounts", () => true],
-  ["premium", "Premium", (user, plan) => plan !== "unpaid"],
-  ["free", "Free", (user, plan) => plan === "unpaid"],
+  ["premium", "Premium", (user, plan) => PAID.includes(plan)],
+  ["free", "Free", (user, plan) => !PAID.includes(plan)],
   ["students", "Students", (user) => roleOf(user) === "user"],
   ["support", "Support team", (user) => roleOf(user) === "support"],
   ["admin", "Admins", (user) => roleOf(user) === "admin"]
 ];
 
 export default function AdminUsers() {
-  const { usersData, saveUser, deleteUser, setUserRole, toast, session, isAdmin, coursesData, refreshFromServer } = useApp();
+  const { usersData, saveUser, deleteUser, setUserRole, adjustUserCredits, downloadPolicy, toast, session, isAdmin, coursesData, refreshFromServer } = useApp();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const [editing, setEditing] = useState(null);
   const [editError, setEditError] = useState("");
   const [confirm, setConfirm] = useState({ open: false, userId: null });
   const [roleBusy, setRoleBusy] = useState("");
+  const [creditBusy, setCreditBusy] = useState("");
   const [profile, setProfile] = useState(null);
   const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
   const [approving, setApproving] = useState("");
@@ -165,28 +183,16 @@ export default function AdminUsers() {
     return counts;
   }, [usersData]);
 
-  const planLabelOf = (user) => {
-    const key = planOf(user);
-    const match = PLANS.find(([value]) => value === key);
-    return match ? match[1] : key;
-  };
+  const planLabelOf = (user) => PLAN_LABELS[planOf(user)] || planOf(user);
 
   const updatePlan = (user, plan) => {
+    if (!PLANS.includes(plan)) return;
     saveUser({
       ...user,
       accountPlan: plan,
-      paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
+      paymentStatus: plan === "unpaid" || plan === "free_unlimited" ? "unpaid" : "paid",
       downloadOnlyAccount: plan === "paid_download_only",
-      category:
-        plan === "paid_lifetime"
-          ? "Paid 500 Birr · Lifetime VIP"
-          : plan === "paid_download_only"
-          ? "Paid · Download-only account"
-          : plan === "premium_annual"
-          ? "Premium Annual"
-          : plan === "premium_monthly"
-          ? "Premium Monthly"
-          : "Unpaid · Pending 2 Uploads",
+      category: categoryOf(plan),
       subscriptionExpiry:
         plan === "premium_annual"
           ? new Date(Date.now() + 365 * 86400000).toISOString()
@@ -194,7 +200,13 @@ export default function AdminUsers() {
           ? new Date(Date.now() + 30 * 86400000).toISOString()
           : user.subscriptionExpiry
     });
-    toast(`${user.name || user.email} moved to ${plan}.`);
+    toast(`${user.name || user.email} → ${PLAN_LABELS[plan] || plan}.`);
+  };
+
+  const giveCredits = async (user, delta) => {
+    setCreditBusy(user.id);
+    await adjustUserCredits(user.id, delta);
+    setCreditBusy("");
   };
 
   const saveEdit = (event) => {
@@ -367,9 +379,9 @@ export default function AdminUsers() {
                 <td className="small" data-label="Department">{user.department || "—"}</td>
                 <td className="col-plan" data-label="Plan">
                   <select className="form-select form-select-sm" value={planOf(user)} onChange={(e) => updatePlan(user, e.target.value)}>
-                    {PLANS.map(([value, label]) => (
+                    {PLANS.map((value) => (
                       <option key={value} value={value}>
-                        {label}
+                        {PLAN_LABELS[value]}
                       </option>
                     ))}
                   </select>
@@ -377,10 +389,35 @@ export default function AdminUsers() {
                 <td className="small" data-label="Shared">
                   {Number(user.sharedMaterialsCount) || 0}
                   <div className="text-secondary" style={{ fontSize: 11 }}>
-                    {(Number(user.unpaidCurrentUploadProgress) || 0)}/2 toward next download
+                    {(Number(user.unpaidCurrentUploadProgress) || 0)}/{downloadPolicy.uploadsPerCredit} toward next download
                   </div>
                 </td>
-                <td className="small" data-label="Downloads">{Number(user.downloadsCount) || 0}</td>
+                <td className="small" data-label="Downloads">
+                  {Number(user.downloadsCount) || 0}
+                  <div className="d-flex align-items-center gap-1 mt-1">
+                    <span className="text-secondary" style={{ fontSize: 11 }}>
+                      {Number(user.downloadCredits) || 0} left
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary py-0 px-1 border-0"
+                      disabled={creditBusy === user.id}
+                      title="Give one more download"
+                      onClick={() => giveCredits(user, 1)}
+                    >
+                      <Plus size={12} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary py-0 px-1 border-0"
+                      disabled={creditBusy === user.id || !(Number(user.downloadCredits) || 0)}
+                      title="Take one download back"
+                      onClick={() => giveCredits(user, -1)}
+                    >
+                      <Minus size={12} aria-hidden="true" />
+                    </button>
+                  </div>
+                </td>
                 <td className="small" data-label="Access">
                   {(user.allowedCourseIds || []).length} courses
                   <div className="text-secondary" style={{ fontSize: 11 }}>
@@ -549,9 +586,9 @@ export default function AdminUsers() {
                 value={addForm.accountPlan}
                 onChange={(e) => setAddForm({ ...addForm, accountPlan: e.target.value })}
               >
-                {PLANS.map(([value, label]) => (
+                {PLANS.map((value) => (
                   <option key={value} value={value}>
-                    {label}
+                    {PLAN_LABELS[value]}
                   </option>
                 ))}
               </select>

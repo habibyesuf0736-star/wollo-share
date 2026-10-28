@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Inbox, RefreshCw, Search, ShieldAlert, ThumbsDown, X } from "lucide-react";
 import * as api from "../../lib/api.js";
 import EmptyState from "../../components/EmptyState.jsx";
-import { UPLOADS_PER_CREDIT, useApp } from "../../store/AppContext.jsx";
+import { useApp } from "../../store/AppContext.jsx";
 
 const STATUSES = ["all", "pending", "approved", "rejected", "duplicate"];
 
@@ -21,7 +21,7 @@ function when(iso) {
 }
 
 export default function AdminSubmissions() {
-  const { session, coursesData, approveSubmission, rejectSubmission, toast } = useApp();
+  const { session, coursesData, downloadPolicy, approveSubmission, rejectSubmission, toast } = useApp();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("pending");
@@ -106,7 +106,7 @@ export default function AdminSubmissions() {
           <span className="ws-section-kicker">Student contributions</span>
           <h2 className="h4 mb-1">Material review queue</h2>
           <p className="small text-secondary mb-0">
-            Publishing {UPLOADS_PER_CREDIT} approved uploads earns the student one download. Repeated or duplicate
+            Publishing {downloadPolicy.uploadsPerCredit} approved uploads earns the student one download. Repeated or duplicate
             documents are blocked automatically and never earn a credit.
           </p>
         </div>

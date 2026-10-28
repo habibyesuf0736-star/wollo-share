@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Lock, Sparkles, Timer, Zap } from "lucide-react";
 import Modal from "./Modal.jsx";
-import { AD_SECONDS, useApp } from "../store/AppContext.jsx";
+import { useApp } from "../store/AppContext.jsx";
 
 const SPOTS = [
   { brand: "Wollo Share Premium", headline: "Every note, exam and slide — no waiting.", price: "from 100 Birr" },
@@ -14,9 +14,10 @@ function pad(value) {
 }
 
 export default function AdGateModal() {
-  const { gate, closeGate, completeAdGate, setGate, downloadStatus } = useApp();
+  const { gate, closeGate, completeAdGate, setGate, downloadStatus, downloadPolicy } = useApp();
   const open = Boolean(gate && gate.type === "ad");
-  const [left, setLeft] = useState(AD_SECONDS);
+  const seconds = downloadPolicy.adSeconds;
+  const [left, setLeft] = useState(seconds);
 
   const spot = useMemo(() => {
     const seed = String((gate && gate.title) || "").length;
@@ -29,11 +30,11 @@ export default function AdGateModal() {
 
   useEffect(() => {
     if (!open) return undefined;
-    setLeft(AD_SECONDS);
+    setLeft(seconds);
     const started = Date.now();
     const timer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - started) / 1000);
-      const remaining = Math.max(0, AD_SECONDS - elapsed);
+      const remaining = Math.max(0, seconds - elapsed);
       setLeft(remaining);
       if (remaining === 0) {
         clearInterval(timer);
@@ -41,12 +42,13 @@ export default function AdGateModal() {
       }
     }, 250);
     return () => clearInterval(timer);
-  }, [open, materialKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, materialKey, seconds]);
 
   if (!open) return null;
 
-  const watched = AD_SECONDS - left;
-  const percent = Math.round((watched / AD_SECONDS) * 100);
+  const watched = seconds - left;
+  const percent = seconds > 0 ? Math.round((watched / seconds) * 100) : 100;
 
   return (
     <Modal
@@ -94,12 +96,14 @@ export default function AdGateModal() {
       <div className="alert alert-light border small mt-3 mb-0 d-flex align-items-start gap-2">
         <Lock size={15} className="mt-1 flex-shrink-0" aria-hidden="true" />
         <div>
-          {downloadStatus.plan === "unpaid" ? (
+          {downloadStatus.premium ? (
+            <>Premium members never see this spot.</>
+          ) : downloadStatus.plan === "unpaid" && downloadPolicy.mode === "credits" ? (
             <>
               1 credit used · <strong>{downloadStatus.credits}</strong> left.
             </>
           ) : (
-            <>Premium members never see this spot.</>
+            <>No downloads were used.</>
           )}
         </div>
       </div>

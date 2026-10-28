@@ -12,7 +12,8 @@ const EMPTY = {
   year: "Year 1",
   semester: "First Semester",
   subcategory: "Lecture Notes",
-  hidden: false
+  hidden: false,
+  free: false
 };
 
 export default function MaterialFormModal({ open, onClose, courseId, materialId, preset }) {
@@ -34,7 +35,8 @@ export default function MaterialFormModal({ open, onClose, courseId, materialId,
         year: mat.year || course.defaultYear || "Year 1",
         semester: mat.semester || "First Semester",
         subcategory: mat.subcategory || "Lecture Notes",
-        hidden: Boolean(mat.hidden)
+        hidden: Boolean(mat.hidden),
+        free: Boolean(mat.free)
       });
       setFile(mat.url && mat.url.startsWith("data:") ? { name: "(Uploaded local file)", dataUrl: mat.url, size: mat.size, type: mat.type } : null);
     } else {
@@ -43,7 +45,8 @@ export default function MaterialFormModal({ open, onClose, courseId, materialId,
         ...EMPTY,
         year: (preset && preset.year) || course.defaultYear || (entries[0] && entries[0].year) || "Year 1",
         semester: (preset && preset.semester) || (entries[0] && entries[0].sem) || "First Semester",
-        subcategory: (preset && preset.subcategory) || (course.subcategories && course.subcategories[0]) || "Lecture Notes"
+        subcategory: (preset && preset.subcategory) || (course.subcategories && course.subcategories[0]) || "Lecture Notes",
+        free: false
       });
       setFile(null);
     }
@@ -79,7 +82,8 @@ export default function MaterialFormModal({ open, onClose, courseId, materialId,
       semester: semesters.includes(form.semester) ? form.semester : semesters[0],
       subcategory: form.subcategory.trim() || "Lecture Notes",
       department: course.name,
-      hidden: form.hidden
+      hidden: form.hidden,
+      free: form.free
     };
     if (materialId) {
       updateMaterial(courseId, materialId, payload);
@@ -175,6 +179,20 @@ export default function MaterialFormModal({ open, onClose, courseId, materialId,
                 }
               }}
             />
+          </div>
+          <div className="col-12">
+            <div className="form-check form-switch">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="materialFreeSwitch"
+                checked={form.free}
+                onChange={(e) => update({ free: e.target.checked })}
+              />
+              <label className="form-check-label small" htmlFor="materialFreeSwitch">
+                Free for everyone — no credit, plan or sponsor spot
+              </label>
+            </div>
           </div>
           <div className="col-12">
             <div className="form-check form-switch">

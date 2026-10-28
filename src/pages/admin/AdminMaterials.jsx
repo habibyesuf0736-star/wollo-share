@@ -7,7 +7,7 @@ import { doesDocumentMatchQuery, formatMaterialTerm } from "../../lib/utils.js";
 const MAX_ROWS = 300;
 
 export default function AdminMaterials() {
-  const { coursesData, deleteMaterial, toggleMaterialVisibility, toast } = useApp();
+  const { coursesData, deleteMaterial, updateMaterial, toggleMaterialVisibility, toast } = useApp();
   const [courseFilter, setCourseFilter] = useState("All");
   const [typeFilter, setTypeFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -26,6 +26,8 @@ export default function AdminMaterials() {
         if (typeFilter !== "All" && (mat.type || "Other") !== typeFilter) return;
         if (statusFilter === "hidden" && !mat.hidden) return;
         if (statusFilter === "visible" && mat.hidden) return;
+        if (statusFilter === "free" && !mat.free) return;
+        if (statusFilter === "paid" && mat.free) return;
         if (statusFilter === "student" && !mat.sharedBy) return;
         if (search.trim() && !doesDocumentMatchQuery(course, mat, search.trim())) return;
         list.push({ course, mat });
@@ -134,6 +136,8 @@ export default function AdminMaterials() {
               <option value="all">All statuses</option>
               <option value="visible">Published only</option>
               <option value="hidden">Hidden only</option>
+              <option value="free">Marked free</option>
+              <option value="paid">Needs a credit or plan</option>
               <option value="student">Student-shared</option>
             </select>
           </div>
@@ -213,7 +217,10 @@ export default function AdminMaterials() {
                   {mat.ratingAvg ? `${mat.ratingAvg.toFixed(1)} ★ (${mat.ratingCount})` : "—"}
                 </td>
                 <td data-label="Status">
-                  <span className={`badge ${mat.hidden ? "text-bg-warning" : "text-bg-success"}`}>{mat.hidden ? "Hidden" : "Published"}</span>
+                  <div className="d-flex flex-wrap gap-1">
+                    <span className={`badge ${mat.hidden ? "text-bg-warning" : "text-bg-success"}`}>{mat.hidden ? "Hidden" : "Published"}</span>
+                    {mat.free ? <span className="badge text-bg-info">Free</span> : null}
+                  </div>
                 </td>
                 <td className="text-end table-actions">
                   <div className="d-flex gap-1 flex-wrap justify-content-end">
@@ -229,6 +236,16 @@ export default function AdminMaterials() {
                       }}
                     >
                       {mat.hidden ? "Publish" : "Hide"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm py-0 ${mat.free ? "btn-soft" : "btn-outline-info"}`}
+                      onClick={() => {
+                        updateMaterial(course.id, mat.id, { free: !mat.free });
+                        toast(mat.free ? `"${mat.name}" needs a credit or plan again.` : `"${mat.name}" is free for everyone.`);
+                      }}
+                    >
+                      {mat.free ? "Make paid" : "Make free"}
                     </button>
                     <button
                       type="button"

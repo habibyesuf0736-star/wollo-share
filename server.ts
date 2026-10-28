@@ -721,6 +721,43 @@ const DEFAULT_APPEARANCE = {
   logoUrl: ""
 };
 
+// What a student has to do to get a file. The administrator owns this on the
+// Downloads page, so the library can be opened to everyone or closed to unpaid
+// accounts without a code change.
+type DownloadMode = "credits" | "free" | "premium";
+
+interface DownloadPolicy {
+  mode: DownloadMode;
+  uploadsPerCredit: number;
+  adSeconds: number;
+}
+
+const DEFAULT_DOWNLOAD_POLICY: DownloadPolicy = {
+  mode: "credits",
+  uploadsPerCredit: 2,
+  adSeconds: 10
+};
+
+// Plans that buy unlimited downloads. `free_unlimited` is deliberately absent: it is
+// an access grant, not a payment, so it never shows up in the paid statistics.
+const PAID_PLANS = ["premium_monthly", "premium_annual", "paid_lifetime", "paid_download_only"];
+
+// Every plan the administrator can hand out. Anything else is folded back to unpaid.
+const STUDENT_PLANS = ["unpaid", "free_unlimited", ...PAID_PLANS];
+
+const PLAN_CATEGORY_LABELS: Record<string, string> = {
+  paid_download_only: "Paid 500 Birr · Download-Only",
+  paid_lifetime: "Paid 500 Birr · Lifetime VIP",
+  premium_annual: "Premium Annual · 250 Birr · 1 Year",
+  premium_monthly: "Premium Monthly · 100 Birr",
+  free_unlimited: "Free · unlimited downloads",
+  unpaid: "Unpaid · Pending Uploads"
+};
+
+function planCategoryLabel(plan: string): string {
+  return PLAN_CATEGORY_LABELS[plan] || PLAN_CATEGORY_LABELS.unpaid;
+}
+
 interface SideMaterial {
   id: string;
   name: string;
@@ -742,6 +779,9 @@ interface CourseMaterial {
   sharedBy?: string;
   subcategory: string;
   hidden: boolean;
+  // Set by the administrator on the Materials page: anyone, signed in or not, may take
+  // this file without credits, a plan or the sponsor slot.
+  free?: boolean;
   ratingAvg: number;
   ratingCount: number;
   ratingsByUser?: Record<string, number>;
@@ -862,6 +902,7 @@ interface DatabaseSchema {
   materialSubmissions: MaterialSubmission[];
   supportTickets: SupportTicket[];
   mailSettings?: MailSettings;
+  downloadPolicy?: DownloadPolicy;
   updatedAt?: number;
   // Bumped only by admin wholesale state saves. `updatedAt` moves on every student
   // write too, so it cannot tell a stale admin editor from normal traffic.
@@ -929,8 +970,8 @@ interface LoginDevice {
   revokedAt?: string;
 }
 
-// A student contribution waiting in the admin review queue. Approving two of them
-// earns the contributor one premium download (see UPLOADS_PER_CREDIT).
+// A student contribution waiting in the admin review queue. Approving enough of them
+// earns the contributor one download (see the uploads-per-credit policy).
 interface MaterialSubmission {
   id: string;
   userId: string;
@@ -956,7 +997,6 @@ interface MaterialSubmission {
   materialId?: string;
 }
 
-const UPLOADS_PER_CREDIT = 2;
 const SUBMISSION_COOLDOWN_MS = 45_000;
 const MAX_PENDING_PER_STUDENT = 3;
 
@@ -984,7 +1024,8 @@ function buildDefaultDatabase(): DatabaseSchema {
     loginDevices: [],
     materialSubmissions: [],
     supportTickets: [],
-    mailSettings: {}
+    mailSettings: {},
+    downloadPolicy: { ...DEFAULT_DOWNLOAD_POLICY }
   };
 }
 
@@ -1073,8 +1114,12 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
       else if (u.paymentStatus === "paid") u.accountPlan = "paid_lifetime";
       else u.accountPlan = "unpaid";
     }
-    // Expire premium_annual subscriptions server-side too
-    if (u.accountPlan === "premium_annual") {
+    // Only the plans the administrator can pick exist. An old label such as "free",
+    // which once quietly counted as paid, is folded back into the unpaid tier.
+    if (!STUDENT_PLANS.includes(u.accountPlan)) u.accountPlan = "unpaid";
+    // Expire premium subscriptions server-side too, so a lapsed plan cannot download
+    // even while the browser still remembers it.
+    if (u.accountPlan === "premium_annual" || u.accountPlan === "premium_monthly") {
       const expiry = u.subscriptionExpiry ? new Date(u.subscriptionExpiry) : null;
       if (!expiry || expiry <= new Date()) {
         u.accountPlan = "unpaid";
@@ -1082,23 +1127,12 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
         u.category = "Unpaid · Subscription Expired";
       }
     }
-    u.paymentStatus = u.accountPlan === "unpaid" ? "unpaid" : "paid";
+    u.paymentStatus = u.accountPlan === "unpaid" || u.accountPlan === "free_unlimited" ? "unpaid" : "paid";
     u.downloadOnlyAccount = u.accountPlan === "paid_download_only";
     u.amountPaidBirr = planPriceBirr(u.accountPlan);
     if (u.category === "Paid 100 Birr · Lifetime VIP") u.category = "Paid 500 Birr · Lifetime VIP";
     else if (u.category === "Paid 100 Birr · Download-Only") u.category = "Paid 500 Birr · Download-Only";
-    if (!u.category) {
-      u.category =
-        u.accountPlan === "paid_download_only"
-          ? "Paid 500 Birr · Download-Only"
-          : u.accountPlan === "paid_lifetime"
-          ? "Paid 500 Birr · Lifetime VIP"
-          : u.accountPlan === "premium_annual"
-          ? "Premium Annual · 250 Birr · 1 Year"
-          : u.accountPlan === "premium_monthly"
-          ? "Premium Monthly · 100 Birr"
-          : "Unpaid · Pending 2 Uploads";
-    }
+    if (!u.category) u.category = planCategoryLabel(u.accountPlan);
     if (typeof u.sharedMaterialsCount !== "number") u.sharedMaterialsCount = 0;
     if (!u.unpaidPerDownloadMigrationV4) {
       u.unpaidCurrentUploadProgress = 0;
@@ -1166,6 +1200,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
         }))
       : [],
     mailSettings: normalizeMailSettings(raw.mailSettings),
+    downloadPolicy: normalizeDownloadPolicy(raw.downloadPolicy),
     updatedAt: Number(raw.updatedAt) || 0,
     contentRevision: Number(raw.contentRevision) || 0
   };
@@ -1195,6 +1230,24 @@ function normalizeMailSettings(raw: unknown): MailSettings {
     mailtrapTokenVault: typeof source.mailtrapTokenVault === "string" ? source.mailtrapTokenVault : "",
     mailtrapTemplateUuid: typeof source.mailtrapTemplateUuid === "string" ? source.mailtrapTemplateUuid.trim() : ""
   };
+}
+
+function normalizeDownloadPolicy(raw: unknown): DownloadPolicy {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const mode = String(source.mode || DEFAULT_DOWNLOAD_POLICY.mode);
+  const uploads = Math.round(Number(source.uploadsPerCredit));
+  const ad = Math.round(Number(source.adSeconds));
+  return {
+    mode: (["credits", "free", "premium"].includes(mode) ? mode : DEFAULT_DOWNLOAD_POLICY.mode) as DownloadMode,
+    uploadsPerCredit: Number.isFinite(uploads) ? Math.min(10, Math.max(1, uploads)) : DEFAULT_DOWNLOAD_POLICY.uploadsPerCredit,
+    adSeconds: Number.isFinite(ad) ? Math.min(120, Math.max(0, ad)) : DEFAULT_DOWNLOAD_POLICY.adSeconds
+  };
+}
+
+// Read the policy the administrator last saved. A store written before the setting
+// existed falls back to the shipped behaviour rather than an empty object.
+function downloadPolicy(): DownloadPolicy {
+  return normalizeDownloadPolicy(dbState.downloadPolicy);
 }
 
 // Evangadi sells its own course pack, so it is never part of a student's library.
@@ -1710,6 +1763,9 @@ export async function createApp() {
       usersData: visibleUsers,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
+      // Every account needs the rules it is being gated by, or the library cannot
+      // explain why a file is closed.
+      downloadPolicy: downloadPolicy(),
       userRatings: dbState.userRatings,
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
@@ -1794,6 +1850,7 @@ export async function createApp() {
       usersData: [...mergedUsers, ...dbState.usersData.filter((user) => !mergedUsers.some((updated) => updated.id === user.id))],
       pageTexts: incoming.pageTexts || dbState.pageTexts,
       appearanceSettings: incoming.appearanceSettings || dbState.appearanceSettings,
+      downloadPolicy: incoming.downloadPolicy || dbState.downloadPolicy,
       userRatings: incoming.userRatings || dbState.userRatings,
       customAdminPassword: dbState.customAdminPassword,
       passwordRecoveryRequests: dbState.passwordRecoveryRequests,
@@ -2084,7 +2141,11 @@ export async function createApp() {
       res.status(409).json({ ok: false, error: "An account already exists for this email." });
       return;
     }
-    const plan = String(req.body?.accountPlan || "unpaid").trim();
+    const requestedPlan = String(req.body?.accountPlan || "unpaid").trim();
+    const plan = STUDENT_PLANS.includes(requestedPlan) ? requestedPlan : "unpaid";
+    // A premium plan without an expiry date reads as lapsed on the next state load, so the
+    // account the administrator just upgraded would silently fall back to unpaid.
+    const premiumDays = plan === "premium_annual" ? 365 : plan === "premium_monthly" ? 30 : 0;
     const user = secureUserAccount({
       id: "user-" + Date.now(),
       name,
@@ -2094,10 +2155,11 @@ export async function createApp() {
       department: String(req.body?.department || "").trim() || undefined,
       phone: String(req.body?.phone || "").trim().slice(0, 32),
       accountPlan: plan,
-      paymentStatus: plan === "unpaid" ? "unpaid" : "paid",
-      downloadOnlyAccount: false,
+      subscriptionExpiry: premiumDays ? new Date(Date.now() + premiumDays * 86400000).toISOString() : undefined,
+      paymentStatus: plan === "unpaid" || plan === "free_unlimited" ? "unpaid" : "paid",
+      downloadOnlyAccount: plan === "paid_download_only",
       amountPaidBirr: planPriceBirr(plan),
-      category: plan === "paid_lifetime" ? "Paid 500 Birr · Lifetime VIP" : plan === "unpaid" ? "Unpaid · Pending 2 Uploads" : "Premium · 1 Year",
+      category: planCategoryLabel(plan),
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: "Never signed in",
@@ -2138,7 +2200,7 @@ export async function createApp() {
       accounts: users.length,
       verified: users.filter((user) => isEmailVerified(user)).length,
       pending: users.filter((user) => !isEmailVerified(user)).length,
-      paid: users.filter((user) => String(user.accountPlan || "unpaid") !== "unpaid").length
+      paid: users.filter((user) => PAID_PLANS.includes(String(user.accountPlan || "unpaid"))).length
     };
   }
 
@@ -2166,6 +2228,7 @@ export async function createApp() {
       coursesData: dbState.coursesData,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
+      downloadPolicy: dbState.downloadPolicy,
       userRatings: dbState.userRatings,
       materialSubmissions: dbState.materialSubmissions
     };
@@ -2352,6 +2415,7 @@ export async function createApp() {
         coursesData: courses as Course[],
         pageTexts: incoming.pageTexts ?? dbState.pageTexts,
         appearanceSettings: incoming.appearanceSettings ?? dbState.appearanceSettings,
+        downloadPolicy: incoming.downloadPolicy ?? dbState.downloadPolicy,
         userRatings: incoming.userRatings ?? dbState.userRatings,
         materialSubmissions: incoming.materialSubmissions ?? dbState.materialSubmissions,
         contentRevision: serverRevision + 1
@@ -2363,6 +2427,7 @@ export async function createApp() {
         usersData: users as UserAccount[],
         pageTexts: incoming.pageTexts ?? dbState.pageTexts,
         appearanceSettings: incoming.appearanceSettings ?? dbState.appearanceSettings,
+        downloadPolicy: incoming.downloadPolicy ?? dbState.downloadPolicy,
         userRatings: incoming.userRatings ?? dbState.userRatings,
         customAdminPassword: incoming.customAdminPassword ?? dbState.customAdminPassword,
         passwordRecoveryRequests: incoming.passwordRecoveryRequests ?? dbState.passwordRecoveryRequests,
@@ -3022,7 +3087,7 @@ export async function createApp() {
       password: crypto.randomBytes(24).toString("base64url"),
       role: "user",
       department: "General Studies & Science",
-      accountPlan: "free",
+      accountPlan: "unpaid",
       paymentStatus: "unpaid",
       downloadOnlyAccount: false,
       amountPaidBirr: 0,
@@ -3687,11 +3752,14 @@ export async function createApp() {
   }
 
   function submissionCreditState(user: UserAccount) {
+    const policy = downloadPolicy();
     return {
       sharedMaterialsCount: Number(user.sharedMaterialsCount) || 0,
       unpaidCurrentUploadProgress: Number(user.unpaidCurrentUploadProgress) || 0,
       downloadCredits: Number(user.downloadCredits) || 0,
-      uploadsPerCredit: UPLOADS_PER_CREDIT
+      uploadsPerCredit: policy.uploadsPerCredit,
+      downloadMode: policy.mode,
+      adSeconds: policy.adSeconds
     };
   }
 
@@ -3894,10 +3962,11 @@ export async function createApp() {
     let credited = false;
     const user = dbState.usersData.find((account) => account.id === submission.userId);
     if (user) {
+      const needed = downloadPolicy().uploadsPerCredit;
       user.sharedMaterialsCount = (Number(user.sharedMaterialsCount) || 0) + 1;
       user.unpaidCurrentUploadProgress = (Number(user.unpaidCurrentUploadProgress) || 0) + 1;
-      if (user.unpaidCurrentUploadProgress >= UPLOADS_PER_CREDIT) {
-        user.unpaidCurrentUploadProgress -= UPLOADS_PER_CREDIT;
+      if (user.unpaidCurrentUploadProgress >= needed) {
+        user.unpaidCurrentUploadProgress -= needed;
         user.downloadCredits = (Number(user.downloadCredits) || 0) + 1;
         credited = true;
       }
@@ -3906,8 +3975,8 @@ export async function createApp() {
           id: "act-" + Date.now(),
           type: "Material Approved",
           detail: credited
-            ? `“${submission.name}” published — you earned a free premium download`
-            : `“${submission.name}” published (${user.unpaidCurrentUploadProgress}/${UPLOADS_PER_CREDIT} toward your next download)`,
+            ? `“${submission.name}” published — you earned a download`
+            : `“${submission.name}” published (${user.unpaidCurrentUploadProgress}/${needed} toward your next download)`,
           timestamp: new Date().toISOString()
         },
         ...(user.activityLog || [])
@@ -3981,6 +4050,44 @@ export async function createApp() {
     ].slice(0, 60);
     saveDatabase(dbState);
     res.json({ ok: true, user: safeUserAccount(target) });
+  });
+
+  // The administrator's direct hand on a student's download balance: hand out access
+  // for a contribution that arrived late, or take it back.
+  app.post("/api/admin/users/:userId/credits", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const target = dbState.usersData.find((user) => user.id === String(req.params.userId || ""));
+    if (!target) {
+      res.status(404).json({ ok: false, error: "That account is not in the library any more." });
+      return;
+    }
+    const delta = Math.round(Number(req.body?.delta));
+    if (!Number.isFinite(delta) || delta === 0) {
+      res.status(400).json({ ok: false, error: "Say how many downloads to add or remove." });
+      return;
+    }
+    const before = Number(target.downloadCredits) || 0;
+    target.downloadCredits = Math.max(0, Math.min(999, before + delta));
+    const given = target.downloadCredits - before;
+    if (given !== 0) {
+      target.activityLog = [
+        {
+          id: "act-" + Date.now(),
+          type: "Download Credit",
+          detail: given > 0
+            ? `The administrator gave you ${given} download${given === 1 ? "" : "s"}.`
+            : `The administrator removed ${Math.abs(given)} download${Math.abs(given) === 1 ? "" : "s"} from your account.`,
+          timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+        },
+        ...(target.activityLog || [])
+      ].slice(0, 60);
+    }
+    saveDatabase(dbState);
+    res.json({ ok: true, given, user: safeUserAccount(target), ...submissionCreditState(target) });
   });
 
   app.post("/api/support/tickets", (req, res) => {
@@ -4254,29 +4361,52 @@ export async function createApp() {
     res.json({ ok: true, progress: user.videoProgress[`${courseId}::${materialId}`] });
   });
 
-  // Spend one earned credit right before the student's download starts, so a
-  // refresh can never hand out the same credit twice.
-  app.post("/api/downloads/consume-credit", (req, res) => {
+  // The download decision lives here rather than in the browser, so what the
+  // administrator set on the Downloads page is what actually happens. A credit is
+  // spent at the moment access is granted, so a refresh cannot hand it out twice.
+  app.post("/api/downloads/authorize", (req, res) => {
     const session = verifyRequestSession(req);
     if (!session) {
-      res.status(401).json({ ok: false, error: "Sign in to download this material." });
+      res.status(401).json({ ok: false, allowed: false, reason: "register", error: "Sign in to download this material." });
       return;
     }
     const user = dbState.usersData.find((account) => account.id === session.id);
     if (!user) {
-      res.status(401).json({ ok: false, error: "Your account could not be found." });
+      res.status(401).json({ ok: false, allowed: false, reason: "register", error: "Your account could not be found." });
       return;
     }
-    if (Number(user.downloadCredits) > 0) {
-      user.downloadCredits = Number(user.downloadCredits) - 1;
-      user.downloadsCount = (Number(user.downloadsCount) || 0) + 1;
-      saveDatabase(dbState);
-      res.json({ ok: true, spent: true, ...submissionCreditState(user) });
+    const course = dbState.coursesData.find((candidate) => candidate.id === String(req.body?.courseId || ""));
+    const material = course ? (course.materials || []).find((m) => m.id === String(req.body?.materialId || "")) : null;
+    const policy = downloadPolicy();
+    const plan = String(user.accountPlan || "unpaid");
+    const premium = PAID_PLANS.includes(plan);
+
+    let allowed = premium;
+    let reason = "";
+    if (!allowed) {
+      // A file the administrator marked free is open to every account, in any mode.
+      if (material && material.free === true) allowed = true;
+      // Support staff have to open files to review them.
+      else if (isStaffSession(session)) allowed = true;
+      else if (plan === "free_unlimited" || policy.mode === "free") allowed = true;
+      else if (policy.mode === "credits" && (Number(user.downloadCredits) || 0) > 0) allowed = true;
+      else if (policy.mode === "premium") reason = "The administrator has the library open to Premium accounts only.";
+      else reason = "You have no downloads left — share a material or pick a plan.";
+    }
+    if (!allowed) {
+      res.json({ ok: true, allowed: false, reason, ...submissionCreditState(user) });
       return;
     }
+
+    // A material the administrator flagged free, or one that left the catalog mid-read,
+    // costs nothing; staff never pay for a file they published.
+    const costsACredit = material ? material.free !== true : false;
+    const spend =
+      !premium && !isStaffSession(session) && plan !== "free_unlimited" && policy.mode === "credits" && costsACredit;
+    if (spend) user.downloadCredits = Math.max(0, (Number(user.downloadCredits) || 0) - 1);
     user.downloadsCount = (Number(user.downloadsCount) || 0) + 1;
     saveDatabase(dbState);
-    res.json({ ok: true, spent: false, ...submissionCreditState(user) });
+    res.json({ ok: true, allowed: true, spent: spend, ...submissionCreditState(user) });
   });
 
   // ============================================================================

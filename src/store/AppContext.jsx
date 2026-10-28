@@ -33,10 +33,28 @@ export const DEFAULT_APPEARANCE = {
 
 const BANNER_DISMISSED_KEY = "wollo_announcement_dismissed_v1";
 
-// Materials a free account must have approved before it earns one download.
-export const UPLOADS_PER_CREDIT = 2;
-// Non-premium accounts watch this many seconds of the sponsor slot first.
-export const AD_SECONDS = 10;
+// The rules the administrator sets on Admin → Downloads. The server owns them; this is
+// the same shape and the same clamps so a first paint before the fetch is not misleading.
+export const DEFAULT_DOWNLOAD_POLICY = {
+  mode: "credits",
+  uploadsPerCredit: 2,
+  adSeconds: 10
+};
+
+export function normalizeDownloadPolicy(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const mode = ["credits", "free", "premium"].includes(String(source.mode)) ? String(source.mode) : DEFAULT_DOWNLOAD_POLICY.mode;
+  const uploads = Math.round(Number(source.uploadsPerCredit));
+  const ad = Math.round(Number(source.adSeconds));
+  return {
+    mode,
+    uploadsPerCredit: Number.isFinite(uploads) ? Math.min(10, Math.max(1, uploads)) : DEFAULT_DOWNLOAD_POLICY.uploadsPerCredit,
+    adSeconds: Number.isFinite(ad) ? Math.min(120, Math.max(0, ad)) : DEFAULT_DOWNLOAD_POLICY.adSeconds
+  };
+}
+
+// Plans that buy unlimited downloads; `free_unlimited` is a grant, not a payment.
+const PAID_PLANS = ["premium_monthly", "premium_annual", "paid_lifetime", "paid_download_only"];
 
 // The session lives in localStorage and the token behind it lasts a year, so a student who
 // signs in once stays signed in through closing the browser or restarting the machine.
@@ -61,7 +79,7 @@ function viewFromLocation() {
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
   const match = hash.match(
-    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|users|mail|analytics|backup))?/
+    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|downloads|users|mail|analytics|backup))?/
   );
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
 }
@@ -107,6 +125,9 @@ export function AppProvider({ children }) {
     ...(readJson(STORAGE_KEYS.APPEARANCE, {}) || {})
   }));
   const [userRatings, setUserRatings] = useState(() => readJson(STORAGE_KEYS.USER_RATINGS, {}) || {});
+  const [downloadPolicy, setDownloadPolicy] = useState(() =>
+    normalizeDownloadPolicy(readJson(STORAGE_KEYS.DOWNLOAD_POLICY, null))
+  );
   const [session, setSession] = useState(() => normalizeSession(readStoredSession()));
   const [studentPreview, setStudentPreview] = useState(false);
   const [view, setView] = useState(() => initialView());
@@ -180,6 +201,9 @@ export function AppProvider({ children }) {
   useEffect(() => {
     writeJson(STORAGE_KEYS.USER_RATINGS, userRatings);
   }, [userRatings]);
+  useEffect(() => {
+    writeJson(STORAGE_KEYS.DOWNLOAD_POLICY, downloadPolicy);
+  }, [downloadPolicy]);
 
   // The browser tab wears the signed-in student's own photo; the admin's uploaded logo
   // comes next and the university emblem is the fallback. The type attribute is dropped
@@ -242,13 +266,21 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isAdmin || hasLocalMutationRef.current !== true) return;
     pendingSyncRef.current = {
-      payload: { coursesData, usersData, pageTexts, appearanceSettings, userRatings, contentRevision: baseRevisionRef.current },
+      payload: {
+        coursesData,
+        usersData,
+        pageTexts,
+        appearanceSettings,
+        downloadPolicy,
+        userRatings,
+        contentRevision: baseRevisionRef.current
+      },
       token: session.authToken
     };
     writeJson(STORAGE_KEYS.PENDING_ADMIN_STATE, pendingSyncRef.current);
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(flushState, 400);
-  }, [appearanceSettings, coursesData, flushState, isAdmin, pageTexts, session, userRatings, usersData]);
+  }, [appearanceSettings, coursesData, downloadPolicy, flushState, isAdmin, pageTexts, session, userRatings, usersData]);
 
   useEffect(() => {
     window.addEventListener("pagehide", flushState);
@@ -299,6 +331,16 @@ export function AppProvider({ children }) {
     [markDirty]
   );
 
+  const commitDownloadPolicy = useCallback(
+    (updater) => {
+      markDirty();
+      setDownloadPolicy((prev) =>
+        normalizeDownloadPolicy({ ...prev, ...(typeof updater === "function" ? updater(prev) : updater) })
+      );
+    },
+    [markDirty]
+  );
+
   /* -------------------------------------------------------------------- boot */
   useEffect(() => {
     let cancelled = false;
@@ -343,6 +385,9 @@ export function AppProvider({ children }) {
           setAppearanceSettings({ ...DEFAULT_APPEARANCE, ...res.appearanceSettings });
         if (res.userRatings && typeof res.userRatings === "object")
           setUserRatings((prev) => ({ ...prev, ...res.userRatings }));
+        // The gate rules always come from the server: a locally cached policy could
+        // hand a student downloads the administrator has since closed.
+        if (res.downloadPolicy) setDownloadPolicy(normalizeDownloadPolicy(res.downloadPolicy));
       }
       if (!cancelled) setBooting(false);
     })();
@@ -651,12 +696,28 @@ export function AppProvider({ children }) {
   }, [goLibrary, storeSession]);
 
   /* --------------------------------------------------------- download status */
-  // Premium and paid plans download instantly. Free accounts pay with a
-  // 10-second advertisement plus one earned credit — a credit is granted for
-  // every two materials the administrator approves from the review queue.
+  // The rules the administrator set on Admin → Downloads, applied to this account.
+  // Premium plans never wait; `free_unlimited` is a grant rather than a payment, so it
+  // still sees the sponsor slot; the site-wide mode can open every file to any signed-in
+  // student or close them to unpaid ones.
   const downloadStatus = useMemo(() => {
     const credits = Number(activeUser?.downloadCredits) || 0;
     const progress = Number(activeUser?.unpaidCurrentUploadProgress) || 0;
+    const totalShared = Number(activeUser?.sharedMaterialsCount) || 0;
+    const requiredCount = downloadPolicy.uploadsPerCredit;
+    const open = (plan, badgeText, extra = {}) => ({
+      canDownload: true,
+      premium: false,
+      plan,
+      credits,
+      progress,
+      requiredCount,
+      sharedCount: totalShared,
+      badgeText,
+      ...extra
+    });
+    const unlimited = (plan, badgeText, extra = {}) => open(plan, badgeText, { premium: true, ...extra });
+
     if (studentPreview) {
       return {
         canDownload: false,
@@ -664,7 +725,7 @@ export function AppProvider({ children }) {
         plan: "visitor_unpaid",
         credits: 0,
         progress: 0,
-        requiredCount: UPLOADS_PER_CREDIT,
+        requiredCount,
         sharedCount: 0,
         badgeText: "Student preview · free materials only"
       };
@@ -681,78 +742,74 @@ export function AppProvider({ children }) {
         badgeText: "Administrator · Unlimited downloads"
       };
     }
-    if (activeUser) {
-      const plan =
-        activeUser.accountPlan ||
-        (activeUser.downloadOnlyAccount
-          ? "paid_download_only"
-          : activeUser.paymentStatus === "paid"
-          ? "paid_lifetime"
-          : "unpaid");
-      const totalShared = Number(activeUser.sharedMaterialsCount) || 0;
-
-      if (plan === "premium_annual" || plan === "premium_monthly") {
-        const expiry = activeUser.subscriptionExpiry ? new Date(activeUser.subscriptionExpiry) : null;
-        if (!expiry || expiry > new Date()) {
-          return {
-            canDownload: true,
-            premium: true,
-            plan,
-            credits,
-            progress,
-            requiredCount: UPLOADS_PER_CREDIT,
-            sharedCount: totalShared,
-            daysLeft: expiry ? Math.ceil((expiry - new Date()) / 86400000) : undefined,
-            badgeText: `${plan === "premium_monthly" ? "Premium monthly" : "Premium annual"} · Unlimited downloads`
-          };
-        }
-      }
-      if (plan === "paid_download_only") {
-        return {
-          canDownload: true,
-          premium: true,
-          plan,
-          credits,
-          progress,
-          requiredCount: UPLOADS_PER_CREDIT,
-          sharedCount: totalShared,
-          badgeText: "Paid account · Unlimited downloads"
-        };
-      }
-      if (plan === "paid_lifetime") {
-        return {
-          canDownload: true,
-          premium: true,
-          plan,
-          credits,
-          progress,
-          requiredCount: UPLOADS_PER_CREDIT,
-          sharedCount: totalShared,
-          badgeText: "Paid student · Lifetime downloads"
-        };
-      }
+    if (!activeUser) {
       return {
-        canDownload: credits > 0,
+        canDownload: false,
+        premium: false,
+        plan: "visitor_unpaid",
+        credits: 0,
+        progress: 0,
+        requiredCount,
+        sharedCount: 0,
+        badgeText: "Free materials only · Sign in to save progress"
+      };
+    }
+
+    // Staff open files to review them, whatever the plan says.
+    if (activeUser.role === "support") {
+      return open("support", "Support team · Unlimited downloads");
+    }
+
+    const plan =
+      activeUser.accountPlan ||
+      (activeUser.downloadOnlyAccount
+        ? "paid_download_only"
+        : activeUser.paymentStatus === "paid"
+        ? "paid_lifetime"
+        : "unpaid");
+
+    if (plan === "premium_annual" || plan === "premium_monthly") {
+      const expiry = activeUser.subscriptionExpiry ? new Date(activeUser.subscriptionExpiry) : null;
+      if (expiry && expiry > new Date()) {
+        return unlimited(
+          plan,
+          `${plan === "premium_monthly" ? "Premium monthly" : "Premium annual"} · Unlimited downloads`,
+          { daysLeft: Math.ceil((expiry - new Date()) / 86400000) }
+        );
+      }
+      // Lapsed or never-dated: the server folds the account back to unpaid, so the
+      // library must not keep showing it as premium.
+    }
+    if (plan === "paid_download_only") return unlimited(plan, "Paid account · Unlimited downloads");
+    if (plan === "paid_lifetime") return unlimited(plan, "Paid student · Lifetime downloads");
+    if (plan === "free_unlimited") return open(plan, "Free · unlimited downloads");
+
+    if (downloadPolicy.mode === "free") {
+      return open("unpaid", "Free downloads are open to every student");
+    }
+    if (downloadPolicy.mode === "premium") {
+      return {
+        canDownload: false,
         premium: false,
         plan: "unpaid",
         credits,
         progress,
-        requiredCount: UPLOADS_PER_CREDIT,
+        requiredCount,
         sharedCount: totalShared,
-        badgeText: credits > 0 ? `Free plan · ${credits} download${credits === 1 ? "" : "s"} ready` : "Free plan"
+        badgeText: "Premium files only · Ask for a plan"
       };
     }
     return {
-      canDownload: false,
+      canDownload: credits > 0,
       premium: false,
-      plan: "visitor_unpaid",
-      credits: 0,
-      progress: 0,
-      requiredCount: UPLOADS_PER_CREDIT,
-      sharedCount: 0,
-      badgeText: "Free materials only · Sign in to save progress"
+      plan: "unpaid",
+      credits,
+      progress,
+      requiredCount,
+      sharedCount: totalShared,
+      badgeText: credits > 0 ? `Free plan · ${credits} download${credits === 1 ? "" : "s"} ready` : "Free plan"
     };
-  }, [activeUser, isAdmin, studentPreview]);
+  }, [activeUser, downloadPolicy, isAdmin, studentPreview]);
 
   /* ------------------------------------------------- earned download credits */
   // The server owns the credit ledger (two approved contributions = one download),
@@ -813,11 +870,62 @@ export function AppProvider({ children }) {
   );
 
   /* ------------------------------------------------------ gated download flow */
+  // The server holds the ledger and the policy, so a student's local copy is replaced by
+  // whatever the answer carries — including an administrator who just changed the mode.
+  const adoptLedger = useCallback(
+    (res) => {
+      if (!res || res.ok === false) return;
+      if (res.downloadMode) {
+        setDownloadPolicy((prev) =>
+          normalizeDownloadPolicy({
+            ...prev,
+            mode: res.downloadMode,
+            uploadsPerCredit: res.uploadsPerCredit,
+            adSeconds: res.adSeconds
+          })
+        );
+      }
+      if (!activeUser || studentPreview) return;
+      commitUsers((prev) =>
+        prev.map((u) =>
+          u.id === activeUser.id
+            ? {
+                ...u,
+                downloadCredits: Number(res.downloadCredits) || 0,
+                unpaidCurrentUploadProgress: Number(res.unpaidCurrentUploadProgress) || 0,
+                sharedMaterialsCount: Number(res.sharedMaterialsCount) || 0
+              }
+            : u
+        )
+      );
+    },
+    [activeUser, commitUsers, studentPreview]
+  );
+
+  // Access is decided here rather than in the browser, so the plan the administrator
+  // hands out — or takes back — applies on the next click instead of the next reload.
   const performDownload = useCallback(
-    (courseId, materialId, sideMaterialId) => {
+    async (courseId, materialId, sideMaterialId) => {
       const course = coursesData.find((c) => c.id === courseId);
       const mat = course ? (course.materials || []).find((m) => m.id === materialId) : null;
       if (!mat) return false;
+
+      const needsAuthorisation = session && activeUser && !studentPreview && !mat.free && !downloadStatus.premium;
+      if (needsAuthorisation) {
+        const res = await api.authorizeDownload({ courseId, materialId }, session.authToken).catch(() => null);
+        adoptLedger(res);
+        // Refused: out of credits, or the library is closed to this plan now. An outage
+        // answers with nothing at all, and a student who was allowed a moment ago is not
+        // punished for the server being unreachable.
+        if (res && res.ok !== false && res.allowed !== true) {
+          pendingDownloadRef.current = null;
+          removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+          setGate({ type: "upgrade", courseId, materialId, sideMaterialId, title: mat.name || "Study Material" });
+          toast(res.reason || "That file is closed to your account right now.");
+          return false;
+        }
+      }
+
       const sideMat = sideMaterialId ? (mat.sideMaterials || []).find((s) => s.id === sideMaterialId) : null;
       const href = sideMat
         ? sideMat.url && !sideMat.url.startsWith("#sample")
@@ -841,31 +949,12 @@ export function AppProvider({ children }) {
           )
         );
       }
-      // A free account pays for premium files with one earned credit; the server
-      // ledger is re-read afterwards so the two devices can never drift.
-      if (session && !downloadStatus.premium && mat && !mat.free) {
-        if (activeUser && !studentPreview) {
-          commitUsers((prev) =>
-            prev.map((u) =>
-              u.id === activeUser.id
-                ? { ...u, downloadCredits: Math.max(0, (Number(u.downloadCredits) || 0) - 1) }
-                : u
-            )
-          );
-        }
-        api
-          .consumeDownloadCredit(session.authToken)
-          .then((res) => {
-            if (res && res.ok !== false) syncCredits();
-          })
-          .catch(() => {});
-      }
       pendingDownloadRef.current = null;
       removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
       toast(`Downloading "${(sideMat || mat).name}"`);
       return true;
     },
-    [activeUser, commitUsers, coursesData, downloadStatus.premium, session, studentPreview, syncCredits, toast]
+    [adoptLedger, activeUser, commitUsers, coursesData, downloadStatus.premium, session, studentPreview, toast]
   );
 
   const requestDownload = useCallback(
@@ -885,11 +974,12 @@ export function AppProvider({ children }) {
 
       if (!isFree && !session) return queue("register");
       if (!isFree && !downloadStatus.canDownload) return queue("upgrade");
-      // Everyone outside a premium plan watches the sponsor slot first.
-      if (!downloadStatus.premium) return queue("ad");
+      // Everyone outside a premium plan watches the sponsor slot first, unless the
+      // administrator switched the wait off.
+      if (!downloadStatus.premium && downloadPolicy.adSeconds > 0) return queue("ad");
       return performDownload(courseId, materialId, sideMaterialId);
     },
-    [coursesData, downloadStatus.canDownload, downloadStatus.premium, performDownload, session, setGate]
+    [coursesData, downloadPolicy.adSeconds, downloadStatus.canDownload, downloadStatus.premium, performDownload, session, setGate]
   );
 
   // Called by the ad modal when its countdown reaches zero.
@@ -1309,6 +1399,23 @@ export function AppProvider({ children }) {
     [isAdmin, session, toast]
   );
 
+  // Credits live on the server ledger, so the answer replaces the local copy of the
+  // account instead of the row drifting away from what the student actually owns.
+  const adjustUserCredits = useCallback(
+    async (userId, delta) => {
+      if (!isAdmin || !session) return { ok: false, error: "Only the administrator can change downloads left." };
+      const res = await api.adjustUserCredits(userId, delta, session.authToken);
+      if (res && res.ok !== false && res.user) {
+        setUsersData((prev) => prev.map((u) => (u.id === res.user.id ? { ...u, ...res.user } : u)));
+        toast(res.given > 0 ? `Gave ${res.user.name} ${res.given} download${res.given === 1 ? "" : "s"}.` : `Took ${Math.abs(res.given)} download${Math.abs(res.given) === 1 ? "" : "s"} back from ${res.user.name}.`);
+      } else if (res && res.error) {
+        toast(res.error);
+      }
+      return res;
+    },
+    [isAdmin, session, toast]
+  );
+
   const logActivity = useCallback(
     (type, detail) => {
       if (!activeUser) return;
@@ -1435,6 +1542,8 @@ export function AppProvider({ children }) {
     usersData,
     pageTexts,
     appearanceSettings,
+    downloadPolicy,
+    commitDownloadPolicy,
     ads,
     banner,
     stats,
@@ -1513,6 +1622,7 @@ export function AppProvider({ children }) {
     saveUser,
     deleteUser,
     setUserRole,
+    adjustUserCredits,
     logActivity,
     resetDatabase,
     toast,

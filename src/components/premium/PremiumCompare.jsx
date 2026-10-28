@@ -1,16 +1,16 @@
 import React from "react";
 import { Check, Minus } from "lucide-react";
-import { AD_SECONDS } from "../../store/AppContext.jsx";
-
-const ROWS = [
-  { label: "Downloads", free: "Earned credits", premium: "Unlimited" },
-  { label: "Waiting", free: `${AD_SECONDS}s sponsor spot`, premium: "None" },
-  { label: "Sponsor ads", free: "Before each file", premium: "Never", premiumOnly: true },
-  { label: "Newest uploads", free: "With everyone", premium: "First", premiumOnly: true },
-  { label: "Every college", free: "Your department", premium: "All of them", premiumOnly: true }
-];
+import { useApp } from "../../store/AppContext.jsx";
 
 export default function PremiumCompare() {
+  const { downloadPolicy } = useApp();
+  const rows = [
+    { label: "Downloads", free: "Earned credits", premium: "Unlimited" },
+    { label: "Waiting", free: `${downloadPolicy.adSeconds}s sponsor spot`, premium: "None" },
+    { label: "Sponsor ads", free: "Before each file", premium: "Never", premiumOnly: true },
+    { label: "Newest uploads", free: "With everyone", premium: "First", premiumOnly: true },
+    { label: "Every college", free: "Your department", premium: "All of them", premiumOnly: true }
+  ];
   return (
     <section className="ws-premium-block">
       <h2>Free vs Premium</h2>
@@ -24,7 +24,7 @@ export default function PremiumCompare() {
             </tr>
           </thead>
           <tbody>
-            {ROWS.map((row) => (
+            {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
                 <td className="text-secondary">

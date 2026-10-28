@@ -333,8 +333,20 @@ export function listMySubmissions(session) {
   return request("/api/materials/submissions/mine", { headers: authHeaders(session) });
 }
 
-export function consumeDownloadCredit(session) {
-  return request("/api/downloads/consume-credit", { method: "POST", headers: authHeaders(session) });
+export function authorizeDownload(payload, session) {
+  return request("/api/downloads/authorize", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function adjustUserCredits(userId, delta, session) {
+  return request(`/api/admin/users/${encodeURIComponent(userId)}/credits`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ delta })
+  });
 }
 
 export function updateMaterialSubmission(submissionId, patch, session) {

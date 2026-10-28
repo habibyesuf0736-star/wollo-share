@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   TEXTS: "wollo_lib_texts_v3",
   APPEARANCE: "wollo_lib_appearance_v3",
   USER_RATINGS: "wollo_lib_user_ratings_v1",
+  DOWNLOAD_POLICY: "wollo_lib_download_policy_v1",
   CURRENT_SESSION: "wollo_lib_active_user_session_v1",
   VISITOR_SHARED_COUNT: "wollo_lib_visitor_shared_count_v2",
   VISITOR_PER_DOWNLOAD_PROGRESS: "wollo_lib_visitor_per_dl_v4",
