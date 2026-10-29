@@ -140,6 +140,10 @@ export function AppProvider({ children }) {
   const [gate, setGate] = useState(null);
   const [videoTarget, setVideoTarget] = useState(null);
   const pendingDownloadRef = useRef(readJson(STORAGE_KEYS.PENDING_DOWNLOAD, null));
+  // Only a download that is waiting because access is missing may restart itself the
+  // moment access arrives. The sponsor spot is not a wait on access, so it must leave
+  // this flag off — otherwise closing the modal would bounce straight back to it.
+  const resumeOnAccessRef = useRef(false);
   const hasLocalMutationRef = useRef(false);
   const baseRevisionRef = useRef(0);
   const syncTimerRef = useRef(null);
@@ -945,6 +949,12 @@ export function AppProvider({ children }) {
     [activeUser, commitUsers, studentPreview]
   );
 
+  const clearPendingDownload = useCallback(() => {
+    pendingDownloadRef.current = null;
+    resumeOnAccessRef.current = false;
+    removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+  }, []);
+
   // Access is decided here rather than in the browser, so the plan the administrator
   // hands out — or takes back — applies on the next click instead of the next reload.
   const performDownload = useCallback(
@@ -962,8 +972,7 @@ export function AppProvider({ children }) {
         // administrator took back. Only a request that got no answer at all falls through —
         // a student who was allowed a moment ago is not punished for an outage.
         if (res && res.allowed !== true) {
-          pendingDownloadRef.current = null;
-          removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+          clearPendingDownload();
           setGate({ type: "upgrade", courseId, materialId, sideMaterialId, title: mat.name || "Study Material" });
           toast(res.reason || "That file is closed to your account right now.");
           return false;
@@ -991,12 +1000,11 @@ export function AppProvider({ children }) {
           prev.map((u) => (u.id === activeUser.id ? { ...u, lastActiveAt: "Active now" } : u))
         );
       }
-      pendingDownloadRef.current = null;
-      removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+      clearPendingDownload();
       toast(`Downloading "${(sideMat || mat).name}"`);
       return true;
     },
-    [adoptLedger, activeUser, commitUsers, coursesData, session, studentPreview, toast]
+    [adoptLedger, activeUser, clearPendingDownload, commitUsers, coursesData, session, studentPreview, toast]
   );
 
   const requestDownload = useCallback(
@@ -1010,6 +1018,9 @@ export function AppProvider({ children }) {
       const queue = (type) => {
         pendingDownloadRef.current = { courseId, materialId, sideMaterialId, title };
         writeJson(STORAGE_KEYS.PENDING_DOWNLOAD, pendingDownloadRef.current);
+        // A sign-in or paywall block is a wait on access, so the download may restart by
+        // itself later. The sponsor spot is not — it only continues through its own timer.
+        resumeOnAccessRef.current = type !== "ad";
         setGate({ type, courseId, materialId, sideMaterialId, title });
         return false;
       };
@@ -1029,26 +1040,29 @@ export function AppProvider({ children }) {
     const pending = pendingDownloadRef.current;
     setGate(null);
     if (!pending) return;
-    pendingDownloadRef.current = null;
-    removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+    clearPendingDownload();
     performDownload(pending.courseId, pending.materialId, pending.sideMaterialId);
-  }, [performDownload, setGate]);
+  }, [clearPendingDownload, performDownload, setGate]);
 
-  const closeGate = useCallback(() => setGate(null), []);
+  // Dismissing a gate drops the queued file with it; otherwise the next state change
+  // would resurrect a download the student just walked away from.
+  const closeGate = useCallback(() => {
+    clearPendingDownload();
+    setGate(null);
+  }, [clearPendingDownload, setGate]);
 
   // A download blocked by the paywall resumes automatically the moment access
   // arrives — the admin flipping a plan, or the second contribution being
   // approved. It re-enters requestDownload so the sponsor slot still plays.
   useEffect(() => {
     if (!downloadStatus.canDownload) return;
+    if (!resumeOnAccessRef.current) return;
     const pending = pendingDownloadRef.current;
     if (!pending) return;
-    if (gate && gate.type === "ad") return;
-    pendingDownloadRef.current = null;
-    removeKey(STORAGE_KEYS.PENDING_DOWNLOAD);
+    clearPendingDownload();
     setGate(null);
     requestDownload(pending.courseId, pending.materialId, pending.sideMaterialId);
-  }, [downloadStatus.canDownload, gate, requestDownload]);
+  }, [clearPendingDownload, downloadStatus.canDownload, requestDownload]);
 
   const completePendingDownload = useCallback(() => {
     const pending = pendingDownloadRef.current;

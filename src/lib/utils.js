@@ -154,7 +154,9 @@ export function triggerBrowserDownload(href, fileName) {
   }
   document.body.appendChild(anchor);
   anchor.click();
-  document.body.removeChild(anchor);
+  // Some browsers cancel a save whose link disappears in the same tick as the click,
+  // so the link is released on the next task instead.
+  setTimeout(() => anchor.remove(), 1000);
 }
 
 export function buildPlaceholderDataUrl(file, formattedSize) {

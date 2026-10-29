@@ -10,7 +10,8 @@ const SPOTS = [
 ];
 
 function pad(value) {
-  return `0:${String(value).padStart(2, "0")}`;
+  const minutes = Math.floor(value / 60);
+  return `${minutes}:${String(value % 60).padStart(2, "0")}`;
 }
 
 export default function AdGateModal() {
@@ -98,12 +99,12 @@ export default function AdGateModal() {
         <div>
           {downloadStatus.premium ? (
             <>Premium members never see this spot.</>
-          ) : downloadStatus.plan === "unpaid" && downloadPolicy.mode === "credits" ? (
+          ) : downloadPolicy.mode === "credits" && downloadStatus.plan === "unpaid" ? (
             <>
               Costs 1 credit · <strong>{Math.max(0, downloadStatus.credits - 1)}</strong> left after this.
             </>
           ) : (
-            <>No downloads were used.</>
+            <>Free download · no credit used.</>
           )}
         </div>
       </div>
