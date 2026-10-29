@@ -2625,8 +2625,7 @@ export async function createApp() {
       mailDeliverable: mailStatus().provider !== "none",
       // One wording for every outcome: a per-account "the email bounced" reply would confirm
       // which addresses are registered.
-      message:
-        "If this account exists, a 6-digit recovery code was created and is valid for 30 minutes. It is emailed when mail delivery works; if nothing arrives, the site administrator can open Admin → Email delivery, read the code in that request and hand it over."
+      message: "If the account exists, a 6-digit code is on its way. It expires in 30 minutes."
     });
   });
 
@@ -3296,8 +3295,7 @@ export async function createApp() {
         ok: false,
         needsRecovery: true,
         email: openReset.email,
-        error:
-          "You have a password reset in progress. Enter the 6-digit recovery code — it was emailed to this address, or read it from the open request in Admin → Email delivery — and choose a new password to finish, then sign in with that password."
+        error: "You have a password reset in progress. Enter your 6-digit recovery code to finish it."
       });
       return;
     }
