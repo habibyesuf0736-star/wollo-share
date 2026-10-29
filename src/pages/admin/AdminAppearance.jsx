@@ -394,6 +394,7 @@ export default function AdminAppearance() {
                 <option value="hero">Hero (top)</option>
                 <option value="middle">Middle of library</option>
                 <option value="footer">Footer</option>
+                <option value="premium">Premium promo (replaces the plan advert)</option>
               </select>
             </div>
           </div>
