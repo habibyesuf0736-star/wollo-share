@@ -143,7 +143,7 @@ export default function LoginPage() {
     event.preventDefault();
     setError("");
     if (!signin.identifier.trim() || !signin.password) {
-      setError("Enter both your email/username and your password.");
+      setError("Enter your sign-in name and your password.");
       return;
     }
     setBusy(true);
@@ -415,7 +415,7 @@ export default function LoginPage() {
             <form onSubmit={submitSignIn} className="d-flex flex-column gap-3">
               <div>
                 <label className="form-label small fw-semibold" htmlFor="loginId">
-                  Email or username
+                  Email, username or phone
                 </label>
                 <div className="ws-field-icon">
                   <Mail size={16} aria-hidden="true" />
@@ -425,7 +425,7 @@ export default function LoginPage() {
                     autoComplete="username"
                     value={signin.identifier}
                     onChange={(e) => setSignin({ ...signin, identifier: e.target.value })}
-                    placeholder="your.email@wollouniv.edu.et"
+                    placeholder="your.email@wollouniv.edu.et or 912 345 678"
                   />
                 </div>
               </div>

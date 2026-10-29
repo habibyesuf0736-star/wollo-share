@@ -305,12 +305,60 @@ function verifyUserAccountPassword(candidatePassword: string, u: UserAccount): b
   return false;
 }
 
+// The custom administrator password lives in the document as one salted hash. Only a
+// plaintext may be hashed again; an existing hash has to pass through untouched.
+function ensureAdminPasswordHash(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("enc$sha256$") || raw.startsWith("enc$vault$")) return raw;
+  return hashPassword(raw, "admin-owner");
+}
+
+// Older builds hashed the stored value on every load and every save, so an administrator
+// password set back then is a chain of hashes. Walking that chain lets the holder of the
+// password back in; the depth is then used to put a single hash back in the document.
+const ADMIN_HASH_CHAIN_LIMIT = 30;
+function matchAdminPasswordChain(candidatePassword: string, storedHash: string): number {
+  if (!candidatePassword || !storedHash) return 0;
+  let candidate = hashPassword(candidatePassword, "admin-owner");
+  for (let depth = 1; depth <= ADMIN_HASH_CHAIN_LIMIT; depth++) {
+    if (candidate === storedHash) return depth;
+    candidate = hashPassword(candidate, "admin-owner");
+  }
+  return 0;
+}
+
 function verifyAdminAccountPassword(candidatePassword: string, customAdminHash: string): boolean {
   if (!candidatePassword) return false;
-  if (customAdminHash) return verifyPasswordHash(candidatePassword, customAdminHash, "admin-owner");
+  if (customAdminHash) {
+    if (verifyPasswordHash(candidatePassword, customAdminHash, "admin-owner")) return true;
+    return matchAdminPasswordChain(candidatePassword, customAdminHash) > 0;
+  }
   if (verifyPasswordHash(candidatePassword, ADMIN_PASSWORD_HASH, "admin-owner")) return true;
   if (verifyPasswordHash(candidatePassword, SECONDARY_ADMIN_PASSWORD_HASH, "admin-owner")) return true;
   return false;
+}
+
+// The phone is required at sign-up and is the thing students remember, so it signs in too.
+function nationalPhoneDigits(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  let digits = raw.replace(/\D/g, "");
+  if (/^\+251/.test(raw)) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("251")) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
+}
+
+function findAccountByIdentifier(identifier: string): UserAccount | undefined {
+  const lower = String(identifier || "").trim().toLowerCase();
+  if (!lower) return undefined;
+  const digits = nationalPhoneDigits(lower);
+  return dbState.usersData.find(
+    (account) =>
+      account.email.toLowerCase() === lower ||
+      account.name.toLowerCase() === lower ||
+      (digits.length === 9 && nationalPhoneDigits(account.phone || "") === digits)
+  );
 }
 
 const DEFAULT_SUBCATEGORIES = [
@@ -1159,9 +1207,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
   });
 
   const rawCustomAdminPw = typeof raw.customAdminPassword === "string" ? raw.customAdminPassword.trim() : "";
-  const customAdminPassword = rawCustomAdminPw
-    ? hashPassword(rawCustomAdminPw, "admin-owner")
-    : "";
+  const customAdminPassword = ensureAdminPasswordHash(rawCustomAdminPw);
 
   return {
     coursesData,
@@ -1285,11 +1331,7 @@ function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
 function phoneProblem(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "Your phone number is required — the library team uses it to reach you.";
-  let digits = raw.replace(/\D/g, "");
-  if (/^\+251/.test(raw)) digits = digits.slice(3);
-  else if (digits.length > 9 && digits.startsWith("251")) digits = digits.slice(3);
-  else if (digits.length > 9 && digits.startsWith("0")) digits = digits.slice(1);
-  if (digits.length !== 9) {
+  if (nationalPhoneDigits(raw).length !== 9) {
     return "Enter the 9 digits after +251, e.g. 912 345 678.";
   }
   return "";
@@ -1323,7 +1365,7 @@ function saveDatabase(db: DatabaseSchema): void {
   try {
     db.usersData.forEach((u) => secureUserAccount(u));
     if (db.customAdminPassword) {
-      db.customAdminPassword = hashPassword(db.customAdminPassword, "admin-owner");
+      db.customAdminPassword = ensureAdminPasswordHash(db.customAdminPassword);
     }
     db.updatedAt = Date.now();
     if (remoteEnabled()) {
@@ -2467,7 +2509,7 @@ export async function createApp() {
         appearanceSettings: incoming.appearanceSettings ?? dbState.appearanceSettings,
         downloadPolicy: incoming.downloadPolicy ?? dbState.downloadPolicy,
         userRatings: incoming.userRatings ?? dbState.userRatings,
-        customAdminPassword: incoming.customAdminPassword ?? dbState.customAdminPassword,
+        customAdminPassword: ensureAdminPasswordHash(incoming.customAdminPassword ?? dbState.customAdminPassword),
         passwordRecoveryRequests: incoming.passwordRecoveryRequests ?? dbState.passwordRecoveryRequests,
         materialSubmissions: incoming.materialSubmissions ?? dbState.materialSubmissions,
         supportTickets: incoming.supportTickets ?? dbState.supportTickets,
@@ -2611,7 +2653,7 @@ export async function createApp() {
     }
 
     if (targetId === "admin-owner") {
-      dbState.customAdminPassword = hashPassword(newPassword, "admin-owner");
+      dbState.customAdminPassword = ensureAdminPasswordHash(newPassword);
       if (account) {
         const updatedUser = secureUserAccount({ ...account, password: newPassword });
         dbState.usersData = dbState.usersData.map((user) => user.id === account.id ? updatedUser : user);
@@ -3209,9 +3251,7 @@ export async function createApp() {
 
     // A live recovery code means the password reset is still open. Signing in with the
     // old password would leave it half-done, so send them back to the code step instead.
-    const resetAccount = dbState.usersData.find(
-      (user) => user.email.toLowerCase() === lowerId || user.name.toLowerCase() === lowerId
-    );
+    const resetAccount = findAccountByIdentifier(identifier);
     const resetUserId = isAdminId ? "admin-owner" : resetAccount?.id || "";
     const openReset = resetUserId
       ? dbState.passwordRecoveryRequests.find(
@@ -3237,6 +3277,13 @@ export async function createApp() {
     // and a refused mailbox would lock the owner out of the panel they use to fix the mail.
     if (isAdminId && verifyAdminAccountPassword(password, dbState.customAdminPassword)) {
       loginRateLimitMap.delete(attemptKey);
+      // A password stored in the old repeated-hash shape is put back to a single hash, so
+      // the next sign-in reads it the normal way.
+      const repairedHash = ensureAdminPasswordHash(password);
+      if (dbState.customAdminPassword && dbState.customAdminPassword !== repairedHash) {
+        dbState.customAdminPassword = repairedHash;
+        saveDatabase(dbState);
+      }
       const signedSession = issueDeviceSession(
         {
           id: "admin-owner",
@@ -3252,11 +3299,10 @@ export async function createApp() {
     }
 
     // Check registered student/user accounts next
-    const matchedUser = dbState.usersData.find(
-      (u) =>
-        (u.email.toLowerCase() === lowerId || u.name.toLowerCase() === lowerId) &&
-        verifyUserAccountPassword(password, u)
-    );
+    const matchedUser = (() => {
+      const account = findAccountByIdentifier(identifier);
+      return account && verifyUserAccountPassword(password, account) ? account : undefined;
+    })();
 
     if (matchedUser) {
       // A student who registered minutes ago already has a live confirmation code in their
@@ -3345,9 +3391,7 @@ export async function createApp() {
     }
     pruneRateMap(twoFactorRateLimitMap, 60 * 60 * 1000);
 
-    const user = dbState.usersData.find(
-      (account) => account.email.toLowerCase() === identifier || account.name.toLowerCase() === identifier
-    );
+    const user = findAccountByIdentifier(identifier);
     if (!user || !pendingSignInCode(user)) {
       res.status(401).json({
         ok: false,
@@ -3429,9 +3473,7 @@ export async function createApp() {
       window.count++;
     }
 
-    const user = dbState.usersData.find(
-      (account) => account.email.toLowerCase() === identifier || account.name.toLowerCase() === identifier
-    );
+    const user = findAccountByIdentifier(identifier);
     // Same answer whether the sign-in is still open or long gone: this route is reachable
     // without a session, so it must not become a way to test which addresses exist.
     if (!user || !pendingSignInCode(user)) {
