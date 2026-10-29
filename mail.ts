@@ -343,13 +343,18 @@ async function sendViaRelay(message: MailMessage): Promise<MailResult> {
   }
 }
 
+// A mailbox shows the sender's display name, and the address only when the reader opens it.
+// A configured From of just `someone@gmail.com` therefore prints a personal address as the
+// sender on every student's phone, so the site name is always filled in.
+const DEFAULT_SENDER_NAME = "Wollo Share";
+
 function parseSender(from: string): { name?: string; email: string } {
   const match = /^\s*(.*?)\s*<\s*([^<>]+)\s*>\s*$/.exec(from || "");
   if (match) {
     const email = match[2].trim();
-    return { name: match[1] || undefined, email };
+    return { name: match[1].trim() || DEFAULT_SENDER_NAME, email };
   }
-  return { email: String(from || "").trim() };
+  return { name: DEFAULT_SENDER_NAME, email: String(from || "").trim() };
 }
 
 async function sendViaBrevo(message: MailMessage): Promise<MailResult> {
@@ -432,7 +437,7 @@ async function sendViaSmtp(message: MailMessage): Promise<MailResult> {
       socketTimeout: 20000
     });
     await transporter.sendMail({
-      from: smtp.from,
+      from: parseSender(smtp.from),
       to: message.to,
       subject: message.subject,
       text: message.text,
