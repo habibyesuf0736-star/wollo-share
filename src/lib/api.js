@@ -200,6 +200,21 @@ export function closeTicket(ticketId, session) {
   });
 }
 
+export function requestPremiumPlan(plan, reference, session) {
+  return request("/api/premium/requests", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ plan, reference })
+  });
+}
+
+export function approvePremiumRequest(ticketId, session) {
+  return request(`/api/premium/requests/${encodeURIComponent(ticketId)}/approve`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
 export function addCourseMaterial(courseId, material, session) {
   return request(`/api/courses/${encodeURIComponent(courseId)}/materials`, {
     method: "POST",

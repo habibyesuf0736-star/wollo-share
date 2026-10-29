@@ -3290,6 +3290,18 @@ body.is-premium .access-tag.is-premium {
 .ws-request-card {
   background: var(--surface-raised);
 }
+/* The money details sit in the order box, not a thread the student has to wait for. */
+.ws-pay-box {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px dashed var(--line-hover);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-subtle) 65%, transparent);
+}
+.ws-pay-text {
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}
 .ws-premium-closing {
   margin-top: 2.4rem;
   padding: 1.2rem;

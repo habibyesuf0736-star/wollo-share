@@ -3,7 +3,7 @@ import { Banknote, Send, ShieldCheck } from "lucide-react";
 
 const STEPS = [
   { icon: Send, title: "Send your plan", text: "One click below tells the team which plan you want." },
-  { icon: Banknote, title: "Pay", text: "The team replies with the telebirr or bank details for that amount." },
+  { icon: Banknote, title: "Pay", text: "Pay the amount at the Telebirr or bank details on the order box." },
   { icon: ShieldCheck, title: "Switched over", text: "Your account unlocks as soon as the payment is confirmed." }
 ];
 

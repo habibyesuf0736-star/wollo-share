@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BarChart3, DatabaseBackup, Download, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Palette, Users } from "lucide-react";
+import { BarChart3, Crown, DatabaseBackup, Download, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Palette, Users } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import * as api from "../lib/api.js";
 import AdminCommandBar from "../components/AdminCommandBar.jsx";
@@ -13,10 +13,12 @@ import AdminUsers from "./admin/AdminUsers.jsx";
 import AdminMail from "./admin/AdminMail.jsx";
 import AdminAnalytics from "./admin/AdminAnalytics.jsx";
 import AdminBackup from "./admin/AdminBackup.jsx";
+import AdminPremiumOrders from "./admin/AdminPremiumOrders.jsx";
 
 const TABS = [
   ["overview", "Overview", LayoutDashboard],
   ["reviews", "Material reviews", Inbox],
+  ["premium", "Premium orders", Crown],
   ["courses", "Courses", GraduationCap],
   ["materials", "Materials", FolderOpen],
   ["downloads", "Downloads", Download],
@@ -50,6 +52,7 @@ export default function AdminPage() {
   } = useApp();
   const [tab, setTab] = useState(() => tabFromHash() || "overview");
   const [pendingReviews, setPendingReviews] = useState(0);
+  const [premiumOrders, setPremiumOrders] = useState(0);
 
   // The nav badge is the admin's to-do list, so it is re-read whenever a tab opens.
   useEffect(() => {
@@ -60,6 +63,22 @@ export default function AdminPage() {
       .then((res) => {
         if (cancelled || !res || !Array.isArray(res.submissions)) return;
         setPendingReviews(res.submissions.filter((s) => s.status === "pending").length);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerIsAdmin, session, studentPreview, tab]);
+
+  // Premium orders are money waiting on the administrator, so they get the same badge.
+  useEffect(() => {
+    if (!ownerIsAdmin || studentPreview || !session) return undefined;
+    let cancelled = false;
+    api
+      .listTickets(session.authToken)
+      .then((res) => {
+        if (cancelled || !res || !Array.isArray(res.tickets)) return;
+        setPremiumOrders(res.tickets.filter((t) => t.premiumPlan && !t.premiumConfirmedAt && t.status !== "closed").length);
       })
       .catch(() => {});
     return () => {
@@ -90,6 +109,7 @@ export default function AdminPage() {
   const materialCount = coursesData.reduce((sum, c) => sum + (c.materials || []).length, 0);
   const counts = {
     reviews: pendingReviews,
+    premium: premiumOrders,
     courses: coursesData.length,
     materials: materialCount,
     appearance: ads.filter((a) => a.active).length,
@@ -158,6 +178,19 @@ export default function AdminPage() {
 
       <AdminCommandBar onSelectTab={selectTab} onOpenCourse={goSublist} />
 
+      {premiumOrders > 0 && tab !== "premium" ? (
+        <div className="banner warn mb-3 d-flex flex-wrap align-items-center gap-2" role="status">
+          <Crown size={16} aria-hidden="true" />
+          <span>
+            <strong>{premiumOrders}</strong> student{premiumOrders === 1 ? "" : "s"} asked for Premium and
+            {premiumOrders === 1 ? " is" : " are"} waiting for the payment to be confirmed.
+          </span>
+          <button type="button" className="btn btn-sm btn-primary ms-auto" onClick={() => selectTab("premium")}>
+            Review orders
+          </button>
+        </div>
+      ) : null}
+
       <nav className="admin-nav my-3" aria-label="Admin sections">
         {TABS.map(([key, label, Icon]) => (
           <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => selectTab(key)}>
@@ -170,6 +203,7 @@ export default function AdminPage() {
 
       {tab === "overview" ? <AdminOverview onNavigate={selectTab} /> : null}
       {tab === "reviews" ? <AdminSubmissions /> : null}
+      {tab === "premium" ? <AdminPremiumOrders onCountChange={setPremiumOrders} /> : null}
       {tab === "courses" ? <AdminCourses /> : null}
       {tab === "materials" ? <AdminMaterials /> : null}
       {tab === "downloads" ? <AdminDownloads onNavigate={selectTab} /> : null}

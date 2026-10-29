@@ -879,6 +879,11 @@ interface SupportTicket {
   createdAt: string;
   updatedAt: string;
   replies: SupportReply[];
+  // Set only when the student ordered a plan from the premium page.
+  premiumPlan?: string;
+  premiumPrice?: string;
+  premiumReference?: string;
+  premiumConfirmedAt?: string;
 }
 
 const SUPPORT_CATEGORIES = [
@@ -888,6 +893,14 @@ const SUPPORT_CATEGORIES = [
   "Account or payment",
   "Something else"
 ];
+
+// Mirrors PLANS in UpgradeGateModal.jsx — the server owns the price so a request can
+// never ask for a plan (or an amount) the team does not sell.
+const PREMIUM_PLANS: Record<string, { title: string; price: string; days: number | null; category: string }> = {
+  premium_monthly: { title: "Premium monthly", price: "100 Birr / month", days: 30, category: "Premium Monthly · 100 Birr" },
+  premium_annual: { title: "Premium annual", price: "250 Birr / year", days: 365, category: "Premium Annual · 250 Birr · 1 Year" },
+  paid_lifetime: { title: "Lifetime access", price: "500 Birr one-time", days: null, category: "Paid 500 Birr · Lifetime VIP" }
+};
 
 interface DatabaseSchema {
   coursesData: Course[];
@@ -4236,6 +4249,107 @@ export async function createApp() {
     ticket.updatedAt = new Date().toISOString();
     saveDatabase(dbState);
     res.json({ ok: true, ticket });
+  });
+
+  // A premium order is a support ticket carrying the plan, so the team reads it in the
+  // same inbox while the administrator gets a dedicated orders queue.
+  app.post("/api/premium/requests", (req, res) => {
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in so the team knows which account to switch." });
+      return;
+    }
+    const planKey = String(req.body?.plan || "").trim();
+    const plan = PREMIUM_PLANS[planKey];
+    if (!plan) {
+      res.status(400).json({ ok: false, error: "Choose one of the plans first." });
+      return;
+    }
+    const reference = String(req.body?.reference || "").trim().slice(0, 80);
+    const now = new Date().toISOString();
+    const existing = dbState.supportTickets.find(
+      (t) => t.userId === user.id && t.premiumPlan === planKey && !t.premiumConfirmedAt && t.status !== "closed"
+    );
+    if (existing) {
+      if (reference) existing.premiumReference = reference;
+      existing.updatedAt = now;
+      saveDatabase(dbState);
+      res.json({ ok: true, ticket: existing, alreadySent: true });
+      return;
+    }
+    const open = dbState.supportTickets.filter((t) => t.userId === user.id && t.status !== "closed");
+    if (open.length >= 5) {
+      res.status(429).json({ ok: false, error: "You already have 5 open threads. The team is working through them." });
+      return;
+    }
+    const ticket: SupportTicket = {
+      id: "trk-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      category: "Account or payment",
+      message: `Plan request: ${plan.title} (${plan.price}). Account: ${user.email}.${reference ? ` Payment reference: ${reference}.` : ""}`,
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+      replies: [],
+      premiumPlan: planKey,
+      premiumPrice: plan.price,
+      premiumReference: reference || undefined
+    };
+    dbState.supportTickets.push(ticket);
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Premium Requested", detail: `${plan.title} — ${plan.price}`, timestamp: now.slice(0, 16).replace("T", " ") },
+      ...(user.activityLog || [])
+    ].slice(0, 60);
+    saveDatabase(dbState);
+    res.json({ ok: true, ticket });
+  });
+
+  // The administrator confirms the money arrived and the plan switches in one step.
+  app.post("/api/premium/requests/:ticketId/approve", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const ticket = dbState.supportTickets.find((t) => t.id === req.params.ticketId);
+    if (!ticket || !ticket.premiumPlan) {
+      res.status(404).json({ ok: false, error: "That premium order is no longer in the queue." });
+      return;
+    }
+    const plan = PREMIUM_PLANS[ticket.premiumPlan];
+    const user = dbState.usersData.find((account) => account.id === ticket.userId);
+    if (!plan || !user) {
+      res.status(404).json({ ok: false, error: "That student account is no longer in the library." });
+      return;
+    }
+    const now = new Date().toISOString();
+    user.accountPlan = ticket.premiumPlan;
+    user.paymentStatus = "paid";
+    user.downloadOnlyAccount = false;
+    user.category = plan.category;
+    if (plan.days) user.subscriptionExpiry = new Date(Date.now() + plan.days * 86400000).toISOString();
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Premium Activated", detail: `${plan.title} — ${plan.price} confirmed`, timestamp: now.slice(0, 16).replace("T", " ") },
+      ...(user.activityLog || [])
+    ].slice(0, 60);
+    ticket.premiumConfirmedAt = now;
+    ticket.status = "answered";
+    ticket.updatedAt = now;
+    ticket.replies = [
+      ...(ticket.replies || []),
+      {
+        id: "rpy-" + Date.now() + "-" + crypto.randomInt(100, 999),
+        text: `Payment confirmed — ${plan.title} is active on your account.`,
+        authorName: "Support team",
+        by: "staff",
+        createdAt: now
+      }
+    ];
+    saveDatabase(dbState);
+    res.json({ ok: true, ticket, user: safeUserAccount(user) });
   });
 
   // Staff cannot use the administrator's wholesale state save, so the library writes
