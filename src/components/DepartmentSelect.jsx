@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import SearchSelect from "./SearchSelect.jsx";
 import { buildDepartmentGroups } from "../lib/departments.js";
 
 export default function DepartmentSelect({
@@ -6,26 +7,31 @@ export default function DepartmentSelect({
   value,
   onChange,
   id,
-  placeholder = "Select your department / program",
-  className = "form-select"
+  placeholder = "Type or pick your department / program",
+  className = "form-control"
 }) {
   const groups = useMemo(() => buildDepartmentGroups(coursesData), [coursesData]);
-  const known = groups.some((group) => group.programs.includes(value));
+  const options = useMemo(() => {
+    const list = groups.flatMap((group) =>
+      group.programs.map((program) => ({ value: program, label: program, group: group.college }))
+    );
+    // Legacy free-text departments stay selectable so editing an old account never silently drops them.
+    if (value && !list.some((option) => option.value === value)) {
+      list.unshift({ value, label: `${value} (saved)`, group: "Saved on this account" });
+    }
+    return list;
+  }, [groups, value]);
 
   return (
-    <select id={id} className={className} value={value || ""} onChange={(event) => onChange(event.target.value)}>
-      <option value="">{placeholder}</option>
-      {/* Legacy free-text departments stay selectable so editing an old account never silently drops them. */}
-      {value && !known ? <option value={value}>{value} (saved)</option> : null}
-      {groups.map((group) => (
-        <optgroup key={group.college} label={group.college}>
-          {group.programs.map((program) => (
-            <option key={program} value={program}>
-              {program}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+    <SearchSelect
+      id={id}
+      className={className}
+      value={value || ""}
+      onChange={onChange}
+      options={options}
+      placeholder={placeholder}
+      ariaLabel="Department / program"
+      emptyLabel="No program matches — try another spelling."
+    />
   );
 }

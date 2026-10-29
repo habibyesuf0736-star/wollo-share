@@ -590,7 +590,6 @@ export default function LoginPage() {
                       coursesData={coursesData}
                       value={signup.department}
                       onChange={(department) => setSignup({ ...signup, department })}
-                      className="form-select"
                     />
                   </div>
                   <p className="form-text small mb-0">Shows your courses first.</p>
