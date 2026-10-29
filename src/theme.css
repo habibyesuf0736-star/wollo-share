@@ -2056,6 +2056,28 @@ a {
   padding-left: 40px;
 }
 
+/* The country code is fixed in the box, so the student only types the 9 national digits. */
+.ws-phone .ws-phone-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-color: var(--line);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: var(--surface-subtle);
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ws-phone .ws-phone-input {
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.ws-phone:focus-within .ws-phone-prefix {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
 /* Six digits read as one code, not as running text. */
 .ws-code-input {
   max-width: 168px;

@@ -4,6 +4,7 @@ import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
 import DepartmentSelect from "../../components/DepartmentSelect.jsx";
+import PhoneField from "../../components/PhoneField.jsx";
 import { approveVerification, createStudentAccount, listVerifications, shareVerificationCode } from "../../lib/api.js";
 import { phoneProblem } from "../../lib/utils.js";
 
@@ -479,7 +480,7 @@ export default function AdminUsers() {
               onChange={(department) => setEditing({ ...editing, department })}
             />
             <label className="form-label small fw-semibold mb-0">Phone number</label>
-            <input className="form-control" inputMode="tel" value={editing.phone || ""} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+            <PhoneField value={editing.phone || ""} onChange={(phone) => setEditing({ ...editing, phone })} />
             {editError ? (
               <div className="banner warn" role="alert">
                 <span>{editError}</span>
@@ -577,7 +578,7 @@ export default function AdminUsers() {
           <div className="row g-2">
             <div className="col-12 col-sm-6">
               <label className="form-label small fw-semibold">Phone number</label>
-              <input className="form-control" inputMode="tel" value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
+              <PhoneField value={addForm.phone} onChange={(phone) => setAddForm({ ...addForm, phone })} />
             </div>
             <div className="col-12 col-sm-6">
               <label className="form-label small fw-semibold">Plan</label>

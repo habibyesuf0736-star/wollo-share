@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import Modal from "./Modal.jsx";
 import DepartmentSelect from "./DepartmentSelect.jsx";
+import PhoneField from "./PhoneField.jsx";
 import { useApp } from "../store/AppContext.jsx";
 import { resendVerificationCode } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
@@ -182,16 +183,7 @@ export default function QuickRegisterModal() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
           <DepartmentSelect coursesData={coursesData} value={form.department} onChange={(department) => setForm({ ...form, department })} />
-          <div>
-            <input
-              className="form-control"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="Phone number (e.g. 0912 345 678)"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-          </div>
+          <PhoneField value={form.phone} onChange={(phone) => setForm({ ...form, phone })} />
           {error ? <p className="text-danger small mb-0">{error}</p> : null}
           <div className="d-flex justify-content-between gap-2">
             <button type="button" className="btn btn-outline-secondary" onClick={() => { close(); goLogin(); }}>

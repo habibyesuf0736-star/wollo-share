@@ -8,7 +8,6 @@ import {
   LogOut,
   Mail,
   MonitorSmartphone,
-  Phone,
   Save,
   ShieldCheck,
   Star,
@@ -20,6 +19,7 @@ import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import EmailVerifyBanner from "../components/EmailVerifyBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
+import PhoneField from "../components/PhoneField.jsx";
 import UserAvatar from "../components/UserAvatar.jsx";
 import { listLoginDevices, revokeLoginDevice, signOutOtherDevices } from "../lib/api.js";
 import { phoneProblem, readAvatarDataUrl } from "../lib/utils.js";
@@ -315,15 +315,7 @@ export default function ProfilePage() {
                   </div>
                   <div className="col-12 col-md-6">
                     <label className="form-label small fw-semibold">Phone number</label>
-                    <div className="ws-field-icon">
-                      <Phone size={16} aria-hidden="true" />
-                      <input
-                        className="form-control"
-                        value={form.phone}
-                        onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                        placeholder="09xx xxx xxx"
-                      />
-                    </div>
+                    <PhoneField value={form.phone} onChange={(phone) => setForm({ ...form, phone })} />
                   </div>
                   <div className="col-12">
                     <label className="form-label small fw-semibold">Email (used to sign in)</label>

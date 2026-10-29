@@ -1272,9 +1272,12 @@ function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
 function phoneProblem(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "Your phone number is required — the library team uses it to reach you.";
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length < 9 || digits.length > 15) {
-    return "Enter a valid phone number, e.g. +251 912 345 678.";
+  let digits = raw.replace(/\D/g, "");
+  if (/^\+251/.test(raw)) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("251")) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length !== 9) {
+    return "Enter the 9 digits after +251, e.g. 912 345 678.";
   }
   return "";
 }

@@ -10,7 +10,6 @@ import {
   KeyRound,
   Lock,
   Mail,
-  Phone,
   QrCode,
   Sparkles,
   User
@@ -18,6 +17,7 @@ import {
 import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
+import PhoneField from "../components/PhoneField.jsx";
 import { completeRecovery, pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
@@ -565,19 +565,12 @@ export default function LoginPage() {
                   <label className="form-label small fw-semibold" htmlFor="signupPhone">
                     Phone number
                   </label>
-                  <div className="ws-field-icon">
-                    <Phone size={16} aria-hidden="true" />
-                    <input
-                      id="signupPhone"
-                      className="form-control"
-                      name="phone"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={signup.phone}
-                      onChange={(e) => setSignup({ ...signup, phone: e.target.value })}
-                      placeholder="+251 …"
-                    />
-                  </div>
+                  <PhoneField
+                    id="signupPhone"
+                    name="phone"
+                    value={signup.phone}
+                    onChange={(phone) => setSignup({ ...signup, phone })}
+                  />
                 </div>
                 <div className="col-12">
                   <label className="form-label small fw-semibold" htmlFor="signupDepartment">

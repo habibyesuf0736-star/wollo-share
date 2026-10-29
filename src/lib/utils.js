@@ -261,13 +261,35 @@ export function initialsOf(name) {
     .toUpperCase();
 }
 
+// Every account is reachable on an Ethiopian mobile, so the country code is fixed in the UI.
+export const PHONE_PREFIX = "+251";
+
+function phoneNationalDigits(value) {
+  const raw = String(value ?? "").trim();
+  let digits = raw.replace(/\D/g, "");
+  if (/^\+251/.test(raw)) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("251")) digits = digits.slice(3);
+  else if (digits.length > 9 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
+}
+
+// The input shows +251 itself, so the student only types (and sees) the 9 national digits.
+export function phoneLocalDigits(value) {
+  return phoneNationalDigits(value).slice(0, 9);
+}
+
+export function phoneFromLocal(value) {
+  const digits = phoneLocalDigits(value);
+  return digits ? `${PHONE_PREFIX}${digits}` : "";
+}
+
 // Mirrors phoneProblem() in server.ts so the form and the API reject the same numbers.
 export function phoneProblem(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "Enter your phone number.";
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length < 9 || digits.length > 15) {
-    return "Enter a valid number, e.g. +251 912 345 678.";
+  const national = phoneNationalDigits(raw);
+  if (national.length !== 9) {
+    return "Enter the 9 digits after +251, e.g. 912 345 678.";
   }
   return "";
 }
