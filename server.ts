@@ -1869,7 +1869,8 @@ export async function createApp() {
       { path: "/", priority: "1.0", changefreq: "daily" },
       { path: "/login", priority: "0.6", changefreq: "monthly" },
       { path: "/premium", priority: "0.9", changefreq: "weekly" },
-      { path: "/support", priority: "0.5", changefreq: "monthly" }
+      { path: "/support", priority: "0.5", changefreq: "monthly" },
+      { path: "/help", priority: "0.6", changefreq: "monthly" }
     ];
     // The build-time prerender writes one page per program and deduplicates a repeated name by
     // suffixing the course id; the sitemap has to name the same files or it 404s on the second

@@ -38,7 +38,7 @@ function deviceLabel() {
   return `${browser} on ${os}`;
 }
 
-export default function LoginPage() {
+export default function LoginPage({ initialTab }) {
   const {
     login,
     signInWithCode,
@@ -55,7 +55,7 @@ export default function LoginPage() {
     coursesData,
     pageTexts
   } = useApp();
-  const [tab, setTab] = useState("signin");
+  const [tab, setTab] = useState(initialTab === "register" ? "register" : "signin");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);

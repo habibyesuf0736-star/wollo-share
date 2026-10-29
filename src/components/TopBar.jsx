@@ -1,7 +1,7 @@
 import React from "react";
 import { useApp } from "../store/AppContext.jsx";
 import { Crown, Eye, LibraryBig, LifeBuoy, LogIn, LogOut, ShieldCheck, Upload } from "lucide-react";
-import universityEmblem from "../assets/images/wollo-university-emblem.jpg";
+import universityEmblem from "../assets/images/wollo-university-emblem.png";
 import UserAvatar from "./UserAvatar.jsx";
 
 function BrandMark() {
@@ -27,6 +27,7 @@ export default function TopBar() {
     goLibrary,
     goAdmin,
     goSupport,
+    goHelp,
     goLogin,
     goProfile,
     goPremium,
@@ -80,7 +81,19 @@ export default function TopBar() {
               <LifeBuoy size={15} className="me-1 align-text-bottom" aria-hidden="true" />
               {ownerIsStaff && !studentPreview ? "Support panel" : "Need help?"}
             </button>
-          ) : null}
+          ) : (
+            // The support desk needs an account, so a visitor gets the rules page instead
+            // of a screen that only tells them to sign in.
+            <button
+              type="button"
+              className={`btn btn-sm ${view.name === "help" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={goHelp}
+              title="How downloads work and how to reach the support team"
+            >
+              <LifeBuoy size={15} className="me-1 align-text-bottom" aria-hidden="true" />
+              Help
+            </button>
+          )}
           {isAdmin ? (
             <button
               type="button"

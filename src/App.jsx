@@ -11,7 +11,7 @@ import QuickRegisterModal from "./components/QuickRegisterModal.jsx";
 import VideoPlayerModal from "./components/VideoPlayerModal.jsx";
 import LibraryPage from "./pages/LibraryPage.jsx";
 import SublistPage from "./pages/SublistPage.jsx";
-import universityEmblem from "./assets/images/wollo-university-emblem.jpg";
+import universityEmblem from "./assets/images/wollo-university-emblem.png";
 
 // Everything a student is unlikely to hit on the first paint — the admin workspace, the
 // support desk, sign-in, profile, premium — ships as its own chunk, so the library loads
@@ -22,6 +22,7 @@ const DeviceLoginPage = lazy(() => import("./pages/DeviceLoginPage.jsx"));
 const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
 const SupportPage = lazy(() => import("./pages/SupportPage.jsx"));
 const PremiumPage = lazy(() => import("./pages/PremiumPage.jsx"));
+const HelpPage = lazy(() => import("./pages/HelpPage.jsx"));
 
 function PageFallback() {
   return (
@@ -57,10 +58,11 @@ function Shell() {
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>
             {view.name === "sublist" ? <SublistPage key={`${view.courseId}|${view.query || ""}`} /> : null}
-            {view.name === "login" ? <LoginPage /> : null}
+            {view.name === "login" ? <LoginPage key={view.tab || "signin"} initialTab={view.tab} /> : null}
             {view.name === "deviceLogin" ? <DeviceLoginPage key={view.qrId} qrId={view.qrId} /> : null}
             {view.name === "profile" ? <ProfilePage /> : null}
             {view.name === "support" ? <SupportPage /> : null}
+            {view.name === "help" ? <HelpPage /> : null}
             {view.name === "premium" ? <PremiumPage /> : null}
             {view.name === "admin" ? <AdminPage /> : null}
             {view.name === "library" ? <LibraryPage /> : null}

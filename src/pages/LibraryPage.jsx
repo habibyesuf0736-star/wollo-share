@@ -304,11 +304,16 @@ export default function LibraryPage() {
           <button type="button" className="btn btn-sm btn-primary" onClick={() => setGate({ type: "share", courseId: "" })}>
             <Upload size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Share your material
           </button>
-          <a className="btn btn-sm btn-outline-secondary" href="#ws-colleges">
+          {/* A plain "#ws-colleges" link would be read as a route by the app router. */}
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => document.getElementById("ws-colleges")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
             <LibraryBig size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Browse by college
-          </a>
+          </button>
           {session && !studentPreview ? null : (
-            <button type="button" className="btn btn-sm btn-soft" onClick={goLogin}>
+            <button type="button" className="btn btn-sm btn-soft" onClick={() => goLogin("register")}>
               <Sparkles size={15} className="me-1 align-text-bottom" aria-hidden="true" /> Create free account
             </button>
           )}

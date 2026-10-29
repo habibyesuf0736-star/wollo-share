@@ -10,7 +10,7 @@ import {
   removeKey,
   takeTabJson
 } from "../lib/storage.js";
-import { LIBRARY_SEO, PREMIUM_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
+import { HELP_SEO, LIBRARY_SEO, PREMIUM_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
 
 const AppContext = createContext(null);
 
@@ -77,6 +77,7 @@ function viewFromLocation() {
   const authorizePath = pathname.match(/^\/authorize\/([A-Za-z0-9_-]{8,64})/);
   if (authorizePath) return { name: "deviceLogin", qrId: authorizePath[1] };
   if (pathname === "/support" || /^#\/support/.test(hash)) return { name: "support" };
+  if (pathname === "/help" || /^#\/help/.test(hash)) return { name: "help" };
   if (pathname === "/premium" || /^#\/premium/.test(hash)) return { name: "premium" };
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
   if (/^#\/profile/.test(hash)) return { name: "profile" };
@@ -218,7 +219,7 @@ export function AppProvider({ children }) {
       link.rel = "icon";
       document.head.appendChild(link);
     }
-    const href = tabPhoto || appearanceSettings.logoUrl || "/wollo-university-emblem.jpg";
+    const href = tabPhoto || appearanceSettings.logoUrl || "/wollo-university-emblem.png";
     if (link.getAttribute("href") !== href) {
       link.setAttribute("href", href);
       if (tabPhoto) link.removeAttribute("type");
@@ -439,9 +440,12 @@ export function AppProvider({ children }) {
     },
     [coursesData]
   );
-  const goLogin = useCallback(() => {
+  // "Sign in" and "create an account" are the same screen on different tabs, so the
+  // caller that means registration says so. A click event can arrive as the first
+  // argument, so only the known tab name is taken.
+  const goLogin = useCallback((tab) => {
     clearStaffHash();
-    setView({ name: "login" });
+    setView({ name: "login", tab: tab === "register" ? "register" : "" });
     if (window.location.pathname !== "/login") window.history.pushState(null, "", "/login");
   }, []);
   const goAdmin = useCallback((tab) => setView({ name: "admin", tab: tab || "" }), []);
@@ -462,6 +466,14 @@ export function AppProvider({ children }) {
   const goPremium = useCallback(() => {
     setView({ name: "premium" });
     if (window.location.pathname !== "/premium") window.history.pushState(null, "", "/premium");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  // Help is readable without an account, so a visitor sent the link gets the rules and
+  // the support route instead of a sign-in wall.
+  const goHelp = useCallback(() => {
+    clearStaffHash();
+    setView({ name: "help" });
+    if (window.location.pathname !== "/help") window.history.pushState(null, "", "/help");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
@@ -504,6 +516,10 @@ export function AppProvider({ children }) {
       applyPageSeo(PREMIUM_SEO);
       return;
     }
+    if (view.name === "help") {
+      applyPageSeo(HELP_SEO);
+      return;
+    }
     if (view.name === "deviceLogin") {
       applyPageSeo({
         path: "/authorize",
@@ -529,6 +545,7 @@ export function AppProvider({ children }) {
       else if (next.name === "deviceLogin") setView({ name: "deviceLogin", qrId: next.qrId });
       else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "support") setView({ name: "support" });
+      else if (next.name === "help") setView({ name: "help" });
       else if (next.name === "premium") setView({ name: "premium" });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
       else if (next.name === "sublist") setView({ name: "sublist", courseId: null, courseSlug: next.courseSlug, query: "", year: "" });
@@ -1612,6 +1629,7 @@ export function AppProvider({ children }) {
     goAdmin,
     goProfile,
     goSupport,
+    goHelp,
     goPremium,
     login,
     signInWithCode,

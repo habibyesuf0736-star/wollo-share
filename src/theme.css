@@ -3340,6 +3340,35 @@ body.is-premium .access-tag.is-premium {
   background: var(--surface-raised);
 }
 
+/* --- Help page ------------------------------------------------------------ */
+.ws-help {
+  width: min(100%, 920px);
+}
+/* A rule line is a full-width notice, so it cannot borrow .banner, which pushes
+   its button to the far edge. */
+.ws-rule-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.88rem;
+  font-weight: 600;
+  width: 100%;
+}
+.ws-rule-line svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.ws-rule-line.is-lime {
+  border-color: color-mix(in srgb, #78a028 36%, transparent);
+  background: color-mix(in srgb, var(--lime) 42%, transparent);
+  color: #3f5407;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

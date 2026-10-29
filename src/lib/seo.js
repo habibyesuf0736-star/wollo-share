@@ -89,3 +89,10 @@ export const PREMIUM_SEO = {
   description:
     "Wollo Share Premium plans from 100 Birr a month, 250 Birr a year or 500 Birr for lifetime access: unlimited Wollo University downloads with no sponsor spot. Choose a plan and the team switches your account over the same day."
 };
+
+export const HELP_SEO = {
+  path: "/help",
+  title: `Help, download rules & support — ${SITE_NAME}`,
+  description:
+    "How Wollo Share downloads work: free and premium file rules, earning download credits by sharing material, signing in on another device, password recovery, and how to reach the student support team about a broken or missing Wollo University PDF."
+};
