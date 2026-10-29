@@ -2,10 +2,10 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
-import { createApp } from "./server.ts";
-import { remoteEnabled } from "./stateStore.ts";
+import { createApp } from "./app.ts";
+import { remoteEnabled } from "./state-store.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.PORT || 3000);
 
 const app = await createApp();
@@ -18,7 +18,7 @@ if (process.env.NODE_ENV !== "production") {
   });
   app.use(vite.middlewares);
 } else {
-  const distPath = path.join(__dirname, "dist");
+  const distPath = path.join(PACKAGE_ROOT, "dist");
   app.use(express.static(distPath));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(distPath, "index.html"));

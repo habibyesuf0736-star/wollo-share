@@ -1,7 +1,7 @@
 # Email templates
 
 Wollo Share sends three transactional emails. All three are rendered from
-[`emailTemplates.ts`](../emailTemplates.ts), so every provider (Relay, Brevo, Mailtrap, SMTP)
+[`server/email-templates.ts`](../server/email-templates.ts), so every provider (Relay, Brevo, Mailtrap, SMTP)
 delivers the same branded design. The design uses tables and inline styles only — no images,
 no external CSS — so it renders the same in Gmail, Outlook and mobile clients.
 
@@ -16,15 +16,15 @@ Each renderer returns `{ subject, text, html }`; the plain-text part is sent as
 
 ## Customising
 
-Edit the helper functions in `emailTemplates.ts`:
+Edit the helper functions in `server/email-templates.ts`:
 
 - `layout()` — header monogram, card, footer, mobile media query. Brand colours live in the
   `BRAND` object (`primary` is the site's `#1d624f`).
 - `codeBlock()` — the large monospaced code box (34px desktop, 28px under 620px).
 - `row()` inside the two notice templates — label/value rows for the details table.
 
-Frontend changes hot-reload; `emailTemplates.ts` is imported by `server.ts`, so restart the
-server (`npx tsx server.ts`) after editing it.
+Frontend changes hot-reload; `server/email-templates.ts` is imported by `server/app.ts`, so restart the
+server (`npm run dev`) after editing it.
 
 ## Mailtrap-hosted templates (reference via API)
 

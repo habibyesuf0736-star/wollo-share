@@ -8,7 +8,7 @@ import path from "node:path";
 
 process.env.WOLLO_STATE_STORE = "supabase";
 
-const { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } = await import("../stateStore.ts");
+const { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } = await import("../server/state-store.ts");
 
 const DB_FILE = path.resolve(process.cwd(), "data/wollo-db.json");
 const command = process.argv[2] || "status";

@@ -303,7 +303,7 @@ export function phoneFromLocal(value) {
   return digits ? `${PHONE_PREFIX}${digits}` : "";
 }
 
-// Mirrors phoneProblem() in server.ts so the form and the API reject the same numbers.
+// Mirrors phoneProblem() in server/app.ts so the form and the API reject the same numbers.
 export function phoneProblem(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "Enter your phone number.";

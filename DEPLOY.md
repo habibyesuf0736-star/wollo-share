@@ -1,8 +1,7 @@
 # Running Wollo Share on Vercel + Supabase
 
 This file is the checklist for getting the app live, and for making the **verification /
-recovery code** emails work in production. Everything here matches the code as of
-commit `c24ab7c`.
+recovery code** emails work in production.
 
 ---
 
@@ -40,7 +39,7 @@ so `/login` and the hash routes both work after a refresh.
 
 ### Which keys the app actually needs
 
-The REST path used by `stateStore.ts` only accepts the **legacy** JWT keys:
+The REST path used by `server/state-store.ts` only accepts the **legacy** JWT keys:
 
 | Variable | Value | Where |
 | --- | --- | --- |
@@ -73,7 +72,7 @@ The new `sb_publishable_…` / `sb_secret_…` keys are **rejected** by this pro
 
    > **Do not set the pepper or the vault key.** Every stored password hash and every
    > encrypted mail credential in the row were produced with the built-in defaults in
-   > `auth-crypto.ts`. Setting either variable makes admin login, all 7 student logins
+   > `server/crypto.ts`. Setting either variable makes admin login, all 7 student logins
    > and Brevo delivery fail at once, with no error message that points at the cause.
    > If they were ever set, `SESSION_SECRET` alone will not fix it — they must be removed
    > and the site redeployed.
@@ -84,14 +83,14 @@ The new `sb_publishable_…` / `sb_secret_…` keys are **rejected** by this pro
 
 Local development already points at the same row (`.env` has `WOLLO_STATE_STORE=supabase`),
 so an edit made locally appears on Vercel immediately — same single source of truth.
-Run the local server with `npm run dev` and restart it after any `server.ts` change; a
+Run the local server with `npm run dev` and restart it after any `server/app.ts` change; a
 stale instance holding port 3000 is the usual reason a server edit "did nothing".
 
 ---
 
 ## 4. Mail provider: two ways to configure it
 
-`mail.ts` merges settings in this order: **values saved in the admin panel (decrypted
+`server/mail.ts` merges settings in this order: **values saved in the admin panel (decrypted
 from the row) win over environment variables**, which win over nothing.
 
 **A. Saved in the app (recommended — travels with the row, no redeploy):**
@@ -141,7 +140,7 @@ Three conditions, each of which alone is enough to break it:
 3. **The email has to leave before the function stops.** Vercel freezes a function once
    the response is flushed, so fire-and-forget work can be silently dropped. The recovery
    endpoint now `await`s `issueRecoveryCode()` and the admin notification inside the
-   request (see [server.ts:1343](file:///C:/Users/habib/Desktop/New%20folder/wollo-share/server.ts#L1343))
+   request (see `issueRecoveryCode` in [server/app.ts](./server/app.ts))
    instead of using `setImmediate`. A mail failure is caught, logged and never leaves a
    live code that nobody can receive.
 
@@ -182,7 +181,7 @@ error string: `not validated` → §5.2, `auth failed` → key/user, `timeout` �
 That string comes from the SPA when `/api/...` answers 500, so the page is fine and the
 **function** is failing. Two causes covered this deployment:
 
-1. **`firebase-applet-config.json` was not inside the function bundle.** `server.ts` used
+1. **`firebase-applet-config.json` was not inside the function bundle.** `server/app.ts` used
    to read it with an un-caught `fs.readFileSync` at import time, so a missing file made
    *every* API call throw before Express was even built. The read now tries three
    locations and degrades to `{}`; `vercel.json` also ships the file with
@@ -220,7 +219,7 @@ Two deployment gotchas that are easy to miss:
 
 Google sign-in specifically: if the config file still isn't readable in the bundle, set
 `FIREBASE_WEB_API_KEY` (and optionally `FIREBASE_PROJECT_ID`) as env vars — they take
-precedence over the file at [server.ts:14](file:///C:/Users/habib/Desktop/New%20folder/wollo-share/server.ts#L14).
+precedence over the file at [`readFirebaseConfig()` in server/app.ts](./server/app.ts).
 Everything else keeps working; only `/api/auth/google` returns its "not configured" error.
 
 ---
@@ -239,8 +238,9 @@ Everything else keeps working; only `/api/auth/google` returns its "not configur
 
 - Login and recovery rate-limiters live in process memory, so each cold start resets
   them. Fine for a university library; move to the row if you ever need real enforcement.
-- `data/wollo-db.json` is never written on Vercel (the store is remote); the file stays
-  in git as a seed/backup, and it contains account emails and salted hashes — the repo is
-  public, which you already accepted.
+- `data/wollo-db.json` is never written on Vercel (the store is remote). The file is
+  gitignored locally and excluded from deployments by `.vercelignore` — it holds account
+  emails, hashes and vault ciphertext. Older commits still contain a copy, so treat every
+  password in that snapshot as exposed and rotate anything that matters.
 - Free Vercel bandwidth is shared with the 441 KB JS bundle; the one-time `public/legacy.html`
   (594 KB) has been removed, and materials are links, not hosted files.

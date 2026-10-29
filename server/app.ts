@@ -1,23 +1,22 @@
 import "dotenv/config";
-import { encryptVaultSecret, hashPassword } from "./auth-crypto.ts";
+import { encryptVaultSecret, hashPassword } from "./crypto.ts";
 import { configureMail, mailStatus, sendMail, activeMailProvider, effectiveMailConfig, normalizeMailSecret, type MailConfig } from "./mail.ts";
-import { recoveryCodeEmail, recoveryRequestNoticeEmail, signInCodeEmail, signupCodeEmail, testEmailMessage } from "./emailTemplates.ts";
+import { recoveryCodeEmail, recoveryRequestNoticeEmail, signInCodeEmail, signupCodeEmail, testEmailMessage } from "./email-templates.ts";
 import crypto from "crypto";
 import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } from "./stateStore.ts";
+import { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } from "./state-store.ts";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Serverless bundles do not necessarily carry the JSON file next to the entry, so the
 // config is looked for in a few places and a miss must not take the whole API down.
 function readFirebaseConfig(): { apiKey?: string; projectId?: string } {
   const candidates = [
-    path.join(__dirname, "firebase-applet-config.json"),
+    path.join(PACKAGE_ROOT, "firebase-applet-config.json"),
     path.join(process.cwd(), "firebase-applet-config.json"),
-    path.join(__dirname, "..", "firebase-applet-config.json")
+    path.join(PACKAGE_ROOT, "..", "firebase-applet-config.json")
   ];
   for (const file of candidates) {
     try {
@@ -34,7 +33,7 @@ const FIREBASE_CONFIG: { apiKey?: string; projectId?: string } = {
   projectId: process.env.FIREBASE_PROJECT_ID || readFirebaseConfig().projectId
 };
 
-const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(__dirname, "data");
+const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(PACKAGE_ROOT, "data");
 const DB_FILE = path.join(DATA_DIR, "wollo-db.json");
 
 const ADMIN_USERNAME = "admin";

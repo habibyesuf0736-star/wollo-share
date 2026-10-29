@@ -4,7 +4,7 @@
 codes to Relay's `POST /api/console/sends` endpoint, so codes leave your infrastructure through your own verified domain
 instead of a third-party sending quota.
 
-Wollo Share talks to Relay through `mail.ts`, imported by `server.ts`. Relay is preferred when configured; otherwise the
+Wollo Share talks to Relay through `server/mail.ts`, imported by `server/app.ts`. Relay is preferred when configured; otherwise the
 server falls back to SMTP, and otherwise it still stores the code for manual delivery. Provider details can be saved live
 from the admin panel (encrypted in the database) or supplied as environment variables.
 
@@ -31,7 +31,7 @@ The full self-hosting guide lives at <https://relay.hyvor.com/hosting>.
 
 **Recommended — from the admin panel (no restart).** Open **Admin → Students & accounts → Email delivery**, choose
 *Provider: Relay*, paste the Relay URL, the project API key and the verified sender, then press **Save settings**. The values
-are stored vault-encrypted in `data/wollo-db.json` (`mailSettings.relayApiKeyVault`) and applied to `mail.ts` immediately —
+are stored vault-encrypted in `data/wollo-db.json` (`mailSettings.relayApiKeyVault`) and applied to `server/mail.ts` immediately —
 the running server starts sending codes without a restart. Blank secret fields keep the stored secret; **Remove key** clears
 it. `GET`/`PUT /api/admin/mail-settings` back this form and never return the key.
 

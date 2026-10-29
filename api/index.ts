@@ -29,8 +29,8 @@ async function boot(): Promise<BundledApp> {
     throw new Error("WOLLO_STATE_STORE=supabase but SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are not all set.");
   }
   // Imported only after the checks pass, because a bad module load throws at import time.
-  const { createApp } = (await import("../server.ts")) as { createApp: () => Promise<unknown> };
-  const { flushRemoteSaves } = (await import("../stateStore.ts")) as { flushRemoteSaves: () => Promise<void> };
+  const { createApp } = (await import("../server/app.ts")) as { createApp: () => Promise<unknown> };
+  const { flushRemoteSaves } = (await import("../server/state-store.ts")) as { flushRemoteSaves: () => Promise<void> };
   const app = (await createApp()) as RequestHandler;
   return { app, flush: flushRemoteSaves };
 }

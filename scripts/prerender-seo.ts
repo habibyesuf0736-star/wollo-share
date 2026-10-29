@@ -48,14 +48,21 @@ const written: string[] = [];
 // ---------- data ----------
 
 // The Evangadi pack is sold by that provider, so it never belongs to the public catalog.
-// Mirrors isEvangadiCourse() in server.ts.
+// Mirrors isEvangadiCourse() in server/app.ts.
 function isEvangadiCourse(course: { id?: unknown; name?: unknown }): boolean {
   return String(course.id || "") === "course-evangadi" || /evangadi/i.test(String(course.name || ""));
 }
 
-function readLocalDoc(): StateDoc {
-  if (!fs.existsSync(DB_FILE)) throw new Error(`missing data file: ${DB_FILE}`);
-  return JSON.parse(fs.readFileSync(DB_FILE, "utf-8")) as StateDoc;
+// The local snapshot is a developer convenience, not a build requirement: a clone that has
+// never run the app has no data file, and CI has no Supabase credentials.
+function readLocalDoc(): StateDoc | null {
+  if (!fs.existsSync(DB_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DB_FILE, "utf-8")) as StateDoc;
+  } catch (err: any) {
+    console.warn(`[prerender-seo] ${path.relative(ROOT, DB_FILE)} could not be read (${err?.message || err})`);
+    return null;
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -74,19 +81,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-// Production (Vercel) reads the live catalog out of Supabase; anything else, including a network
-// hiccup, falls back to the committed snapshot so a build can never fail on data access.
-async function loadDoc(): Promise<{ doc: StateDoc; source: string }> {
+// Production (Vercel) reads the live catalog out of Supabase. Anywhere else — a fresh clone,
+// CI without credentials — the build falls back to the developer's local snapshot, and if that
+// is missing too it ships the SPA without prerendered pages rather than failing.
+async function loadDoc(): Promise<{ doc: StateDoc | null; source: string }> {
   if (process.env.WOLLO_STATE_STORE === "supabase") {
     try {
-      const { loadRemoteState } = await import("../stateStore.ts");
+      const { loadRemoteState } = await import("../server/state-store.ts");
       const remote = await withTimeout(Promise.resolve(loadRemoteState()), REMOTE_TIMEOUT_MS);
       if (remote && typeof remote === "object") {
-        return { doc: remote as StateDoc, source: `supabase (after ${REMOTE_TIMEOUT_MS}ms cap)` };
+        return { doc: remote as StateDoc, source: "supabase" };
       }
-      console.warn("[prerender-seo] Supabase returned no document, using data/wollo-db.json");
+      console.warn("[prerender-seo] Supabase returned no document, trying the local snapshot");
     } catch (err: any) {
-      console.warn(`[prerender-seo] Supabase read failed (${err?.message || err}), using data/wollo-db.json`);
+      console.warn(`[prerender-seo] Supabase read failed (${err?.message || err}), trying the local snapshot`);
     }
     return { doc: readLocalDoc(), source: "data/wollo-db.json (after a remote attempt)" };
   }
@@ -395,6 +403,12 @@ function writePage(file: string, html: string) {
 }
 
 const { doc, source: dataSource } = await loadDoc();
+if (!doc) {
+  console.warn(
+    "[prerender-seo] no catalog to render (no Supabase read and no data/wollo-db.json) — the bundle ships without prerendered program pages."
+  );
+  process.exit(0);
+}
 const allCourses = Array.isArray(doc.coursesData) ? doc.coursesData : [];
 const courses = allCourses.filter((course) => course && !isEvangadiCourse(course));
 

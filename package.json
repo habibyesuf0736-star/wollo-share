@@ -1,36 +1,39 @@
 {
-  "name": "react-example",
+  "name": "wollo-share",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
+  "description": "Wollo University student material library: a React SPA in front of an Express API that keeps its whole state in one Supabase row.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/habibyesuf0736-star/wollo-share.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev": "tsx serveLocal.ts",
+    "dev": "tsx server/local.ts",
+    "start": "tsx server/local.ts",
+    "build": "vite build && tsx scripts/prerender-seo.ts",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist",
     "admin:reset-password": "tsx scripts/reset-admin-password.ts",
     "db:status": "tsx scripts/supabase-sync.ts status",
     "db:init": "node scripts/supabase-init.mjs",
     "db:push": "tsx scripts/supabase-sync.ts push",
-    "db:pull": "tsx scripts/supabase-sync.ts pull",
-    "build": "vite build && tsx scripts/prerender-seo.ts",
-    "start": "tsx serveLocal.ts",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "db:pull": "tsx scripts/supabase-sync.ts pull"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.3.3",
-    "@vitejs/plugin-react": "^6.1.1",
     "bootstrap": "^5.3.8",
     "dotenv": "^18.0.8",
     "express": "^4.21.2",
-    "firebase": "^13.0.0",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
     "nodemailer": "^10.1.2",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^8.3.0"
+    "react-dom": "^19.0.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -38,11 +41,9 @@
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.28.2",
-    "pg": "^8.23.1",
-    "tailwindcss": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
   }
 }

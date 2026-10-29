@@ -3,7 +3,7 @@ import fs from "fs";
 import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
-import { encryptVaultSecret, hashPassword } from "../auth-crypto.ts";
+import { encryptVaultSecret, hashPassword } from "../server/crypto.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.WOLLO_DATA_DIR || path.join(__dirname, "..", "data");
