@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../lib/api.js";
-import { DEFAULT_SUBCATEGORIES, nowStamp, triggerBrowserDownload, uniqueId } from "../lib/utils.js";
+import { DEFAULT_SUBCATEGORIES, isStaffOnlyCourse, nowStamp, triggerBrowserDownload, uniqueId } from "../lib/utils.js";
 import {
   STORAGE_KEYS,
   readJson,
@@ -172,7 +172,7 @@ export function AppProvider({ children }) {
   const canSeeCourse = useCallback(
     (course) => {
       // Evangadi sells its own pack, so it is not part of the student library at all.
-      if (course.id === "course-evangadi" || /evangadi/i.test(String(course.name || ""))) return isAdmin;
+      if (isStaffOnlyCourse(course)) return isAdmin;
       if (!course.restricted) return true;
       if (studentPreview) return false;
       if (isAdmin) return true;
@@ -1439,6 +1439,27 @@ export function AppProvider({ children }) {
     [isAdmin, session, toast]
   );
 
+  // Who may open one restricted course is decided here, in one write, so the list the
+  // administrator sees when they assign a course is the list that lands on the server.
+  const setCourseAccess = useCallback(
+    (courseId, userIds) => {
+      if (!isAdmin) return { ok: false, error: "Only the administrator assigns courses." };
+      const wanted = new Set(userIds);
+      commitUsers((prev) =>
+        prev.map((user) => {
+          const has = Array.isArray(user.allowedCourseIds) && user.allowedCourseIds.includes(courseId);
+          if (has === wanted.has(user.id)) return user;
+          const allowedCourseIds = has
+            ? user.allowedCourseIds.filter((id) => id !== courseId)
+            : [...(user.allowedCourseIds || []), courseId];
+          return { ...user, allowedCourseIds };
+        })
+      );
+      return { ok: true, count: wanted.size };
+    },
+    [commitUsers, isAdmin]
+  );
+
   const logActivity = useCallback(
     (type, detail) => {
       if (!activeUser) return;
@@ -1644,6 +1665,7 @@ export function AppProvider({ children }) {
     commitPageTexts,
     commitAppearance,
     saveUser,
+    setCourseAccess,
     deleteUser,
     setUserRole,
     adjustUserCredits,

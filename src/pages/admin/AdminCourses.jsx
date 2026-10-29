@@ -1,15 +1,20 @@
 import React, { useMemo, useState } from "react";
 import { useApp } from "../../store/AppContext.jsx";
 import CourseFormModal from "../../components/CourseFormModal.jsx";
+import CourseStudentsModal from "../../components/CourseStudentsModal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
-import { courseAverageRating, sanitizeCourseCode } from "../../lib/utils.js";
+import { courseAverageRating, isStaffOnlyCourse, sanitizeCourseCode } from "../../lib/utils.js";
 
 export default function AdminCourses() {
-  const { coursesData, updateCourse, deleteCourse, moveCourse, toast } = useApp();
+  const { coursesData, usersData, updateCourse, deleteCourse, moveCourse, toast } = useApp();
   const [search, setSearch] = useState("");
   const [college, setCollege] = useState("All");
   const [modal, setModal] = useState({ open: false, courseId: null });
   const [confirm, setConfirm] = useState({ open: false, courseId: null });
+  const [accessCourse, setAccessCourse] = useState(null);
+
+  const assignedCount = (course) =>
+    usersData.filter((user) => (user.role || "user") === "user" && (user.allowedCourseIds || []).includes(course.id)).length;
 
   const colleges = useMemo(() => Array.from(new Set(coursesData.map((c) => c.college).filter(Boolean))).sort(), [coursesData]);
   const rows = useMemo(() => {
@@ -93,6 +98,22 @@ export default function AdminCourses() {
                     >
                       {course.restricted ? "Restricted" : "Public"}
                     </button>
+                    <div className="mt-1">
+                      {isStaffOnlyCourse(course) ? (
+                        <span className="small text-secondary">Staff only</span>
+                      ) : course.restricted ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary py-0 px-1 border-0"
+                          title="Choose which accounts may open this course"
+                          onClick={() => setAccessCourse(course)}
+                        >
+                          {assignedCount(course)} assigned
+                        </button>
+                      ) : (
+                        <span className="small text-secondary">Everyone</span>
+                      )}
+                    </div>
                   </td>
                   <td className="text-end table-actions">
                     <div className="d-flex gap-1 flex-wrap justify-content-end">
@@ -124,6 +145,7 @@ export default function AdminCourses() {
         </table>
       </div>
 
+      <CourseStudentsModal course={accessCourse} onClose={() => setAccessCourse(null)} />
       <CourseFormModal open={modal.open} courseId={modal.courseId} onClose={() => setModal({ open: false, courseId: null })} />
       <ConfirmModal
         open={confirm.open}

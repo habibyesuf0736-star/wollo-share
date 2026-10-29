@@ -3,10 +3,11 @@ import { Minus, Plus } from "lucide-react";
 import { useApp } from "../../store/AppContext.jsx";
 import Modal from "../../components/Modal.jsx";
 import ConfirmModal from "../../components/ConfirmModal.jsx";
+import CourseAccessModal from "../../components/CourseAccessModal.jsx";
 import DepartmentSelect from "../../components/DepartmentSelect.jsx";
 import PhoneField from "../../components/PhoneField.jsx";
 import { approveVerification, createStudentAccount, listVerifications, shareVerificationCode } from "../../lib/api.js";
-import { phoneProblem } from "../../lib/utils.js";
+import { assignedCourseIds, phoneProblem } from "../../lib/utils.js";
 
 const PLAN_LABELS = {
   unpaid: "Unpaid · earns downloads by sharing",
@@ -60,6 +61,7 @@ export default function AdminUsers() {
   const [roleBusy, setRoleBusy] = useState("");
   const [creditBusy, setCreditBusy] = useState("");
   const [profile, setProfile] = useState(null);
+  const [accessUser, setAccessUser] = useState(null);
   const [verifications, setVerifications] = useState({ pending: [], mailConfigured: true });
   const [approving, setApproving] = useState("");
   const [sharing, setSharing] = useState("");
@@ -420,9 +422,19 @@ export default function AdminUsers() {
                   </div>
                 </td>
                 <td className="small" data-label="Access">
-                  {(user.allowedCourseIds || []).length} courses
-                  <div className="text-secondary" style={{ fontSize: 11 }}>
-                    {user.lastActiveAt || "—"}
+                  {assignedCourseIds(user, coursesData).length} assigned
+                  <div className="d-flex align-items-center gap-1 mt-1">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary py-0 px-1 border-0"
+                      title="Choose which restricted courses this account may open"
+                      onClick={() => setAccessUser(user)}
+                    >
+                      Assign
+                    </button>
+                    <span className="text-secondary" style={{ fontSize: 11 }}>
+                      {user.lastActiveAt || "—"}
+                    </span>
                   </div>
                 </td>
                 <td className="text-end table-actions">
@@ -497,6 +509,8 @@ export default function AdminUsers() {
           </form>
         ) : null}
       </Modal>
+
+      <CourseAccessModal user={accessUser} onClose={() => setAccessUser(null)} />
 
       <Modal
         open={Boolean(sharedCode)}
@@ -649,7 +663,7 @@ export default function AdminUsers() {
               </li>
               <li className="d-flex justify-content-between gap-2">
                 <span className="text-secondary">Assigned courses</span>
-                <strong>{(profile.allowedCourseIds || []).length}</strong>
+                <strong>{assignedCourseIds(profile, coursesData).length}</strong>
               </li>
               <li className="d-flex justify-content-between gap-2">
                 <span className="text-secondary">Last activity</span>

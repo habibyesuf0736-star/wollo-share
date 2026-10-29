@@ -20,6 +20,7 @@ export default function SublistPage() {
     goLibrary,
     goBrowse,
     canEdit,
+    canSeeCourse,
     addMaterial,
     updateMaterial,
     deleteMaterial,
@@ -62,7 +63,9 @@ export default function SublistPage() {
     return list;
   }, [canEdit, course, format, query, semester, subcategory]);
 
-  if (!course) {
+  // An unassigned course is indistinguishable from one that never existed: saying "you do
+  // not have access" would confirm the course is there.
+  if (!course || !canSeeCourse(course)) {
     return (
       <div className="ws-page">
         <EmptyState
