@@ -1,6 +1,15 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "../../store/AppContext.jsx";
-import { closeRecoveryRequest, getMailSettings, issueRecoveryCode, listRecoveryRequests, saveMailSettings, sendTestEmail } from "../../lib/api.js";
+import {
+  clearFinishedRecoveryRequests,
+  closeRecoveryRequest,
+  deleteRecoveryRequest,
+  getMailSettings,
+  issueRecoveryCode,
+  listRecoveryRequests,
+  saveMailSettings,
+  sendTestEmail
+} from "../../lib/api.js";
 
 const EMPTY_MAIL_FORM = {
   preference: "auto",
@@ -38,10 +47,43 @@ function mailFailureMessage(error, fallback) {
   return text || fallback;
 }
 
+const isOpenRequest = (req) => req.status === "pending" || req.status === "code-issued";
+
+const STATUS_LABEL = {
+  pending: "asked",
+  "code-issued": "code sent",
+  completed: "reset done",
+  closed: "closed"
+};
+
+const STATUS_TONE = {
+  pending: "text-bg-info",
+  "code-issued": "text-bg-warning",
+  completed: "text-bg-success",
+  closed: "text-bg-secondary"
+};
+
+function when(iso) {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function codeNote(req) {
+  const expires = Date.parse(req.codeExpiresAt || "");
+  if (req.status === "completed") return "password changed";
+  if (req.status === "closed") return "closed";
+  if (!Number.isFinite(expires)) return "no code issued yet";
+  if (expires <= Date.now()) return "code expired — send a new one";
+  return `${req.mailDelivered === false ? "email failed" : "code emailed"} · live until ${new Date(expires).toLocaleTimeString()}`;
+}
+
 export default function AdminMail() {
   const { session, toast, isAdmin } = useApp();
   const [requests, setRequests] = useState([]);
   const [revealed, setRevealed] = useState({});
+  const [filter, setFilter] = useState("open");
+  const [busyRequest, setBusyRequest] = useState("");
   const [mail, setMail] = useState(null);
   const [form, setForm] = useState(EMPTY_MAIL_FORM);
   const [stored, setStored] = useState({ relayKey: false, smtpPass: false, brevoKey: false, mailtrapToken: false });
@@ -125,56 +167,179 @@ export default function AdminMail() {
     loadRequests();
   }, [loadRequests]);
 
+  const openCount = requests.filter(isOpenRequest).length;
+  const finishedCount = requests.length - openCount;
+  const visibleRequests = useMemo(
+    () =>
+      requests.filter((req) =>
+        filter === "all" ? true : filter === "open" ? isOpenRequest(req) : !isOpenRequest(req)
+      ),
+    [filter, requests]
+  );
+
+  const sendCode = useCallback(
+    async (req) => {
+      setBusyRequest(req.id);
+      const res = await issueRecoveryCode(req.id, session.authToken);
+      setBusyRequest("");
+      if (res && res.ok && res.code) setRevealed((prev) => ({ ...prev, [req.id]: res.code }));
+      if (res && res.ok && res.sent) toast(`Recovery code emailed to ${req.email} via ${res.provider}.`);
+      else if (res && res.ok)
+        toast(mailFailureMessage(res.error, "Email delivery failed — read the code in the row and hand it over."));
+      else toast((res && res.error) || "Could not issue a code.");
+      loadRequests();
+    },
+    [loadRequests, session, toast]
+  );
+
+  const copyCode = useCallback(
+    async (req) => {
+      try {
+        await navigator.clipboard.writeText(revealed[req.id]);
+        toast("Code copied.");
+      } catch {
+        toast("Copy failed — select the digits and copy them.");
+      }
+    },
+    [revealed, toast]
+  );
+
+  const closeRequest = useCallback(
+    async (req) => {
+      setBusyRequest(req.id);
+      const res = await closeRecoveryRequest(req.id, session.authToken);
+      setBusyRequest("");
+      if (!res || res.ok === false) toast((res && res.error) || "Could not close this request.");
+      loadRequests();
+    },
+    [loadRequests, session, toast]
+  );
+
+  const deleteRequest = useCallback(
+    async (req) => {
+      setBusyRequest(req.id);
+      const res = await deleteRecoveryRequest(req.id, session.authToken);
+      setBusyRequest("");
+      if (!res || res.ok === false) {
+        toast((res && res.error) || "Could not delete this request.");
+        return;
+      }
+      setRequests((prev) => prev.filter((item) => item.id !== req.id));
+      setRevealed((prev) => {
+        const next = { ...prev };
+        delete next[req.id];
+        return next;
+      });
+      toast(isOpenRequest(req) ? `Deleted — the code for ${req.email} no longer works.` : "Recovery request deleted.");
+    },
+    [session, toast]
+  );
+
+  const clearFinished = useCallback(async () => {
+    setBusyRequest("clear");
+    const res = await clearFinishedRecoveryRequests(session.authToken);
+    setBusyRequest("");
+    if (!res || res.ok === false) {
+      toast((res && res.error) || "Could not clear the finished requests.");
+      return;
+    }
+    toast(res.removed ? `Removed ${res.removed} finished ${res.removed === 1 ? "request" : "requests"}.` : "Nothing to clear.");
+    loadRequests();
+  }, [loadRequests, session, toast]);
+
   return (
     <div className="d-flex flex-column gap-3">
-      {requests.length ? (
-        <div className="card p-3">
-          <h3 className="h6 mb-2">Password recovery requests</h3>
+      <div className="card p-3">
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <h3 className="h6 mb-0">Password recovery requests</h3>
+          {openCount ? <span className="badge text-bg-warning rounded-pill">{openCount} waiting</span> : null}
+          <div className="btn-group btn-group-sm">
+            {["open", "finished", "all"].map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={`btn btn-sm py-0 text-capitalize ${filter === key ? "btn-soft" : "btn-outline-secondary"}`}
+                onClick={() => setFilter(key)}
+              >
+                {key} ({key === "open" ? openCount : key === "finished" ? finishedCount : requests.length})
+              </button>
+            ))}
+          </div>
+          <span className="flex-grow-1" />
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary py-0"
+            disabled={!finishedCount || busyRequest === "clear"}
+            onClick={clearFinished}
+          >
+            {busyRequest === "clear" ? "Clearing…" : "Clear finished"}
+          </button>
+        </div>
+
+        {visibleRequests.length ? (
           <ul className="list-unstyled mb-0 d-flex flex-column gap-2">
-            {requests.map((req) => (
+            {visibleRequests.map((req) => (
               <li key={req.id} className="d-flex flex-wrap align-items-center gap-2 small">
-                <strong>{req.name || req.email}</strong>
-                <span className="text-secondary">{req.status}</span>
-                <span className="text-secondary">
-                  {req.codeSentAt
-                    ? `code emailed ${new Date(req.codeSentAt).toLocaleTimeString()}`
-                    : req.mailDelivered === false
-                    ? "email failed — code only here"
-                    : "code not issued"}
+                <div style={{ minWidth: 200 }}>
+                  <div className="fw-semibold">{req.name || req.email}</div>
+                  <div className="text-secondary">
+                    {req.email} · asked {when(req.createdAt)}
+                  </div>
+                </div>
+                <span className={`badge rounded-pill ${STATUS_TONE[req.status] || "text-bg-secondary"}`}>
+                  {STATUS_LABEL[req.status] || req.status}
+                </span>
+                <span className="text-secondary" title={req.mailError || undefined}>
+                  {codeNote(req)}
                 </span>
                 {revealed[req.id] ? (
-                  <span className="badge text-bg-warning font-monospace">{revealed[req.id]}</span>
+                  <>
+                    <span className="badge text-bg-warning font-monospace">{revealed[req.id]}</span>
+                    <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={() => copyCode(req)}>
+                      Copy
+                    </button>
+                  </>
                 ) : null}
                 <span className="flex-grow-1" />
+                {isOpenRequest(req) ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-soft py-0"
+                      disabled={busyRequest === req.id}
+                      onClick={() => sendCode(req)}
+                    >
+                      {busyRequest === req.id ? "Sending…" : req.codeSentAt ? "Resend code" : "Send code"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary py-0"
+                      disabled={busyRequest === req.id}
+                      onClick={() => closeRequest(req)}
+                    >
+                      Close
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
-                  className="btn btn-sm btn-soft py-0"
-                  onClick={async () => {
-                    const res = await issueRecoveryCode(req.id, session.authToken);
-                    if (res && res.ok && res.code) setRevealed((prev) => ({ ...prev, [req.id]: res.code }));
-                    if (res && res.ok && res.sent) toast(`Recovery code emailed to ${req.email} via ${res.provider}.`);
-                    else if (res && res.ok) toast(mailFailureMessage(res.error, "Email delivery failed — read the code in the list and hand it over."));
-                    else toast((res && res.error) || "Could not issue a code.");
-                    loadRequests();
-                  }}
+                  className="btn btn-sm btn-outline-danger py-0"
+                  disabled={busyRequest === req.id}
+                  onClick={() => deleteRequest(req)}
                 >
-                  Issue code
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-secondary py-0"
-                  onClick={async () => {
-                    await closeRecoveryRequest(req.id, session.authToken);
-                    loadRequests();
-                  }}
-                >
-                  Close
+                  Delete
                 </button>
               </li>
             ))}
           </ul>
-        </div>
-      ) : null}
+        ) : (
+          <p className="small text-secondary mb-0">
+            {filter === "open"
+              ? "No request is waiting. New reset requests land here the moment a student asks."
+              : "Nothing in this list."}
+          </p>
+        )}
+      </div>
 
       <div className="card p-3">
         <div className="d-flex flex-wrap align-items-center gap-2 mb-1">

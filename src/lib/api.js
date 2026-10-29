@@ -320,6 +320,20 @@ export function closeRecoveryRequest(requestId, session) {
   });
 }
 
+export function deleteRecoveryRequest(requestId, session) {
+  return request(`/api/admin/password-recovery-requests/${encodeURIComponent(requestId)}`, {
+    method: "DELETE",
+    headers: authHeaders(session)
+  });
+}
+
+export function clearFinishedRecoveryRequests(session) {
+  return request("/api/admin/password-recovery-requests/clear", {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
 export function getMailStatus(session) {
   return request("/api/admin/mail-status", { headers: authHeaders(session) });
 }

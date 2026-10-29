@@ -2774,6 +2774,41 @@ export async function createApp() {
     res.json({ ok: true });
   });
 
+  // Removing the row is the revoke: the code hash lives on the request, so deleting an open
+  // request kills the code with it. The archive is the admin's to keep tidy.
+  app.delete("/api/admin/password-recovery-requests/:requestId", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const before = dbState.passwordRecoveryRequests.length;
+    dbState.passwordRecoveryRequests = dbState.passwordRecoveryRequests.filter(
+      (request) => request.id !== req.params.requestId
+    );
+    if (dbState.passwordRecoveryRequests.length === before) {
+      res.status(404).json({ ok: false, error: "This recovery request no longer exists." });
+      return;
+    }
+    saveDatabase(dbState);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/admin/password-recovery-requests/clear", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const open = dbState.passwordRecoveryRequests.filter(
+      (request) => request.status === "pending" || request.status === "code-issued"
+    );
+    const removed = dbState.passwordRecoveryRequests.length - open.length;
+    dbState.passwordRecoveryRequests = open;
+    saveDatabase(dbState);
+    res.json({ ok: true, removed });
+  });
+
   app.get("/api/admin/mail-status", (req, res) => {
     const session = verifyRequestSession(req);
     if (!session || session.role !== "admin") {
