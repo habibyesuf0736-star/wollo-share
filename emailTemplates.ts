@@ -119,7 +119,7 @@ export function recoveryCodeEmail(input: {
 
   const bodyHtml = [
     `<p style="margin:0 0 16px 0;">Hi ${escapeHtml(name)},</p>`,
-    `<p style="margin:0 0 4px 0;">Use this code to finish resetting the password for <strong style="color:${BRAND.ink};">${escapeHtml(input.email)}</strong>.</p>`,
+    `<p style="margin:0 0 4px 0;">Use this code to finish resetting the password on your <strong style="color:${BRAND.ink};">Wollo Share</strong> account.</p>`,
     codeBlock(input.code),
     `<p style="margin:0 0 6px 0;font-size:14px;color:${BRAND.muted};">Expires in ${input.minutesLeft} minutes &middot; single use</p>`,
     divider(),
@@ -150,7 +150,7 @@ export function signupCodeEmail(input: {
     `Hi ${name},`,
     "",
     `Your Wollo Share verification code is ${input.code}.`,
-    `Enter it on the "Confirm your email" step to open ${input.email}.`,
+    `Enter it on the "Confirm your email" step to open your Wollo Share account.`,
     `It expires in ${input.minutesLeft} minutes.`,
     "If you did not create this account, ignore this email.",
     "",
@@ -159,7 +159,7 @@ export function signupCodeEmail(input: {
 
   const bodyHtml = [
     `<p style="margin:0 0 16px 0;">Hi ${escapeHtml(name)},</p>`,
-    `<p style="margin:0 0 4px 0;">Enter this code to finish creating the account for <strong style="color:${BRAND.ink};">${escapeHtml(input.email)}</strong>.</p>`,
+    `<p style="margin:0 0 4px 0;">Enter this code to finish creating your <strong style="color:${BRAND.ink};">Wollo Share</strong> account.</p>`,
     codeBlock(input.code),
     `<p style="margin:0 0 6px 0;font-size:14px;color:${BRAND.muted};">Expires in ${input.minutesLeft} minutes</p>`,
     divider(),
@@ -199,7 +199,7 @@ export function signInCodeEmail(input: {
 
   const bodyHtml = [
     `<p style="margin:0 0 16px 0;">Hi ${escapeHtml(name)},</p>`,
-    `<p style="margin:0 0 4px 0;">Enter this code to finish signing in to <strong style="color:${BRAND.ink};">${escapeHtml(input.email)}</strong>.</p>`,
+    `<p style="margin:0 0 4px 0;">Enter this code to finish signing in to your <strong style="color:${BRAND.ink};">Wollo Share</strong> account.</p>`,
     codeBlock(input.code),
     `<p style="margin:0 0 6px 0;font-size:14px;color:${BRAND.muted};">Expires in ${input.minutesLeft} minutes</p>`,
     divider(),
