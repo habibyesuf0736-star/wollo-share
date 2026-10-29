@@ -28,7 +28,7 @@ export const PLANS = [
 ];
 
 export default function UpgradeGateModal() {
-  const { gate, closeGate, setGate, downloadStatus, downloadPolicy, mySubmissions, session, goPremium } = useApp();
+  const { gate, closeGate, setGate, downloadStatus, downloadPolicy, mySubmissions, session, goPremium, ads } = useApp();
   const open = Boolean(gate && gate.type === "upgrade");
   if (!open) return null;
 
@@ -46,6 +46,13 @@ export default function UpgradeGateModal() {
       : downloadPolicy.adSeconds > 0
       ? `Premium downloads instantly. Free waits ${downloadPolicy.adSeconds} seconds.`
       : "Premium downloads instantly. Free spends one download credit.";
+
+  // The same administrator-written advert the library shows. Pausing it leaves the gate
+  // with its own campaign rather than an empty box, since this panel is the offer itself.
+  const promo = ads.find((ad) => ad.placement === "premium");
+  const livePromo = promo && promo.active !== false ? promo : null;
+  const promoBadge = (livePromo && livePromo.badge) || "Advertisement · Wollo Share Premium";
+  const promoTitle = (livePromo && livePromo.title) || "Unlock the whole library — no sponsor spots, no counting.";
 
   return (
     <Modal
@@ -65,13 +72,13 @@ export default function UpgradeGateModal() {
         <div className="premium-ad card border-0 shadow-sm overflow-hidden">
           <div className="card-body p-3 p-md-4">
             <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
-              <span className="badge text-bg-dark rounded-pill">Advertisement · Wollo Share Premium</span>
+              <span className="badge text-bg-dark rounded-pill">{promoBadge}</span>
               <span className="small text-secondary">
                 <Sparkles size={13} className="me-1 align-text-bottom" aria-hidden="true" />
                 {session ? "Your account is on the free plan" : "Sign in to activate a plan"}
               </span>
             </div>
-            <h4 className="h5 mt-3 mb-1">Unlock the whole library — no sponsor spots, no counting.</h4>
+            <h4 className="h5 mt-3 mb-1">{promoTitle}</h4>
             <p className="text-secondary small mb-3">{waitLine}</p>
             <div className="row g-2 g-md-3">
               {PLANS.map((plan) => (

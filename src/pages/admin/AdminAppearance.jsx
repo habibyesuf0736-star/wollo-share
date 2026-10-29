@@ -396,6 +396,11 @@ export default function AdminAppearance() {
                 <option value="footer">Footer</option>
                 <option value="premium">Premium promo (replaces the plan advert)</option>
               </select>
+              <div className="form-text">
+                {adForm.placement === "premium"
+                  ? "Shown to free accounts in the library and as the banner in the plans window. Pause it to hide the advert; leave Message blank to keep the automatic line."
+                  : "Pick Premium promo to write the plan advert students see instead of the Evangadi pack."}
+              </div>
             </div>
           </div>
 
