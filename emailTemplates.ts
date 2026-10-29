@@ -52,7 +52,7 @@ function layout(input: { preheader: string; title: string; bodyHtml: string; foo
           <td style="padding:0 4px 18px 4px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;background:${BRAND.primary};border-radius:12px;color:${BRAND.white};font-family:${FONT};font-size:15px;font-weight:700;letter-spacing:0.04em;">WS</td>
+                <td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;"><img src="https://wollo-share.vercel.app/wollo-university-emblem.jpg" width="40" height="40" alt="Wollo University" style="display:block;width:40px;height:40px;border:0;border-radius:12px;" /></td>
                 <td style="padding-left:12px;font-family:${FONT};">
                   <div style="font-size:17px;font-weight:700;color:${BRAND.ink};letter-spacing:-0.01em;">Wollo Share</div>
                   <div style="font-size:12px;color:${BRAND.muted};padding-top:2px;">Wollo University &middot; Course Library</div>
