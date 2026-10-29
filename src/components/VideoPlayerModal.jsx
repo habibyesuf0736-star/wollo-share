@@ -257,7 +257,7 @@ export default function VideoPlayerModal() {
       open
       onClose={() => setVideoTarget(null)}
       title={mat.name}
-      subtitle={`${course.name} · ${mat.year || ""} ${mat.semester || ""} · lesson ${position + 1} of ${lessons.length || 1}`}
+      subtitle={`${course.name} · ${semesterName(mat.semester || "First Semester")} · lesson ${position + 1} of ${lessons.length || 1}`}
       size="wide"
     >
       <div className="row g-3">

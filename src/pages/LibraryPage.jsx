@@ -14,9 +14,9 @@ import { matchDepartmentPrograms, normalizeDepartment, isProgramCourse } from ".
 import {
   courseAverageRating,
   doesDocumentMatchQuery,
-  getCourseSemesterEntries,
   initialsOf,
-  sanitizeCourseCode
+  sanitizeCourseCode,
+  semesterName
 } from "../lib/utils.js";
 
 const TOPIC_FILTERS = ["All", "Video Lectures", "Lecture Notes", "Past Exams & Quizzes", "Lab Manuals", "Slides & Presentations", "Assignments & Projects"];
@@ -34,21 +34,6 @@ function splitHeroTitle(title) {
 
 function visibleFileCount(course, canEdit) {
   return (course.materials || []).filter((m) => canEdit || !m.hidden).length;
-}
-
-function programYears(course) {
-  const declared = Array.isArray(course.years) ? course.years.filter(Boolean) : [];
-  if (declared.length) return declared;
-  const duration = Number(course.durationYears) || 0;
-  if (duration > 0) return Array.from({ length: duration }, (_, index) => `Year ${index + 1}`);
-  const observed = Array.from(new Set([course.defaultYear, ...(course.materials || []).map((m) => m.year)].filter(Boolean)));
-  return observed.length ? observed.sort() : ["Year 1"];
-}
-
-function countFilesInYear(course, year, canEdit) {
-  return (course.materials || []).filter(
-    (m) => (canEdit || !m.hidden) && (m.year || course.defaultYear || "Year 1") === year
-  ).length;
 }
 
 function sortCourses(list, sort, canEdit) {
@@ -107,10 +92,6 @@ export default function LibraryPage() {
   }, [accessible, canEdit]);
 
   const activeCollege = browse.college ? collegeGroups.find((group) => group.name === browse.college) || null : null;
-  const activeCourse =
-    activeCollege && browse.courseId
-      ? activeCollege.courses.find((course) => course.id === browse.courseId) || null
-      : null;
 
   const filteredCourses = useMemo(() => {
     const list = accessible.filter((course) => {
@@ -151,7 +132,7 @@ export default function LibraryPage() {
         if (!canEdit && mat.hidden) return;
         if (topic !== "All" && (mat.subcategory || "Lecture Notes") !== topic) return;
         if (docFormat !== "All" && (mat.type || "").toLowerCase() !== docFormat.toLowerCase()) return;
-        if (docSemester !== "All" && (mat.semester || "First Semester") !== docSemester) return;
+        if (docSemester !== "All" && semesterName(mat.semester || "First Semester") !== docSemester) return;
         if (needle && !doesDocumentMatchQuery(course, mat, needle)) return;
         rows.push({ course, mat });
       });
@@ -208,16 +189,6 @@ export default function LibraryPage() {
     setDocFormat("All");
     setDocSemester("All");
   };
-
-  const yearCards = useMemo(() => {
-    if (!activeCourse) return [];
-    const entries = getCourseSemesterEntries(activeCourse);
-    return programYears(activeCourse).map((year) => ({
-      year,
-      files: countFilesInYear(activeCourse, year, canEdit),
-      semesters: entries.filter((entry) => entry.year === year).length
-    }));
-  }, [activeCourse, canEdit]);
 
   const renderColleges = () => (
     <>
@@ -293,17 +264,15 @@ export default function LibraryPage() {
         ) : (
           <ul className="browse-list">
             {programs.map((course) => {
-              const years = programYears(course);
-              const span = years.length > 1 ? `${years[0]} – ${years[years.length - 1]}` : years[0];
               const files = visibleFileCount(course, canEdit);
               return (
                 <li key={course.id}>
-                  <button type="button" className="browse-row" onClick={() => goBrowse({ courseId: course.id })}>
+                  <button type="button" className="browse-row" onClick={() => goSublist(course.id)}>
                     <span className="browse-code">{sanitizeCourseCode(course.icon, course.name)}</span>
                     <span className="browse-main">
                       <span className="browse-title">{course.name}</span>
                       <span className="browse-meta">
-                        {span} · {files} {files === 1 ? "file" : "files"}
+                        {files} {files === 1 ? "file" : "files"}
                         {course.restricted ? " · Paid / assigned access" : ""}
                       </span>
                     </span>
@@ -316,51 +285,6 @@ export default function LibraryPage() {
             })}
           </ul>
         )}
-      </>
-    );
-  };
-
-  const renderYears = () => {
-    const allFiles = visibleFileCount(activeCourse, canEdit);
-    const semesterCount = getCourseSemesterEntries(activeCourse).length;
-    return (
-      <>
-        <div className="ws-dept mb-3">
-          <div className="d-flex flex-wrap justify-content-between align-items-start gap-3">
-            <div style={{ minWidth: 0, maxWidth: 760 }}>
-              <span className="ws-hero-eyebrow mb-1">{activeCollege.name}</span>
-              <h2 className="h4 mt-2 mb-1">{activeCourse.name}</h2>
-              <p className="small text-secondary mb-0">{activeCourse.description}</p>
-            </div>
-            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => goSublist(activeCourse.id)}>
-              Open full program <ArrowRight size={14} className="ms-1 align-text-bottom" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        <div className="year-grid">
-          {yearCards.map((card) => (
-            <button key={card.year} type="button" className="year-tile" onClick={() => goSublist(activeCourse.id, "", card.year)}>
-              <span className="year-label">{card.year}</span>
-              <span className="year-meta">
-                {card.files} {card.files === 1 ? "file" : "files"} · {card.semesters}{" "}
-                {card.semesters === 1 ? "semester" : "semesters"}
-              </span>
-              <span className="year-go d-inline-flex align-items-center gap-1">
-                View materials <ArrowRight size={12} aria-hidden="true" />
-              </span>
-            </button>
-          ))}
-          <button type="button" className="year-tile year-all" onClick={() => goSublist(activeCourse.id)}>
-            <span className="year-label">All years</span>
-            <span className="year-meta">
-              {allFiles} {allFiles === 1 ? "file" : "files"} · {semesterCount} semesters
-            </span>
-            <span className="year-go d-inline-flex align-items-center gap-1">
-              View everything <ArrowRight size={12} aria-hidden="true" />
-            </span>
-          </button>
-        </div>
       </>
     );
   };
@@ -411,7 +335,7 @@ export default function LibraryPage() {
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  onClick={() => goBrowse({ college: departmentPanel.college, courseId: departmentPanel.program.id })}
+                  onClick={() => goSublist(departmentPanel.program.id)}
                 >
                   Open my program
                 </button>
@@ -471,7 +395,7 @@ export default function LibraryPage() {
                       key={course.id}
                       type="button"
                       className="dept-chip"
-                      onClick={() => goBrowse({ college: course.college, courseId: course.id })}
+                      onClick={() => goSublist(course.id)}
                     >
                       <span className="dept-chip-name">{course.name}</span>
                       <span className="dept-chip-meta">
@@ -545,17 +469,7 @@ export default function LibraryPage() {
             Colleges
           </button>
           <span aria-hidden="true">/</span>
-          {activeCourse ? (
-            <>
-              <button type="button" className="crumb" onClick={() => goBrowse({ courseId: "" })}>
-                {activeCollege.name}
-              </button>
-              <span aria-hidden="true">/</span>
-              <span className="crumb current">{activeCourse.name}</span>
-            </>
-          ) : (
-            <span className="crumb current">{activeCollege.name}</span>
-          )}
+          <span className="crumb current">{activeCollege.name}</span>
         </nav>
       ) : null}
 
@@ -627,8 +541,6 @@ export default function LibraryPage() {
             </div>
           )}
         </>
-      ) : activeCourse ? (
-        <section aria-label={`${activeCourse.name} years`}>{renderYears()}</section>
       ) : activeCollege ? (
         <section aria-label={`${activeCollege.name} programs`}>{renderPrograms()}</section>
       ) : (

@@ -428,9 +428,9 @@ export function AppProvider({ children }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
   const goSublist = useCallback(
-    (courseId, query = "", year = "") => {
+    (courseId, query = "") => {
       clearStaffHash();
-      setView({ name: "sublist", courseId, query, year });
+      setView({ name: "sublist", courseId, query });
       const course = coursesData.find((item) => item.id === courseId);
       setCoursePath(course ? courseSlug(course) : "");
       window.scrollTo({ top: 0, behavior: "smooth" });

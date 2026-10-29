@@ -38,9 +38,22 @@ export function getCourseSemesterEntries(course) {
   });
 }
 
+// Programs are browsed as one flat set of files, so a stored label such as
+// "Year 2 · First Semester" is shown as just "First Semester".
+export function semesterName(label) {
+  return String(label || "First Semester").replace(/^Year \d+ · /, "").trim() || "First Semester";
+}
+
 export function formatMaterialTerm(material) {
-  const semester = String(material.semester || "First Semester").replace(/^Year \d+ · /, "");
-  return `${material.year || "Year 1"} · ${semester}`;
+  return semesterName(material.semester);
+}
+
+// Older program blurbs end in "— 4 years · 8 semesters". Programs are browsed without years,
+// so that tail is dropped when the text reaches a student screen.
+export function programBlurb(course) {
+  return String(course?.description || "")
+    .replace(/\s*[—–-]\s*\d+\s*years?\s*·\s*\d+\s*semesters?\s*\.?\s*$/i, "")
+    .trim();
 }
 
 export function doesDocumentMatchQuery(course, mat, rawQuery) {
@@ -214,14 +227,6 @@ export function courseAverageRating(course) {
   return rated.reduce((sum, m) => sum + m.ratingAvg, 0) / rated.length;
 }
 
-export function courseSemesterSummary(course) {
-  const durationYears = Number(course.durationYears) || 0;
-  if (Array.isArray(course.years) && course.years.length === 1 && durationYears > 1) return course.years[0];
-  if (durationYears > 1) return `Year 1–${durationYears} · ${durationYears * 2} Semesters`;
-  if (durationYears === 1) return "Year 1 · 2 Semesters";
-  const years = new Set([course.defaultYear, ...(course.materials || []).map((m) => m.year)].filter(Boolean));
-  return Array.from(years).sort().join(", ") || "All Years";
-}
 
 export function fileCountsByType(course) {
   const counts = {};

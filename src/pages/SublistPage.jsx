@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, FileText, Layers, Pencil, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, Pencil, Plus, Search, X } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import AdSlot from "../components/AdSlot.jsx";
 import MaterialRow from "../components/MaterialRow.jsx";
@@ -8,7 +8,7 @@ import CourseFormModal from "../components/CourseFormModal.jsx";
 import MaterialFormModal from "../components/MaterialFormModal.jsx";
 import SideMaterialModal from "../components/SideMaterialModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
-import { courseSemesterSummary, doesDocumentMatchQuery, getCourseSemesterEntries, sanitizeCourseCode } from "../lib/utils.js";
+import { doesDocumentMatchQuery, getCourseSemesterEntries, programBlurb, sanitizeCourseCode, semesterName } from "../lib/utils.js";
 
 const FORMATS = ["All", "PDF", "PPT", "DOC", "XLS", "Video", "Other"];
 
@@ -28,7 +28,6 @@ export default function SublistPage() {
   } = useApp();
 
   const course = coursesData.find((c) => c.id === view.courseId);
-  const [year, setYear] = useState(view.year || "All");
   const [semester, setSemester] = useState("All");
   const [subcategory, setSubcategory] = useState("All");
   const [format, setFormat] = useState("All");
@@ -38,31 +37,30 @@ export default function SublistPage() {
   const [courseModalOpen, setCourseModalOpen] = useState(false);
   const [confirm, setConfirm] = useState({ open: false, materialId: null });
 
-  const entries = useMemo(() => (course ? getCourseSemesterEntries(course) : []), [course]);
-  const years = useMemo(() => Array.from(new Set(entries.map((e) => e.year))), [entries]);
-  const yearOptions = useMemo(
-    () => (year !== "All" && !years.includes(year) ? [...years, year] : years),
-    [year, years]
-  );
-  const semestersForYear = useMemo(
-    () => Array.from(new Set(entries.filter((e) => year === "All" || e.year === year).map((e) => e.sem))),
-    [entries, year]
-  );
+  // A program is one flat set of files; its semesters are shown by name only, without
+  // the year prefix some stored labels still carry.
+  const semesterOptions = useMemo(() => {
+    if (!course) return [];
+    const names = new Set(getCourseSemesterEntries(course).map((entry) => semesterName(entry.sem)));
+    (course.materials || []).forEach((mat) => {
+      if (mat.semester) names.add(semesterName(mat.semester));
+    });
+    return Array.from(names);
+  }, [course]);
 
   const materials = useMemo(() => {
     if (!course) return [];
     const needle = query.trim().toLowerCase();
     const list = (course.materials || []).filter((mat) => {
       if (!canEdit && mat.hidden) return false;
-      if (year !== "All" && (mat.year || course.defaultYear || "Year 1") !== year) return false;
-      if (semester !== "All" && (mat.semester || "First Semester") !== semester) return false;
+      if (semester !== "All" && semesterName(mat.semester || "First Semester") !== semester) return false;
       if (subcategory !== "All" && (mat.subcategory || "Lecture Notes") !== subcategory) return false;
       if (format !== "All" && (mat.type || "").toLowerCase() !== format.toLowerCase()) return false;
       if (needle && !doesDocumentMatchQuery(course, mat, needle)) return false;
       return true;
     });
     return list;
-  }, [canEdit, course, format, query, semester, subcategory, year]);
+  }, [canEdit, course, format, query, semester, subcategory]);
 
   if (!course) {
     return (
@@ -82,17 +80,17 @@ export default function SublistPage() {
 
   const visibleCount = (course.materials || []).filter((m) => canEdit || !m.hidden).length;
   const subcategories = course.subcategories && course.subcategories.length ? course.subcategories : ["Lecture Notes"];
-  const backToYears = browse.courseId === course.id;
+  const backToCollege = Boolean(browse.college) && browse.college === course.college;
 
   return (
     <div className="ws-page">
       <button
         type="button"
         className="btn btn-sm btn-outline-secondary mb-3"
-        onClick={backToYears ? () => goBrowse({ courseId: course.id }) : goLibrary}
+        onClick={backToCollege ? () => goBrowse({ college: course.college, courseId: "" }) : goLibrary}
       >
         <ArrowLeft size={14} className="me-1 align-text-bottom" aria-hidden="true" />
-        {backToYears ? "Back to years" : "Back to library"}
+        {backToCollege ? "Back to programs" : "Back to library"}
       </button>
 
       <section className="card ws-course-head p-3 p-md-4 mb-3">
@@ -102,16 +100,12 @@ export default function SublistPage() {
               {sanitizeCourseCode(course.icon, course.name)} · {course.college || "Wollo University"}
             </span>
             <h1 className="ws-course-title mt-2 mb-1">{course.name}</h1>
-            <p className="text-secondary mb-2" style={{ maxWidth: 820 }}>
-              {course.description}
-            </p>
+            {programBlurb(course) ? (
+              <p className="text-secondary mb-2" style={{ maxWidth: 820 }}>
+                {programBlurb(course)}
+              </p>
+            ) : null}
             <div className="d-flex flex-wrap gap-2">
-              {year !== "All" ? (
-                <span className="tag format">
-                  <Layers size={11} aria-hidden="true" /> {year}
-                </span>
-              ) : null}
-              <span className="tag">{courseSemesterSummary(course)}</span>
               <span className="tag format">
                 <FileText size={11} aria-hidden="true" /> {visibleCount} files
               </span>
@@ -125,7 +119,7 @@ export default function SublistPage() {
           </div>
           {canEdit ? (
             <div className="d-flex flex-column gap-2">
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => setMaterialModal({ open: true, materialId: null, preset: { year: year !== "All" ? year : null, semester: semester !== "All" ? semester : null, subcategory: subcategory !== "All" ? subcategory : null } })}>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setMaterialModal({ open: true, materialId: null, preset: { semester: semester !== "All" ? semester : null, subcategory: subcategory !== "All" ? subcategory : null } })}>
                 <Plus size={14} className="me-1 align-text-bottom" aria-hidden="true" /> Add material
               </button>
               <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setCourseModalOpen(true)}>
@@ -140,7 +134,7 @@ export default function SublistPage() {
 
       <section className="ws-toolbar mb-3">
         <div className="row g-2">
-          <div className="col-12 col-md-5">
+          <div className="col-12 col-md-6">
             <label className="form-label small fw-semibold" htmlFor="matSearch">
               Search inside {pageTexts.siteTitle || "Wollo Share"} · {course.name}
             </label>
@@ -162,16 +156,7 @@ export default function SublistPage() {
               ) : null}
             </span>
           </div>
-          <div className="col-6 col-md-2">
-            <label className="form-label small fw-semibold">Academic year</label>
-            <select className="form-select" value={year} onChange={(e) => setYear(e.target.value)}>
-              <option value="All">All years</option>
-              {yearOptions.map((y) => (
-                <option key={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-6 col-md-2">
+          <div className="col-6 col-md-3">
             <label className="form-label small fw-semibold">Category</label>
             <select className="form-select" value={subcategory} onChange={(e) => setSubcategory(e.target.value)}>
               <option value="All">All categories</option>
@@ -180,7 +165,7 @@ export default function SublistPage() {
               ))}
             </select>
           </div>
-          <div className="col-12 col-md-3">
+          <div className="col-6 col-md-3">
             <label className="form-label small fw-semibold">Format</label>
             <select className="form-select" value={format} onChange={(e) => setFormat(e.target.value)}>
               {FORMATS.map((f) => (
@@ -196,9 +181,8 @@ export default function SublistPage() {
           <button type="button" className={`chip ${semester === "All" ? "active" : ""}`} onClick={() => setSemester("All")}>
             All semesters
           </button>
-          {semestersForYear.map((sem) => (
+          {semesterOptions.map((sem) => (
             <button key={sem} type="button" className={`chip ${semester === sem ? "active" : ""}`} onClick={() => setSemester(sem)}>
-              {year === "All" ? "" : `${year} · `}
               {sem}
             </button>
           ))}
@@ -208,9 +192,8 @@ export default function SublistPage() {
       <div className="d-flex justify-content-between align-items-center mb-2">
         <span className="small text-secondary">
           <strong>{materials.length}</strong> {materials.length === 1 ? "document" : "documents"}
-          {year !== "All" || semester !== "All" ? ` · ${year === "All" ? "All years" : year} · ${semester === "All" ? "both semesters" : semester}` : ""}
+          {semester !== "All" ? ` · ${semester}` : ""}
         </span>
-        <span className="small text-secondary mono">{getCourseSemesterEntries(course).length} semesters</span>
       </div>
 
       <div className="d-flex flex-column gap-2 material-stack">
@@ -227,7 +210,7 @@ export default function SublistPage() {
                     setMaterialModal({
                       open: true,
                       materialId: null,
-                      preset: { year: year !== "All" ? year : null, semester: semester !== "All" ? semester : null, subcategory: subcategory !== "All" ? subcategory : null }
+                      preset: { semester: semester !== "All" ? semester : null, subcategory: subcategory !== "All" ? subcategory : null }
                     })
                   }
                 >

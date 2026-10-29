@@ -41,7 +41,7 @@ function Shell() {
       <TopBar />
       <main id="main">
         <ErrorBoundary>
-          {view.name === "sublist" ? <SublistPage key={`${view.courseId}|${view.query || ""}|${view.year || ""}`} /> : null}
+          {view.name === "sublist" ? <SublistPage key={`${view.courseId}|${view.query || ""}`} /> : null}
           {view.name === "login" ? <LoginPage /> : null}
           {view.name === "deviceLogin" ? <DeviceLoginPage key={view.qrId} qrId={view.qrId} /> : null}
           {view.name === "profile" ? <ProfilePage /> : null}
