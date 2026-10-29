@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Modal from "./Modal.jsx";
 import { useApp } from "../store/AppContext.jsx";
-import { extractYouTubeVideoId } from "../lib/utils.js";
+import { extractYouTubeVideoId, semesterName } from "../lib/utils.js";
 import { loadYouTubeApi } from "../lib/youtube.js";
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];

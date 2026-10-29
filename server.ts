@@ -1002,6 +1002,8 @@ interface PasswordRecoveryRequest {
   failedAttempts: number;
   notificationSent?: boolean;
   codeSentAt?: string;
+  mailDelivered?: boolean;
+  mailError?: string;
 }
 
 // One desktop screen waiting to be signed in. The id is the only secret the desk
@@ -1701,19 +1703,24 @@ async function issueRecoveryCode(request: PasswordRecoveryRequest) {
   request.codeExpiresAt = new Date(Date.now() + RECOVERY_CODE_TTL_MS).toISOString();
   request.failedAttempts = 0;
   const delivery = await sendMail(buildRecoveryCodeMessage(code, request));
+  request.mailDelivered = delivery.ok;
   if (delivery.ok) {
     request.codeSentAt = new Date().toISOString();
+    delete request.mailError;
   } else {
-    // The code only exists in the recipient's inbox. If the mail did not leave,
-    // drop it rather than leaving a live code nobody can receive or see.
-    request.status = "pending";
-    delete request.codeHash;
-    delete request.codeExpiresAt;
-    delete request.codeSentAt;
-    console.error("Recovery code email failed:", delivery.error);
+    // Mail is often not configured yet, and a code that only ever lived in an inbox nobody
+    // can reach leaves the owner locked out of their own site. The code stays valid and is
+    // written to this server's log — which only the project owner can read — plus it can be
+    // revealed from Admin → Recovery requests. The public response never repeats it.
+    request.codeSentAt = undefined;
+    request.mailError = delivery.error || "no mail provider configured";
+    console.log(
+      `RECOVERY CODE ${code} for ${request.email} (request ${request.id}) — email delivery failed: ${request.mailError}. ` +
+      `Valid until ${request.codeExpiresAt}.`
+    );
   }
   saveDatabase(dbState);
-  return { ok: delivery.ok, provider: delivery.provider, error: delivery.error };
+  return { ok: delivery.ok, provider: delivery.provider, error: delivery.error, code };
 }
 
 export async function createApp() {
@@ -1862,11 +1869,25 @@ export async function createApp() {
       { path: "/premium", priority: "0.9", changefreq: "weekly" },
       { path: "/support", priority: "0.5", changefreq: "monthly" }
     ];
+    // The build-time prerender writes one page per program and deduplicates a repeated name by
+    // suffixing the course id; the sitemap has to name the same files or it 404s on the second
+    // "Physics" and leaves the real page uncrawled.
+    const seenPaths = new Set<string>();
+    const colleges = new Set<string>();
     for (const course of dbState.coursesData) {
       if (isEvangadiCourse(course)) continue;
-      const name = slug(course.name);
-      if (!name) continue;
-      urls.push({ path: `/c/${encodeURIComponent(name)}`, priority: "0.8", changefreq: "weekly" });
+      const college = slug(String(course.college || ""));
+      if (college) colleges.add(college);
+      const base = slug(course.name);
+      if (!base) continue;
+      let path = `/c/${encodeURIComponent(base)}`;
+      if (seenPaths.has(path)) path = `/c/${encodeURIComponent(`${base}-${slug(course.id) || String(course.id)}`)}`;
+      if (seenPaths.has(path)) continue;
+      seenPaths.add(path);
+      urls.push({ path, priority: "0.8", changefreq: "weekly" });
+    }
+    for (const college of colleges) {
+      urls.push({ path: `/college/${encodeURIComponent(college)}`, priority: "0.7", changefreq: "weekly" });
     }
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
@@ -2601,10 +2622,11 @@ export async function createApp() {
     }
     res.json({
       ok: true,
+      mailDeliverable: mailStatus().provider !== "none",
+      // One wording for every outcome: a per-account "the email bounced" reply would confirm
+      // which addresses are registered.
       message:
-        mailStatus().provider === "none"
-          ? "If this account exists, the administrator has been notified."
-          : "If this account exists, a recovery code was emailed to it. The code expires in 30 minutes."
+        "If this account exists, a 6-digit recovery code was created and is valid for 30 minutes. It is emailed when mail delivery works; if nothing arrives, the site administrator can open Admin → Email delivery, read the code in that request and hand it over."
     });
   });
 
@@ -2710,8 +2732,15 @@ export async function createApp() {
       ok: true,
       sent: delivery.ok,
       provider: delivery.provider,
-      expiresAt: recoveryRequest.codeSentAt ? recoveryRequest.codeExpiresAt : undefined,
-      error: delivery.ok ? undefined : delivery.error
+      mailDelivered: delivery.ok,
+      // Same door the signup code has: when mail cannot leave the server, the administrator
+      // reads the code here and passes it to the account owner by hand.
+      code: delivery.code,
+      expiresAt: recoveryRequest.codeExpiresAt,
+      error: delivery.ok ? undefined : delivery.error,
+      message: delivery.ok
+        ? `A recovery code was emailed to ${recoveryRequest.email}.`
+        : `Email delivery failed, so the code below is the only copy. Give it to ${recoveryRequest.email}.`
     });
   });
 
@@ -3268,7 +3297,7 @@ export async function createApp() {
         needsRecovery: true,
         email: openReset.email,
         error:
-          "You have a password reset in progress. Enter the 6-digit recovery code from your email and choose a new password to finish, then sign in with that password."
+          "You have a password reset in progress. Enter the 6-digit recovery code — it was emailed to this address, or read it from the open request in Admin → Email delivery — and choose a new password to finish, then sign in with that password."
       });
       return;
     }

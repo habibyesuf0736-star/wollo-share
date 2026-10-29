@@ -10,7 +10,7 @@
     "db:init": "node scripts/supabase-init.mjs",
     "db:push": "tsx scripts/supabase-sync.ts push",
     "db:pull": "tsx scripts/supabase-sync.ts pull",
-    "build": "vite build",
+    "build": "vite build && tsx scripts/prerender-seo.ts",
     "start": "tsx serveLocal.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

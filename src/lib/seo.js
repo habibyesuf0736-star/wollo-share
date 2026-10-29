@@ -80,7 +80,7 @@ export const LIBRARY_SEO = {
   path: "/",
   title: `${SITE_NAME} — Wollo University Course Materials, Past Exams & Notes PDFs`,
   description:
-    "Free Wollo University student library: download lecture notes, slide decks, past exam PDFs, lab manuals and assignment solutions by college, program, year and semester — from Common Freshman courses to graduation."
+    "Free Wollo University student library: download lecture notes, slide decks, past exam PDFs, lab manuals and assignment solutions by college and program — from Common Freshman courses to graduation."
 };
 
 export const PREMIUM_SEO = {

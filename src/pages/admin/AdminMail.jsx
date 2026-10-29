@@ -41,6 +41,7 @@ function mailFailureMessage(error, fallback) {
 export default function AdminMail() {
   const { session, toast, isAdmin } = useApp();
   const [requests, setRequests] = useState([]);
+  const [revealed, setRevealed] = useState({});
   const [mail, setMail] = useState(null);
   const [form, setForm] = useState(EMPTY_MAIL_FORM);
   const [stored, setStored] = useState({ relayKey: false, smtpPass: false, brevoKey: false, mailtrapToken: false });
@@ -135,21 +136,29 @@ export default function AdminMail() {
                 <strong>{req.name || req.email}</strong>
                 <span className="text-secondary">{req.status}</span>
                 <span className="text-secondary">
-                  {req.codeSentAt ? `code emailed ${new Date(req.codeSentAt).toLocaleTimeString()}` : "code not emailed"}
+                  {req.codeSentAt
+                    ? `code emailed ${new Date(req.codeSentAt).toLocaleTimeString()}`
+                    : req.mailDelivered === false
+                    ? "email failed — code only here"
+                    : "code not issued"}
                 </span>
+                {revealed[req.id] ? (
+                  <span className="badge text-bg-warning font-monospace">{revealed[req.id]}</span>
+                ) : null}
                 <span className="flex-grow-1" />
                 <button
                   type="button"
                   className="btn btn-sm btn-soft py-0"
                   onClick={async () => {
                     const res = await issueRecoveryCode(req.id, session.authToken);
+                    if (res && res.ok && res.code) setRevealed((prev) => ({ ...prev, [req.id]: res.code }));
                     if (res && res.ok && res.sent) toast(`Recovery code emailed to ${req.email} via ${res.provider}.`);
-                    else if (res && res.ok) toast(mailFailureMessage(res.error, "Email delivery failed — no code was sent."));
+                    else if (res && res.ok) toast(mailFailureMessage(res.error, "Email delivery failed — read the code in the list and hand it over."));
                     else toast((res && res.error) || "Could not issue a code.");
                     loadRequests();
                   }}
                 >
-                  Re-send code by email
+                  Issue code
                 </button>
                 <button
                   type="button"
