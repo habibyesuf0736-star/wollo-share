@@ -397,7 +397,7 @@ a {
 .form-control:focus,
 .form-select:focus {
   border-color: var(--accent);
-  background: var(--surface);
+  background-color: var(--surface);
   box-shadow: var(--ring);
 }
 .form-text {
