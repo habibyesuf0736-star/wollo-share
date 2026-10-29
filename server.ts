@@ -758,6 +758,8 @@ const DEFAULT_TEXTS = {
   welcomeDesc: "Course notes, slides, past exams and lab manuals — by college, year & semester.",
   coursesHeading: "Courses & Study Materials",
   footerText: "Wollo Share · University Course Materials Library",
+  loginTitle: "One account for the whole library",
+  loginLines: "",
   premiumPayment: ""
 };
 

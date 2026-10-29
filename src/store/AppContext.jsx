@@ -20,6 +20,8 @@ export const DEFAULT_TEXTS = {
   welcomeTitle: "Every Wollo University course material in one library",
   welcomeDesc: "Notes, exams, slides and manuals.",
   footerText: "Wollo Share · Built by Wollo University students, for Wollo University students.",
+  loginTitle: "One account for the whole library",
+  loginLines: "",
   premiumPayment: ""
 };
 

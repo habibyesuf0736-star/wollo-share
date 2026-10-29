@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useApp } from "../../store/AppContext.jsx";
+import { DEFAULT_TEXTS, useApp } from "../../store/AppContext.jsx";
 import { safeAdLink, AdCard, AD_STYLES } from "../../components/AdSlot.jsx";
 import { uniqueId } from "../../lib/utils.js";
 
@@ -41,6 +41,8 @@ export default function AdminAppearance() {
     footerText: "",
     welcomeTitle: "",
     welcomeDesc: "",
+    loginTitle: "",
+    loginLines: "",
     premiumPayment: "",
     primaryColor: "#1d624f",
     fontSize: "16px",
@@ -58,6 +60,8 @@ export default function AdminAppearance() {
       footerText: pageTexts.footerText || "",
       welcomeTitle: pageTexts.welcomeTitle || "",
       welcomeDesc: pageTexts.welcomeDesc || "",
+      loginTitle: pageTexts.loginTitle ?? DEFAULT_TEXTS.loginTitle,
+      loginLines: pageTexts.loginLines ?? DEFAULT_TEXTS.loginLines,
       premiumPayment: pageTexts.premiumPayment || "",
       primaryColor: appearanceSettings.primaryColor || "#1d624f",
       fontSize: appearanceSettings.fontSize || "16px",
@@ -76,6 +80,8 @@ export default function AdminAppearance() {
       footerText: brand.footerText,
       welcomeTitle: brand.welcomeTitle,
       welcomeDesc: brand.welcomeDesc,
+      loginTitle: brand.loginTitle,
+      loginLines: brand.loginLines,
       premiumPayment: brand.premiumPayment
     });
     commitAppearance({
@@ -159,6 +165,26 @@ export default function AdminAppearance() {
             <div className="col-12">
               <label className="form-label small fw-semibold">Hero description</label>
               <textarea className="form-control" rows={2} value={brand.welcomeDesc} onChange={(e) => setBrand({ ...brand, welcomeDesc: e.target.value })} />
+            </div>
+            <div className="col-12">
+              <label className="form-label small fw-semibold">Sign-in panel headline</label>
+              <input
+                className="form-control"
+                placeholder="One account for the whole library"
+                value={brand.loginTitle}
+                onChange={(e) => setBrand({ ...brand, loginTitle: e.target.value })}
+              />
+            </div>
+            <div className="col-12">
+              <label className="form-label small fw-semibold">Sign-in panel lines</label>
+              <textarea
+                className="form-control"
+                rows={3}
+                placeholder={"Notes, exams and slides.\nFree for verified students."}
+                value={brand.loginLines}
+                onChange={(e) => setBrand({ ...brand, loginLines: e.target.value })}
+              />
+              <p className="form-text">One line each, shown under the headline. Clear both to drop the dark panel and widen the form.</p>
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Footer text</label>

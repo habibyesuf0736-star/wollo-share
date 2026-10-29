@@ -14,7 +14,7 @@ import {
   Sparkles,
   User
 } from "lucide-react";
-import { useApp } from "../store/AppContext.jsx";
+import { DEFAULT_TEXTS, useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
 import PhoneField from "../components/PhoneField.jsx";
@@ -52,7 +52,8 @@ export default function LoginPage() {
     goAdmin,
     goSupport,
     isAdmin,
-    coursesData
+    coursesData,
+    pageTexts
   } = useApp();
   const [tab, setTab] = useState("signin");
   const [error, setError] = useState("");
@@ -342,14 +343,25 @@ export default function LoginPage() {
     if (key !== "signin") setTwoFactor({ identifier: "", email: "", code: "", minutesLeft: 10 });
   };
 
+  const loginTitle = String(pageTexts.loginTitle ?? DEFAULT_TEXTS.loginTitle).trim();
+  const loginLines = String(pageTexts.loginLines ?? DEFAULT_TEXTS.loginLines ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
   return (
     <div className="ws-page">
       <AnnouncementBanner />
 
-      <div className="ws-auth">
-        <aside className="ws-auth-aside">
-          <h1>One account for the whole library</h1>
-        </aside>
+      <div className={`ws-auth${loginTitle || loginLines.length ? "" : " is-single"}`}>
+        {loginTitle || loginLines.length ? (
+          <aside className="ws-auth-aside">
+            {loginTitle ? <h1>{loginTitle}</h1> : null}
+            {loginLines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </aside>
+        ) : null}
 
         <section className="ws-auth-form">
           <div className="ws-segmented mb-4" role="tablist">

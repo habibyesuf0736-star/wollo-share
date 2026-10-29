@@ -1972,6 +1972,11 @@ a {
 .ws-auth-aside > * {
   position: relative;
 }
+/* The dark panel is optional now that its copy is editable: with nothing in it the
+   sign-in form takes the whole card instead of leaving an empty column. */
+.ws-auth.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
 .ws-auth-aside h1 {
   font-size: clamp(21px, 2.2vw, 26px);
   color: #fff;
