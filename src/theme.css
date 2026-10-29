@@ -431,6 +431,31 @@ a {
   color: var(--muted);
   cursor: not-allowed;
 }
+/* Program and course names are long. The closed field is one line, so a name that
+   does not fit truncates instead of pushing the box to two lines and shoving the
+   row it sits in around. */
+.form-select {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Nothing chosen yet: the placeholder stays grey so an untouched field does not
+   read as an answer the student already gave. */
+.form-select:has(> option[value=""]:checked) {
+  color: var(--muted);
+}
+/* Bootstrap's small variant is overridden by the box above, so the compact metrics
+   have to be restated here: dense admin tables and the filter chips want a 32px
+   control, not the 40px default. */
+.form-select-sm {
+  min-height: 32px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  padding-right: 1.85rem;
+  font-size: 0.82rem;
+  background-size: 13px 13px;
+  background-position: right 0.55rem center;
+}
 /* A select whose value is still the empty placeholder reads as unfinished. */
 .form-select option[value=""] {
   color: var(--muted);
@@ -478,6 +503,9 @@ a {
     max-height: min(22rem, 60vh);
     color: var(--ink);
     font-family: inherit;
+    /* A 135-program list is the normal case here, so the scroll has to stay quiet. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-hover) transparent;
   }
   .form-select option {
     display: flex;
@@ -526,6 +554,17 @@ a {
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+  }
+  .form-select-sm::picker(select) {
+    max-height: min(17rem, 55vh);
+  }
+  .form-select-sm option {
+    gap: 7px;
+    padding: 6px 9px;
+    font-size: 0.82rem;
+  }
+  .form-select-sm option:checked::checkmark {
+    font-size: 0.72rem;
   }
   .form-select option[value=""] {
     font-style: normal;
@@ -2502,12 +2541,70 @@ footer.ws-footer .ws-page {
   margin: 0;
 }
 .ws-player-speed select {
-  background: rgba(255, 255, 255, 0.08);
+  appearance: none;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.08)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9d9d1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 5px center / 11px 11px;
   color: #e8f1ec;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 6px;
   font-size: 11.5px;
-  padding: 3px 6px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 3px 20px 3px 7px;
+  cursor: pointer;
+}
+.ws-player-speed select:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.ws-player-speed select option {
+  background: #16241f;
+  color: #e8f1ec;
+  font-weight: 400;
+}
+/* The player sits on a dark surface, so its list has to be dark too. */
+@supports (appearance: base-select) {
+  .ws-player-speed select {
+    appearance: base-select;
+  }
+  .ws-player-speed select::picker-icon {
+    display: none;
+  }
+  .ws-player-speed select::picker(select) {
+    background: #16241f;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    box-shadow: 0 14px 30px -14px rgba(0, 0, 0, 0.6);
+    color: #e8f1ec;
+    font-family: inherit;
+    padding: 4px;
+  }
+  .ws-player-speed option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    background: transparent;
+    font-size: 11.5px;
+  }
+  .ws-player-speed option:hover,
+  .ws-player-speed option:focus {
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+  }
+  .ws-player-speed option:checked {
+    background: transparent;
+    color: #ffffff;
+    font-weight: 700;
+  }
+  .ws-player-speed option:checked::checkmark {
+    margin-left: auto;
+    color: #7fd1b9;
+    font-size: 0.7rem;
+  }
 }
 .ws-player-row-secondary {
   border-top: 1px solid rgba(255, 255, 255, 0.07);
