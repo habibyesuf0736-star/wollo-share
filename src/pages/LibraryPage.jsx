@@ -129,8 +129,22 @@ export default function LibraryPage() {
     return sortCourses(list, sort, canEdit);
   }, [accessible, activeQuery, canEdit, sort, topic]);
 
-  const globalDocs = useMemo(() => {
-    const needle = (docQuery || query).trim();
+  // The search box answers with the files themselves, not only the programs that hold
+  // them — a student who types a document title wants the download button in reach.
+  const searchDocs = useMemo(() => {
+    if (!activeQuery) return [];
+    const rows = [];
+    accessible.forEach((course) => {
+      (course.materials || []).forEach((mat) => {
+        if (!canEdit && mat.hidden) return;
+        if (topic !== "All" && (mat.subcategory || "Lecture Notes") !== topic) return;
+        if (doesDocumentMatchQuery(course, mat, activeQuery)) rows.push({ course, mat });
+      });
+    });
+    return rows;
+  }, [accessible, activeQuery, canEdit, topic]);
+
+  const globalDocs = useMemo(() => {    const needle = (docQuery || query).trim();
     const rows = [];
     accessible.forEach((course) => {
       (course.materials || []).forEach((mat) => {
@@ -549,23 +563,50 @@ export default function LibraryPage() {
         <>
           <div className="d-flex justify-content-between align-items-center results-line mb-2">
             <span className="small text-secondary">
-              <strong>{filteredCourses.length}</strong> {filteredCourses.length === 1 ? "program" : "programs"} matching your search
+              <strong>{searchDocs.length}</strong> {searchDocs.length === 1 ? "file" : "files"} and{" "}
+              <strong>{filteredCourses.length}</strong> {filteredCourses.length === 1 ? "program" : "programs"} matching
+              your search
             </span>
             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={clearFilters}>
               Back to browsing
             </button>
           </div>
 
+          {searchDocs.length ? (
+            <section className="card p-3 mb-3" aria-label="Files matching your search">
+              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <h2 className="h6 mb-0">Downloadable files</h2>
+                <span className="small text-secondary">
+                  {searchDocs.length > 30 ? `First 30 of ${searchDocs.length}` : `${searchDocs.length} match`}
+                </span>
+              </div>
+              <div className="d-flex flex-column gap-2 material-stack">
+                {searchDocs.slice(0, 30).map(({ course, mat }) => (
+                  <MaterialRow
+                    key={`${course.id}-${mat.id}`}
+                    course={course}
+                    mat={mat}
+                    isGlobal
+                    query={query.trim()}
+                    onEdit={() => goSublist(course.id)}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           {filteredCourses.length === 0 ? (
-            <EmptyState
-              title="No programs match that search"
-              description="Try fewer words."
-              action={
-                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={clearFilters}>
-                  Clear search
-                </button>
-              }
-            />
+            searchDocs.length ? null : (
+              <EmptyState
+                title="Nothing matches that search"
+                description="Try fewer words, or search a file title such as “calculus past exam”."
+                action={
+                  <button type="button" className="btn btn-outline-secondary btn-sm" onClick={clearFilters}>
+                    Clear search
+                  </button>
+                }
+              />
+            )
           ) : (
             <div className="row g-3">
               {filteredCourses.map((course, index) => (

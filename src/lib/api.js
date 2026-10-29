@@ -223,6 +223,22 @@ export function addCourseMaterial(courseId, material, session) {
   });
 }
 
+export function createStaffCourse(payload, session) {
+  return request("/api/staff/courses", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function importStaffLibrary(backup, session) {
+  return request("/api/staff/library/import", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(backup)
+  });
+}
+
 export function seedFreshmanMaterials(dryRun, session) {
   return request("/api/support/freshman/seed", {
     method: "POST",

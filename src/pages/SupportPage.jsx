@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
   FileText,
+  GraduationCap,
   Inbox,
   Layers,
   LifeBuoy,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   Sprout,
   ThumbsDown,
+  Upload,
   X
 } from "lucide-react";
 import * as api from "../lib/api.js";
@@ -452,10 +454,12 @@ function ReviewQueue({ onCountChange }) {
   );
 }
 
-function AddMaterialForm() {
+function AddMaterialForm({ initialCourseId = "" }) {
   const { session, coursesData, toast, refreshFromServer } = useApp();
   const courses = useMemo(() => [...coursesData].sort((a, b) => String(a.name).localeCompare(String(b.name))), [coursesData]);
-  const [courseId, setCourseId] = useState(courses.length ? courses[0].id : "");
+  const [courseId, setCourseId] = useState(() =>
+    courses.some((c) => c.id === initialCourseId) ? initialCourseId : courses.length ? courses[0].id : ""
+  );
   const course = courses.find((c) => c.id === courseId) || null;
   const entries = useMemo(() => (course ? getCourseSemesterEntries(course) : []), [course]);
   const EMPTY = { name: "", type: "PDF", size: "1.8 MB", subcategory: DEFAULT_SUBCATEGORIES[1] || "Lecture Notes", department: "", url: "", hidden: false };
@@ -841,9 +845,286 @@ function FreshmanSeeder() {
   );
 }
 
+function LibraryBuilder({ onPublish }) {
+  const { session, coursesData, toast, refreshFromServer } = useApp();
+  const colleges = useMemo(
+    () => Array.from(new Set(coursesData.map((course) => course.college).filter(Boolean))).sort(),
+    [coursesData]
+  );
+  const groups = useMemo(() => {
+    const map = new Map();
+    coursesData.forEach((course) => {
+      const name = course.college || "Other programs";
+      if (!map.has(name)) map.set(name, { name, programs: [], files: 0 });
+      const group = map.get(name);
+      group.programs.push(course);
+      group.files += (course.materials || []).length;
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [coursesData]);
+
+  const [query, setQuery] = useState("");
+  const [form, setForm] = useState({ college: "", name: "", icon: "", durationYears: 4, description: "" });
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [imported, setImported] = useState(null);
+  const importInputRef = useRef(null);
+
+  const needle = query.trim().toLowerCase();
+  const visibleGroups = useMemo(
+    () =>
+      groups
+        .map((group) => ({
+          ...group,
+          programs: needle
+            ? group.programs.filter(
+                (course) =>
+                  group.name.toLowerCase().includes(needle) ||
+                  String(course.name).toLowerCase().includes(needle) ||
+                  String(course.icon || "").toLowerCase().includes(needle)
+              )
+            : group.programs
+        }))
+        .filter((group) => group.programs.length > 0),
+    [groups, needle]
+  );
+
+  const create = async (event) => {
+    event.preventDefault();
+    if (!form.college.trim() || !form.name.trim()) {
+      setError("Name both the college and the program.");
+      return;
+    }
+    setBusy("create");
+    setError("");
+    const res = await api.createStaffCourse(
+      {
+        college: form.college.trim(),
+        name: form.name.trim(),
+        icon: form.icon.trim(),
+        durationYears: form.durationYears,
+        description: form.description.trim()
+      },
+      session.authToken
+    );
+    setBusy("");
+    if (!res || res.ok === false) {
+      setError((res && res.error) || "The program was not created.");
+      return;
+    }
+    toast(`${res.course.name} is live under ${res.course.college}. Publish its first file next.`);
+    setForm((prev) => ({ ...prev, name: "", icon: "", description: "" }));
+    await refreshFromServer();
+  };
+
+  const importFile = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy("import");
+    setError("");
+    try {
+      const parsed = JSON.parse(await file.text());
+      const res = await api.importStaffLibrary(parsed, session.authToken);
+      if (!res || res.ok === false) {
+        setError((res && res.error) || "Nothing was imported.");
+        setBusy("");
+        return;
+      }
+      setImported({ ...res, fileName: file.name });
+      toast(
+        `${res.addedMaterials} material${res.addedMaterials === 1 ? "" : "s"} imported` +
+          (res.addedCourses ? ` and ${res.addedCourses} new program${res.addedCourses === 1 ? "" : "s"}` : "") +
+          "."
+      );
+      await refreshFromServer();
+    } catch {
+      setError("That file could not be read as a Wollo Share backup.");
+    }
+    setBusy("");
+  };
+
+  return (
+    <div className="d-flex flex-column gap-3">
+      <div>
+        <span className="ws-section-kicker">Support team</span>
+        <h2 className="h4 mb-1">Colleges &amp; programs</h2>
+        <p className="small text-secondary mb-0">
+          Create a college, file a program under it, then publish that program&apos;s first material.
+        </p>
+      </div>
+      {error ? (
+        <div className="banner warn" role="alert">
+          <AlertTriangle size={15} aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
+      <div className="row g-3">
+        <div className="col-12 col-lg-7">
+          <form className="card p-3 h-100 d-flex flex-column gap-2" onSubmit={create}>
+            <h3 className="h6 mb-0">New college or program</h3>
+            <div className="row g-2">
+              <div className="col-12 col-md-6">
+                <label className="form-label small fw-semibold" htmlFor="lbCollege">
+                  College
+                </label>
+                <input
+                  id="lbCollege"
+                  className="form-control"
+                  list="lb-college-list"
+                  placeholder="Pick one or type a new college"
+                  value={form.college}
+                  onChange={(event) => setForm({ ...form, college: event.target.value })}
+                />
+                <datalist id="lb-college-list">
+                  {colleges.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="col-12 col-md-6">
+                <label className="form-label small fw-semibold" htmlFor="lbName">
+                  Program / sub-class
+                </label>
+                <input
+                  id="lbName"
+                  className="form-control"
+                  placeholder="e.g. Software Engineering"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </div>
+              <div className="col-6 col-md-4">
+                <label className="form-label small fw-semibold" htmlFor="lbCode">
+                  Code (optional)
+                </label>
+                <input
+                  id="lbCode"
+                  className="form-control"
+                  placeholder="SE"
+                  maxLength={6}
+                  value={form.icon}
+                  onChange={(event) => setForm({ ...form, icon: event.target.value })}
+                />
+              </div>
+              <div className="col-6 col-md-3">
+                <label className="form-label small fw-semibold" htmlFor="lbYears">
+                  Years
+                </label>
+                <select
+                  id="lbYears"
+                  className="form-select"
+                  value={form.durationYears}
+                  onChange={(event) => setForm({ ...form, durationYears: Number(event.target.value) })}
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>
+                      {n} year{n > 1 ? "s" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-5">
+                <label className="form-label small fw-semibold" htmlFor="lbDesc">
+                  Description (optional)
+                </label>
+                <input
+                  id="lbDesc"
+                  className="form-control"
+                  placeholder="One line students will read"
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                />
+              </div>
+            </div>
+            <div className="d-flex justify-content-end mt-auto">
+              <button type="submit" className="btn btn-primary btn-sm" disabled={busy === "create"}>
+                {busy === "create" ? "Creating…" : "Create program"}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="col-12 col-lg-5">
+          <div className="card p-3 h-100 d-flex flex-column gap-2">
+            <h3 className="h6 mb-0">Import a library file</h3>
+            <p className="small text-secondary mb-0">
+              Adds the programs and materials in a Wollo Share backup. Files already in the library are left alone.
+            </p>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2 align-self-start mt-auto"
+              onClick={() => importInputRef.current && importInputRef.current.click()}
+              disabled={busy === "import"}
+            >
+              <Upload size={15} aria-hidden="true" />
+              {busy === "import" ? "Importing…" : "Choose backup JSON…"}
+            </button>
+            {imported ? (
+              <p className="small text-secondary mb-0">
+                <strong>{imported.fileName}</strong>: {imported.addedMaterials} new material
+                {imported.addedMaterials === 1 ? "" : "s"}
+                {imported.addedCourses ? `, ${imported.addedCourses} new program${imported.addedCourses === 1 ? "" : "s"}` : ""}
+                {imported.skippedMaterials ? ` · ${imported.skippedMaterials} already here` : ""}.
+              </p>
+            ) : null}
+            <input ref={importInputRef} type="file" accept="application/json,.json" className="d-none" onChange={importFile} />
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <h3 className="h6 mb-0">Library structure</h3>
+          <input
+            className="form-control form-control-sm"
+            style={{ maxWidth: 280 }}
+            placeholder="Search college or program"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        {visibleGroups.map((group) => (
+          <details key={group.name} className="mb-1">
+            <summary className="d-flex flex-wrap justify-content-between gap-2 small py-1">
+              <strong>{group.name}</strong>
+              <span className="text-secondary">
+                {group.programs.length} program{group.programs.length === 1 ? "" : "s"} · {group.files} file
+                {group.files === 1 ? "" : "s"}
+              </span>
+            </summary>
+            <ul className="list-unstyled mb-2 ps-2">
+              {group.programs.map((course) => {
+                const files = (course.materials || []).length;
+                return (
+                  <li
+                    key={course.id}
+                    className="d-flex flex-wrap justify-content-between align-items-center gap-2 small py-1 border-top"
+                  >
+                    <span>
+                      <strong>{course.name}</strong>
+                      <span className="text-secondary"> · {files} file{files === 1 ? "" : "s"}</span>
+                    </span>
+                    <button type="button" className="btn btn-sm btn-soft py-0" onClick={() => onPublish(course.id)}>
+                      + Publish material
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        ))}
+        {!visibleGroups.length ? <p className="small text-secondary mb-0">No college matches that search.</p> : null}
+      </div>
+    </div>
+  );
+}
+
 const STAFF_TABS = [
   ["complaints", "Complaints", LifeBuoy],
   ["reviews", "Material reviews", Inbox],
+  ["library", "Colleges & programs", GraduationCap],
   ["add", "Add material", FileText],
   ["reference", "Reference materials", Layers],
   ["freshman", "Freshman library", Sprout]
@@ -854,6 +1135,7 @@ export default function SupportPage() {
   const [tab, setTab] = useState("complaints");
   const [tickets, setTickets] = useState([]);
   const [pendingReviews, setPendingReviews] = useState(0);
+  const [presetCourseId, setPresetCourseId] = useState("");
 
   const staffMode = isStaff && !studentPreview;
 
@@ -919,7 +1201,15 @@ export default function SupportPage() {
           </nav>
           {tab === "complaints" ? <ComplaintInbox tickets={tickets} onTicket={loadTickets} /> : null}
           {tab === "reviews" ? <ReviewQueue onCountChange={setPendingReviews} /> : null}
-          {tab === "add" ? <AddMaterialForm /> : null}
+          {tab === "library" ? (
+            <LibraryBuilder
+              onPublish={(courseId) => {
+                setPresetCourseId(courseId);
+                setTab("add");
+              }}
+            />
+          ) : null}
+          {tab === "add" ? <AddMaterialForm initialCourseId={presetCourseId} /> : null}
           {tab === "reference" ? <ReferenceMaterials /> : null}
           {tab === "freshman" ? <FreshmanSeeder /> : null}
         </>

@@ -4394,6 +4394,160 @@ export async function createApp() {
     res.json({ ok: true, material, course });
   });
 
+  // A college exists in this library as soon as a program is filed under it, so the
+  // support team creates both in one step instead of needing a separate college table.
+  app.post("/api/staff/courses", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const name = String(req.body?.name || "").trim().slice(0, 120);
+    const college = String(req.body?.college || "").trim().slice(0, 120);
+    if (!name) {
+      res.status(400).json({ ok: false, error: "Give the program a name." });
+      return;
+    }
+    if (!college) {
+      res.status(400).json({ ok: false, error: "Name the college this program belongs to." });
+      return;
+    }
+    const duplicate = dbState.coursesData.find(
+      (course) =>
+        String(course.name).toLowerCase() === name.toLowerCase() &&
+        String(course.college || "").toLowerCase() === college.toLowerCase()
+    );
+    if (duplicate) {
+      res.status(409).json({ ok: false, error: `“${name}” is already listed under ${college}.`, course: duplicate });
+      return;
+    }
+    const collegeExisted = dbState.coursesData.some(
+      (course) => String(course.college || "").toLowerCase() === college.toLowerCase()
+    );
+    const durationYears = Math.max(1, Math.min(7, Number(req.body?.durationYears) || 4));
+    const years = Array.from({ length: durationYears }, (_, index) => `Year ${index + 1}`);
+    const course: Course = {
+      id: "course-" + Date.now() + "-" + crypto.randomInt(1000, 9999),
+      name,
+      description:
+        String(req.body?.description || "").trim().slice(0, 400) ||
+        `${name} study materials for Wollo University students.`,
+      college,
+      icon: String(req.body?.icon || "").trim().slice(0, 6).toUpperCase() || name.slice(0, 4).toUpperCase(),
+      color: /^#[a-f\d]{6}$/i.test(String(req.body?.color || "")) ? String(req.body.color) : "#1d624f",
+      restricted: Boolean(req.body?.restricted),
+      allowStudentSideMaterials: true,
+      durationYears,
+      years,
+      semesters: buildProgramSemesterLabels(durationYears),
+      defaultYear: years[0],
+      subcategories: [...DEFAULT_SUBCATEGORIES],
+      materials: []
+    };
+    dbState.coursesData.push(course);
+    saveDatabase(dbState);
+    res.json({ ok: true, course, collegeExisted });
+  });
+
+  // Importing a library export must not wipe what is live: courses are matched by id or
+  // by name and college, and a file is only added when nothing with that title is there.
+  app.post("/api/staff/library/import", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const body = req.body || {};
+    const source = body.state && typeof body.state === "object" ? body.state : body;
+    const incomingCourses: Partial<Course>[] = Array.isArray(source.coursesData) ? source.coursesData : [];
+    if (!incomingCourses.length) {
+      res.status(400).json({ ok: false, error: "That file has no courses in it." });
+      return;
+    }
+    let addedCourses = 0;
+    let addedMaterials = 0;
+    let matchedCourses = 0;
+    let skippedMaterials = 0;
+    for (const incoming of incomingCourses.slice(0, 600)) {
+      const name = String(incoming.name || "").trim().slice(0, 120);
+      if (!name) continue;
+      const college = String(incoming.college || "").trim().slice(0, 120);
+      const incomingMaterials = Array.isArray(incoming.materials) ? incoming.materials.slice(0, 300) : [];
+      let target = dbState.coursesData.find(
+        (course) =>
+          (incoming.id && course.id === incoming.id) ||
+          (String(course.name).toLowerCase() === name.toLowerCase() &&
+            String(course.college || "").toLowerCase() === college.toLowerCase())
+      );
+      if (!target) {
+        const declaredYears = Array.isArray(incoming.years) ? incoming.years.filter(Boolean).map(String) : [];
+        const durationYears = Math.max(
+          1,
+          Math.min(7, Number(incoming.durationYears) || declaredYears.length || 4)
+        );
+        const years = declaredYears.length
+          ? declaredYears
+          : Array.from({ length: durationYears }, (_, index) => `Year ${index + 1}`);
+        target = {
+          id: "course-" + Date.now() + "-" + crypto.randomInt(1000, 9999),
+          name,
+          description:
+            String(incoming.description || "").trim().slice(0, 400) ||
+            `${name} study materials for Wollo University students.`,
+          college: college || "Common Courses",
+          icon: String(incoming.icon || "").trim().slice(0, 6).toUpperCase() || name.slice(0, 4).toUpperCase(),
+          color: /^#[a-f\d]{6}$/i.test(String(incoming.color || "")) ? String(incoming.color) : "#1d624f",
+          restricted: Boolean(incoming.restricted),
+          allowStudentSideMaterials: Boolean(incoming.allowStudentSideMaterials),
+          durationYears: years.length,
+          years,
+          semesters:
+            Array.isArray(incoming.semesters) && incoming.semesters.length
+              ? incoming.semesters.map(String).slice(0, 20)
+              : buildProgramSemesterLabels(years.length),
+          defaultYear: years.includes(String(incoming.defaultYear || "")) ? String(incoming.defaultYear) : years[0],
+          subcategories:
+            Array.isArray(incoming.subcategories) && incoming.subcategories.length
+              ? incoming.subcategories.map(String).slice(0, 12)
+              : [...DEFAULT_SUBCATEGORIES],
+          materials: []
+        };
+        dbState.coursesData.push(target);
+        addedCourses += 1;
+      } else {
+        matchedCourses += 1;
+      }
+      for (const mat of incomingMaterials) {
+        const title = String(mat.name || "").trim().slice(0, 180);
+        if (!title) continue;
+        if ((target.materials || []).some((existing) => String(existing.name).toLowerCase() === title.toLowerCase())) {
+          skippedMaterials += 1;
+          continue;
+        }
+        target.materials.push({
+          id: "mat-" + Date.now() + "-" + crypto.randomInt(10000, 99999),
+          name: title,
+          type: String(mat.type || "PDF").slice(0, 12),
+          size: String(mat.size || "1.0 MB").slice(0, 24),
+          url: String(mat.url || "#sample-file").slice(0, 500),
+          year: String(mat.year || target.defaultYear || "Year 1").slice(0, 24),
+          semester: String(mat.semester || (target.semesters || [])[0] || "First Semester").slice(0, 40),
+          department: String(mat.department || target.name || "").slice(0, 120),
+          subcategory: String(mat.subcategory || "Lecture Notes").slice(0, 60),
+          sharedBy: String(mat.sharedBy || (session.role === "support" ? "Support team" : "Administrator")).slice(0, 60),
+          hidden: Boolean(mat.hidden),
+          free: Boolean(mat.free),
+          ratingAvg: 0,
+          ratingCount: 0,
+          sideMaterials: []
+        });
+        addedMaterials += 1;
+      }
+    }
+    saveDatabase(dbState);
+    res.json({ ok: true, addedCourses, addedMaterials, matchedCourses, skippedMaterials });
+  });
+
   // Freshman courses arrive empty, so the support team publishes the starter pack for
   // every Year 1 course. Always previewed first: nothing is written until dryRun is false.
   app.post("/api/support/freshman/seed", (req, res) => {
