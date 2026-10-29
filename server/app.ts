@@ -1150,11 +1150,12 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
   usersData.forEach((u: any) => {
     secureUserAccount(u);
     if (!Array.isArray(u.allowedCourseIds)) u.allowedCourseIds = [];
-    if (!u.evangadiSynced) {
-      if (!u.allowedCourseIds.includes("course-evangadi")) {
-        u.allowedCourseIds.unshift("course-evangadi");
-      }
-      u.evangadiSynced = true;
+    // Every account used to be handed the Evangadi pack automatically. Access is now a
+    // decision the administrator makes per account, so that blanket grant is withdrawn
+    // once and the flag is spent: a later deliberate grant is kept.
+    if (u.evangadiSynced) {
+      u.allowedCourseIds = u.allowedCourseIds.filter((courseId: string) => courseId !== "course-evangadi");
+      u.evangadiSynced = false;
     }
     if (!u.department) u.department = "Computer Science";
     if (!u.unpaidMigrationV3) {
@@ -1831,12 +1832,18 @@ export async function createApp() {
         ? dbState.usersData.map(safeUserAccount)
         : dbState.usersData.filter((user) => user.id === session.id).map(safeUserAccount)
       : [];
-    // The Evangadi pack is sold by that provider, so students never receive it. Keeping
-    // it out of the payload also keeps its material links off their devices.
+    // Evangadi sells its own pack, so it stays out of every payload except the one
+    // account the administrator granted it to. Anonymous visitors and crawlers never
+    // receive it, which also keeps its material links off devices that no one owns.
+    const grantedCourseIds = session
+      ? new Set((dbState.usersData.find((user) => user.id === session.id)?.allowedCourseIds) || [])
+      : null;
     const visibleCourses =
       session && session.role === "admin"
         ? dbState.coursesData
-        : dbState.coursesData.filter((course) => !isEvangadiCourse(course));
+        : dbState.coursesData.filter(
+            (course) => !isEvangadiCourse(course) || Boolean(grantedCourseIds?.has(String(course.id)))
+          );
     res.json({
       coursesData: visibleCourses,
       usersData: visibleUsers,
@@ -2266,7 +2273,7 @@ export async function createApp() {
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: "Never signed in",
-      allowedCourseIds: ["course-evangadi", "course-se-capstone", "course-clinical-research", "course-calc-uni"],
+      allowedCourseIds: ["course-se-capstone", "course-clinical-research", "course-calc-uni"],
       emailVerified: true,
       addedByAdmin: true,
       activityLog: [
@@ -3019,7 +3026,7 @@ export async function createApp() {
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: "Active now",
-      allowedCourseIds: ["course-evangadi", "course-se-capstone", "course-clinical-research", "course-calc-uni"],
+      allowedCourseIds: ["course-se-capstone", "course-clinical-research", "course-calc-uni"],
       evangadiSynced: true,
       unpaidMigrationV3: true,
       unpaidPerDownloadMigrationV4: true,
@@ -3247,7 +3254,7 @@ export async function createApp() {
       sharedMaterialsCount: 0,
       downloadsCount: 0,
       lastActiveAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-      allowedCourseIds: ["course-evangadi", "course-se-capstone", "course-calc-uni"],
+      allowedCourseIds: ["course-se-capstone", "course-calc-uni"],
       evangadiSynced: true,
       unpaidMigrationV3: true,
       unpaidPerDownloadMigrationV4: true,

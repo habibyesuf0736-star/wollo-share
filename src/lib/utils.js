@@ -17,16 +17,16 @@ export function sanitizeCourseCode(rawIcon, courseName = "") {
   return String(courseName || "COURSE").slice(0, 4).toUpperCase();
 }
 
-// Evangadi sells its own pack, so it never belongs to a student account no matter what
-// is ticked in the access editors. Keep the rule in one place with canSeeCourse.
+// Evangadi sells its own pack: it never appears in the public catalog and reaches an
+// account only through a grant the administrator makes in the access editors.
 export function isStaffOnlyCourse(course) {
   return Boolean(course) && (course.id === "course-evangadi" || /evangadi/i.test(String(course.name || "")));
 }
 
-// Only a restricted course gates anybody, so an id pointing at a public or staff-only one
-// is not access and must not be counted as it. Old accounts are full of them.
+// Only a restricted course gates anybody, so an id pointing at a public one is not access
+// and must not be counted as it. Old accounts are full of them.
 export function assignedCourseIds(user, coursesData) {
-  const gated = new Set((coursesData || []).filter((c) => c.restricted && !isStaffOnlyCourse(c)).map((c) => c.id));
+  const gated = new Set((coursesData || []).filter((c) => c.restricted).map((c) => c.id));
   return ((user && user.allowedCourseIds) || []).filter((id) => gated.has(id));
 }
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useApp } from "../store/AppContext.jsx";
 import Modal from "./Modal.jsx";
-import { assignedCourseIds, isStaffOnlyCourse, sanitizeCourseCode } from "../lib/utils.js";
+import { assignedCourseIds, sanitizeCourseCode } from "../lib/utils.js";
 
 /**
  * Which restricted courses one account may open. A public course gates nobody, so it is
@@ -12,7 +12,7 @@ export default function CourseAccessModal({ user, onClose }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState([]);
 
-  const gated = useMemo(() => coursesData.filter((course) => course.restricted && !isStaffOnlyCourse(course)), [coursesData]);
+  const gated = useMemo(() => coursesData.filter((course) => course.restricted), [coursesData]);
 
   useEffect(() => {
     if (!user) return;

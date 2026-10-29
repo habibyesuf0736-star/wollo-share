@@ -178,14 +178,20 @@ export function AppProvider({ children }) {
 
   const canSeeCourse = useCallback(
     (course) => {
-      // Evangadi sells its own pack, so it is not part of the student library at all.
-      if (isStaffOnlyCourse(course)) return isAdmin;
+      // Evangadi sells its own pack: the server omits it from every payload except an
+      // account the administrator granted, so a grant is the only way in.
+      if (isStaffOnlyCourse(course)) {
+        if (isAdmin) return true;
+        if (studentPreview) return false;
+        if (!session || !activeUser) return false;
+        return (activeUser.allowedCourseIds || []).includes(course.id);
+      }
       if (!course.restricted) return true;
       if (studentPreview) return false;
       if (isAdmin) return true;
       if (!session) return false;
       if (session.role === "admin" || session.role === "support") return true;
-      if (!activeUser) return course.id === "course-evangadi";
+      if (!activeUser) return false;
       if (activeUser.role === "admin") return true;
       return Array.isArray(activeUser.allowedCourseIds) && activeUser.allowedCourseIds.includes(course.id);
     },

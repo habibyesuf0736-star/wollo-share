@@ -98,10 +98,9 @@ export default function AdminCourses() {
                     >
                       {course.restricted ? "Restricted" : "Public"}
                     </button>
-                    <div className="mt-1">
-                      {isStaffOnlyCourse(course) ? (
-                        <span className="small text-secondary">Staff only</span>
-                      ) : course.restricted ? (
+                    <div className="mt-1 d-flex align-items-center gap-2">
+                      {isStaffOnlyCourse(course) ? <span className="small text-secondary">Staff only</span> : null}
+                      {course.restricted || isStaffOnlyCourse(course) ? (
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-secondary py-0 px-1 border-0"
