@@ -1027,7 +1027,7 @@ interface LoginDevice {
   name: string;
   role: string;
   label: string;
-  method: "password" | "qr" | "google" | "verification";
+  method: "password" | "qr" | "google" | "verification" | "recovery";
   createdAt: string;
   expiresAt: number;
   revokedAt?: string;
@@ -2673,24 +2673,36 @@ export async function createApp() {
       return;
     }
 
-    if (targetId === "admin-owner") {
-      dbState.customAdminPassword = ensureAdminPasswordHash(newPassword);
-      if (account) {
-        const updatedUser = secureUserAccount({ ...account, password: newPassword });
-        dbState.usersData = dbState.usersData.map((user) => user.id === account.id ? updatedUser : user);
-      }
-    } else if (account) {
-      const updatedUser = secureUserAccount({ ...account, password: newPassword });
-      dbState.usersData = dbState.usersData.map((user) => user.id === account.id ? updatedUser : user);
-    } else {
+    if (targetId === "admin-owner") dbState.customAdminPassword = ensureAdminPasswordHash(newPassword);
+    if (!account && targetId !== "admin-owner") {
       res.status(400).json({ ok: false, error: "The account could not be found." });
       return;
+    }
+    const updatedUser = account
+      ? secureUserAccount({ ...account, password: newPassword, lastActiveAt: "Active now" })
+      : null;
+    if (account && updatedUser) {
+      dbState.usersData = dbState.usersData.map((user) => (user.id === account.id ? updatedUser : user));
     }
     recoveryRequest.status = "completed";
     delete recoveryRequest.codeHash;
     delete recoveryRequest.codeExpiresAt;
     saveDatabase(dbState);
-    res.json({ ok: true, message: "Your password has been changed. You can now sign in." });
+    // The code came out of their mailbox and they just chose this password, so the browser is
+    // dropped into the account instead of making the student retype what they typed a second ago.
+    const session = updatedUser
+      ? issueDeviceSession(
+          { id: updatedUser.id, name: updatedUser.name, email: updatedUser.email, role: updatedUser.role || "user" },
+          req,
+          "recovery"
+        )
+      : null;
+    res.json({
+      ok: true,
+      session,
+      user: updatedUser ? safeUserAccount(updatedUser) : null,
+      message: session ? "Password updated — you are signed in." : "Password updated. You can now sign in."
+    });
   });
 
   app.get("/api/admin/password-recovery-requests", (req, res) => {

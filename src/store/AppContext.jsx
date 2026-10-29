@@ -681,6 +681,20 @@ export function AppProvider({ children }) {
     [settleSession]
   );
 
+  // A finished reset proves the mailbox and sets the password, so it opens the account instead
+  // of sending the student back through the sign-in form.
+  const finishRecovery = useCallback(
+    async ({ email, code, newPassword }) => {
+      const res = await api.completeRecovery({ email, code, newPassword });
+      if (!res || res.ok !== true) return { ok: false, error: (res && res.error) || "Recovery failed." };
+      if (!res.session) return { ok: true, signedIn: false, message: res.message };
+      const saved = await settleSession(res.session);
+      if (res.user) setUsersData((prev) => prev.map((u) => (u.id === res.user.id ? { ...u, ...res.user } : u)));
+      return { ok: true, signedIn: true, session: saved };
+    },
+    [settleSession]
+  );
+
   const saveProfile = useCallback(async (details) => {
     if (!session) return { ok: false, error: "Sign in to edit your profile." };
     const res = await api.updateProfile(details, session.authToken);
@@ -1582,6 +1596,7 @@ export function AppProvider({ children }) {
     register,
     adoptSession: storeSession,
     verifySignup,
+    finishRecovery,
     saveProfile,
     logout,
     canSeeCourse,

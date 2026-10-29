@@ -37,7 +37,8 @@ const METHOD_LABELS = {
   password: "Password sign-in",
   qr: "Scanned from a phone",
   google: "Google sign-in",
-  verification: "Verified by email code"
+  verification: "Verified by email code",
+  recovery: "Password reset"
 };
 
 function formatStamp(value) {

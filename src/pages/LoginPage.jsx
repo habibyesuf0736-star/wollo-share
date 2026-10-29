@@ -18,7 +18,7 @@ import { useApp } from "../store/AppContext.jsx";
 import AnnouncementBanner from "../components/AnnouncementBanner.jsx";
 import DepartmentSelect from "../components/DepartmentSelect.jsx";
 import PhoneField from "../components/PhoneField.jsx";
-import { completeRecovery, pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
+import { pollQrLogin, requestRecovery, resendVerificationCode, startQrLogin } from "../lib/api.js";
 import { phoneProblem } from "../lib/utils.js";
 import { FRESHMAN_DEPARTMENT } from "../lib/departments.js";
 import { SITE_ORIGIN } from "../lib/seo.js";
@@ -45,6 +45,7 @@ export default function LoginPage() {
     resendSignInCode,
     register,
     verifySignup,
+    finishRecovery,
     adoptSession,
     goLibrary,
     toast,
@@ -315,15 +316,22 @@ export default function LoginPage() {
       return;
     }
     setBusy(true);
-    const res = await completeRecovery({ email: recovery.email, code: recovery.code, newPassword: recovery.newPassword });
+    const res = await finishRecovery({ email: recovery.email, code: recovery.code, newPassword: recovery.newPassword });
     setBusy(false);
-    if (res && res.ok) {
-      setNotice("Password updated — sign in with your new password.");
-      setRecovery({ email: recovery.email, code: "", newPassword: "", stage: "request" });
-      setTab("signin");
-    } else {
-      setError((res && res.error) || "Recovery failed.");
+    if (!res.ok) {
+      setError(res.error || "Recovery failed.");
+      return;
     }
+    setRecovery({ email: "", code: "", newPassword: "", stage: "request" });
+    if (res.signedIn) {
+      toast("Password updated — you are signed in.");
+      if (res.session.role === "admin") goAdmin();
+      else if (res.session.role === "support") goSupport();
+      else goLibrary();
+      return;
+    }
+    setNotice("Password updated — sign in with your new password.");
+    setTab("signin");
   };
 
   const switchTab = (key) => {
