@@ -1,6 +1,6 @@
 import React from "react";
 import { Check, Crown } from "lucide-react";
-import { PLANS } from "../UpgradeGateModal.jsx";
+import { PLANS } from "../../lib/plans.js";
 
 export default function PremiumPlanCards({ selected, onSelect, currentPlan }) {
   return (

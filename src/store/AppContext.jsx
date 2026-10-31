@@ -499,6 +499,8 @@ export function AppProvider({ children }) {
   // Titles and descriptions follow the page so a crawler and a browser tab both say
   // what this screen holds.
   useEffect(() => {
+    // The phone surface is not a search result: it keeps the short name in the tab.
+    if (window.__WS_MOBILE__) return;
     if (view.name === "sublist") {
       const course = coursesData.find((item) => item.id === view.courseId);
       if (course) {
@@ -998,6 +1000,18 @@ export function AppProvider({ children }) {
             `Wollo Share Course Material\nFile: ${mat.name}\nYear: ${mat.year || "Year 1"}\nType: ${mat.type}\nSize: ${mat.size}`
           )}`;
       triggerBrowserDownload(href, (sideMat || mat).name || "wollo-share-material");
+      // The phone surface keeps a list of what actually came down, and only this callback
+      // knows the difference between a finished file and one the server refused.
+      if (window.__WS_ON_DOWNLOAD__)
+        window.__WS_ON_DOWNLOAD__({
+          courseId,
+          materialId,
+          sideMaterialId,
+          name: (sideMat || mat).name || "Study material",
+          course: course.name || "",
+          type: (sideMat || mat).type || "",
+          url: href.startsWith("data:") ? "" : href
+        });
 
       if (session && activeUser && !studentPreview) {
         // The download count itself comes back on the authorize answer; adding one here too
@@ -1579,9 +1593,13 @@ export function AppProvider({ children }) {
   /* ------------------------------------------------------------ appearance */
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--primary", appearanceSettings.primaryColor || "#1d624f");
-    root.style.setProperty("--bs-primary", appearanceSettings.primaryColor || "#1d624f");
-    root.style.setProperty("--green", appearanceSettings.primaryColor || "#1d624f");
+    // The administrator's accent and font belong to the website. The phone surface keeps
+    // its own green and system type, which is what makes it read as a different thing.
+    if (!window.__WS_MOBILE__) {
+      root.style.setProperty("--primary", appearanceSettings.primaryColor || "#1d624f");
+      root.style.setProperty("--bs-primary", appearanceSettings.primaryColor || "#1d624f");
+      root.style.setProperty("--green", appearanceSettings.primaryColor || "#1d624f");
+    }
     root.style.fontSize = appearanceSettings.fontSize || "16px";
     const family =
       appearanceSettings.fontStyle === "serif"
@@ -1589,8 +1607,10 @@ export function AppProvider({ children }) {
         : appearanceSettings.fontStyle === "mono"
         ? "'IBM Plex Mono', monospace"
         : "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif";
-    root.style.setProperty("--bs-body-font-family", family);
-    document.body.style.fontFamily = family;
+    if (!window.__WS_MOBILE__) {
+      root.style.setProperty("--bs-body-font-family", family);
+      document.body.style.fontFamily = family;
+    }
   }, [appearanceSettings]);
 
   // Premium accounts get their own chrome (gold accents, badge, hero tint).

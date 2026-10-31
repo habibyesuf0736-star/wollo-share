@@ -41,6 +41,6 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/sitemap.xml", "destination": "/api" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|sitemap.xml|mobile\\.html).*)", "destination": "/index.html" }
   ]
 }

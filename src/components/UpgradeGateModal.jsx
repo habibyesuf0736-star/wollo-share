@@ -1,31 +1,8 @@
 import React from "react";
 import { Check, Clock, Gift, Sparkles, Upload } from "lucide-react";
 import Modal from "./Modal.jsx";
+import { PLANS } from "../lib/plans.js";
 import { useApp } from "../store/AppContext.jsx";
-
-export const PLANS = [
-  {
-    key: "premium_monthly",
-    title: "Premium monthly",
-    price: "100 Birr / month",
-    detail: "Unlimited downloads while active.",
-    perks: ["No sponsor spots", "Newest uploads first", "Pause any time"]
-  },
-  {
-    key: "premium_annual",
-    title: "Premium annual",
-    price: "250 Birr / year",
-    detail: "Lowest monthly cost, billed once.",
-    perks: ["No sponsor spots", "Every college covered", "Priority review"]
-  },
-  {
-    key: "paid_lifetime",
-    title: "Lifetime access",
-    price: "500 Birr one-time",
-    detail: "One payment, never expires.",
-    perks: ["Never expires", "All future semesters", "No ads, ever"]
-  }
-];
 
 export default function UpgradeGateModal() {
   const { gate, closeGate, setGate, downloadStatus, downloadPolicy, mySubmissions, session, goPremium, ads } = useApp();

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ArrowRight, Banknote, CheckCircle2, Copy, Send } from "lucide-react";
-import { PLANS } from "../UpgradeGateModal.jsx";
+import { PLANS } from "../../lib/plans.js";
 import { useApp } from "../../store/AppContext.jsx";
 import * as api from "../../lib/api.js";
 

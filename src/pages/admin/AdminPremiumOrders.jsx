@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Crown, RefreshCw } from "lucide-react";
 import { useApp } from "../../store/AppContext.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
-import { PLANS } from "../../components/UpgradeGateModal.jsx";
+import { PLANS } from "../../lib/plans.js";
 import * as api from "../../lib/api.js";
 
 function when(iso) {

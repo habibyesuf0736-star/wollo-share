@@ -1,7 +1,7 @@
 import React from "react";
 import { useApp } from "../store/AppContext.jsx";
 import { AdCard } from "./AdSlot.jsx";
-import { PLANS } from "./UpgradeGateModal.jsx";
+import { PLANS } from "../lib/plans.js";
 
 const PAID_PLAN_KEYS = new Set(PLANS.map((plan) => plan.key));
 

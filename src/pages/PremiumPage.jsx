@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useApp } from "../store/AppContext.jsx";
-import { PLANS } from "../components/UpgradeGateModal.jsx";
+import { PLANS } from "../lib/plans.js";
 import PremiumHero from "../components/premium/PremiumHero.jsx";
 import PremiumPlanCards from "../components/premium/PremiumPlanCards.jsx";
 import PremiumActive from "../components/premium/PremiumActive.jsx";

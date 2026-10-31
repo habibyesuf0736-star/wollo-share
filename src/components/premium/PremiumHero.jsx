@@ -1,6 +1,6 @@
 import React from "react";
 import { ArrowRight, Crown } from "lucide-react";
-import { PLANS } from "../UpgradeGateModal.jsx";
+import { PLANS } from "../../lib/plans.js";
 import { scrollToId } from "./premiumUtils.js";
 
 const LOWEST = Math.min(...PLANS.map((plan) => parseInt(plan.price, 10)));
