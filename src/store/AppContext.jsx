@@ -33,6 +33,39 @@ export const DEFAULT_APPEARANCE = {
   modules: { topics: true, docs: true }
 };
 
+// What the administrator decides about the phone app: whether it opens at all, the line it
+// greets the student with, the notice under it, the version it must be on, and — since the
+// app has its own look — the colour and switches that belong to the app and not the website.
+export const DEFAULT_APP_SETTINGS = {
+  enabled: true,
+  welcome: "Your materials, all in one place.",
+  message: "",
+  hidePremium: false,
+  minimumVersion: "",
+  updateUrl: "",
+  accent: "",
+  theme: "",
+  allowSignup: true,
+  showRatings: true
+};
+
+export function normalizeAppSettings(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const text = (value, fallback) => (typeof value === "string" && value.trim() ? value.trim() : fallback);
+  return {
+    enabled: source.enabled !== false,
+    welcome: text(source.welcome, DEFAULT_APP_SETTINGS.welcome),
+    message: text(source.message, ""),
+    hidePremium: Boolean(source.hidePremium),
+    minimumVersion: text(source.minimumVersion, ""),
+    updateUrl: text(source.updateUrl, ""),
+    accent: /^#[0-9a-f]{6}$/i.test(String(source.accent || "").trim()) ? String(source.accent).trim() : "",
+    theme: source.theme === "light" || source.theme === "dark" ? source.theme : "",
+    allowSignup: source.allowSignup !== false,
+    showRatings: source.showRatings !== false
+  };
+}
+
 const BANNER_DISMISSED_KEY = "wollo_announcement_dismissed_v1";
 
 // The rules the administrator sets on Admin → Downloads. The server owns them; this is
@@ -131,6 +164,9 @@ export function AppProvider({ children }) {
   const [downloadPolicy, setDownloadPolicy] = useState(() =>
     normalizeDownloadPolicy(readJson(STORAGE_KEYS.DOWNLOAD_POLICY, null))
   );
+  const [appSettings, setAppSettings] = useState(() =>
+    normalizeAppSettings(readJson(STORAGE_KEYS.APP_SETTINGS, null))
+  );
   const [session, setSession] = useState(() => normalizeSession(readStoredSession()));
   const [studentPreview, setStudentPreview] = useState(false);
   const [view, setView] = useState(() => initialView());
@@ -217,6 +253,9 @@ export function AppProvider({ children }) {
   useEffect(() => {
     writeJson(STORAGE_KEYS.DOWNLOAD_POLICY, downloadPolicy);
   }, [downloadPolicy]);
+  useEffect(() => {
+    writeJson(STORAGE_KEYS.APP_SETTINGS, appSettings);
+  }, [appSettings]);
 
   // The browser tab wears the signed-in student's own photo; the admin's uploaded logo
   // comes next and the university emblem is the fallback. The type attribute is dropped
@@ -285,6 +324,7 @@ export function AppProvider({ children }) {
         pageTexts,
         appearanceSettings,
         downloadPolicy,
+        appSettings,
         userRatings,
         contentRevision: baseRevisionRef.current
       },
@@ -293,7 +333,7 @@ export function AppProvider({ children }) {
     writeJson(STORAGE_KEYS.PENDING_ADMIN_STATE, pendingSyncRef.current);
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(flushState, 400);
-  }, [appearanceSettings, coursesData, downloadPolicy, flushState, isAdmin, pageTexts, session, userRatings, usersData]);
+  }, [appSettings, appearanceSettings, coursesData, downloadPolicy, flushState, isAdmin, pageTexts, session, userRatings, usersData]);
 
   useEffect(() => {
     window.addEventListener("pagehide", flushState);
@@ -340,6 +380,16 @@ export function AppProvider({ children }) {
     (updater) => {
       markDirty();
       setAppearanceSettings((prev) => ({ ...prev, ...(typeof updater === "function" ? updater(prev) : updater) }));
+    },
+    [markDirty]
+  );
+
+  const commitAppSettings = useCallback(
+    (updater) => {
+      markDirty();
+      setAppSettings((prev) =>
+        normalizeAppSettings({ ...prev, ...(typeof updater === "function" ? updater(prev) : updater) })
+      );
     },
     [markDirty]
   );
@@ -396,6 +446,7 @@ export function AppProvider({ children }) {
           setPageTexts({ ...DEFAULT_TEXTS, ...res.pageTexts });
         if (res.appearanceSettings && typeof res.appearanceSettings === "object")
           setAppearanceSettings({ ...DEFAULT_APPEARANCE, ...res.appearanceSettings });
+        if (res.appSettings) setAppSettings(normalizeAppSettings(res.appSettings));
         if (res.userRatings && typeof res.userRatings === "object")
           setUserRatings((prev) => ({ ...prev, ...res.userRatings }));
       }
@@ -1647,6 +1698,8 @@ export function AppProvider({ children }) {
     appearanceSettings,
     downloadPolicy,
     commitDownloadPolicy,
+    appSettings,
+    commitAppSettings,
     ads,
     banner,
     stats,

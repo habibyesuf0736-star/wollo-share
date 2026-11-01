@@ -6,8 +6,9 @@ export default defineConfig({
   build: {
     // The phone surface is a second entry in the same project, so it ships from
     // /mobile.html on the site's own origin and needs no separate host or API base.
+    // The third entry is the Android app's own surface, bundled for the device.
     rollupOptions: {
-      input: { main: "index.html", mobile: "mobile.html" }
+      input: { main: "index.html", mobile: "mobile.html", app: "app.html" }
     }
   }
 });

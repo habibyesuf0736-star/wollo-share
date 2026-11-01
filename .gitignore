@@ -12,4 +12,10 @@ data/wollo-db.json
 # Local database snapshots never leave the machine
 data/*.backup-*.json
 
+# The APK's web bundle is copied out of dist/ by npm run app:bundle
+mobile-app/app-dist/
+
+# Hand-built debug APKs are copied here for installation, never committed
+mobile-app/*.apk
+
 .vercel

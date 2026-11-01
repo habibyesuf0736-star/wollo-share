@@ -951,6 +951,55 @@ const PREMIUM_PLANS: Record<string, { title: string; price: string; days: number
   paid_lifetime: { title: "Lifetime access", price: "500 Birr one-time", days: null, category: "Paid 500 Birr · Lifetime VIP" }
 };
 
+// The phone app reads its instructions out of the same document the website edits, so the
+// administrator can switch it off, change its message or force an update without shipping a
+// new APK.
+interface AppSettings {
+  enabled: boolean;
+  welcome: string;
+  message: string;
+  hidePremium: boolean;
+  minimumVersion: string;
+  updateUrl: string;
+  accent: string;
+  theme: string;
+  allowSignup: boolean;
+  showRatings: boolean;
+}
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  enabled: true,
+  welcome: "Your materials, all in one place.",
+  message: "",
+  hidePremium: false,
+  minimumVersion: "",
+  updateUrl: "",
+  accent: "",
+  theme: "",
+  allowSignup: true,
+  showRatings: true
+};
+
+function normalizeAppSettings(raw: unknown): AppSettings {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (value: unknown, limit: number, fallback: string) =>
+    typeof value === "string" && value.trim() ? value.trim().slice(0, limit) : fallback;
+  const hex = /^#[0-9a-f]{6}$/i.test(String(source.accent || "").trim()) ? String(source.accent).trim() : "";
+  const theme = ["light", "dark"].includes(String(source.theme)) ? String(source.theme) : "";
+  return {
+    enabled: source.enabled !== false,
+    welcome: text(source.welcome, 120, DEFAULT_APP_SETTINGS.welcome),
+    message: text(source.message, 160, ""),
+    hidePremium: Boolean(source.hidePremium),
+    minimumVersion: text(source.minimumVersion, 20, ""),
+    updateUrl: text(source.updateUrl, 300, ""),
+    accent: hex,
+    theme,
+    allowSignup: source.allowSignup !== false,
+    showRatings: source.showRatings !== false
+  };
+}
+
 interface DatabaseSchema {
   coursesData: Course[];
   usersData: UserAccount[];
@@ -965,6 +1014,7 @@ interface DatabaseSchema {
   supportTickets: SupportTicket[];
   mailSettings?: MailSettings;
   downloadPolicy?: DownloadPolicy;
+  appSettings?: AppSettings;
   updatedAt?: number;
   // Bumped only by admin wholesale state saves. `updatedAt` moves on every student
   // write too, so it cannot tell a stale admin editor from normal traffic.
@@ -1089,7 +1139,8 @@ function buildDefaultDatabase(): DatabaseSchema {
     materialSubmissions: [],
     supportTickets: [],
     mailSettings: {},
-    downloadPolicy: { ...DEFAULT_DOWNLOAD_POLICY }
+    downloadPolicy: { ...DEFAULT_DOWNLOAD_POLICY },
+    appSettings: { ...DEFAULT_APP_SETTINGS }
   };
 }
 
@@ -1264,6 +1315,7 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
       : [],
     mailSettings: normalizeMailSettings(raw.mailSettings),
     downloadPolicy: normalizeDownloadPolicy(raw.downloadPolicy),
+    appSettings: normalizeAppSettings(raw.appSettings),
     updatedAt: Number(raw.updatedAt) || 0,
     contentRevision: Number(raw.contentRevision) || 0
   };
@@ -1852,6 +1904,7 @@ export async function createApp() {
       // Every account needs the rules it is being gated by, or the library cannot
       // explain why a file is closed.
       downloadPolicy: downloadPolicy(),
+      appSettings: normalizeAppSettings(dbState.appSettings),
       userRatings: dbState.userRatings,
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
@@ -1958,6 +2011,7 @@ export async function createApp() {
       pageTexts: incoming.pageTexts || dbState.pageTexts,
       appearanceSettings: incoming.appearanceSettings || dbState.appearanceSettings,
       downloadPolicy: incoming.downloadPolicy || dbState.downloadPolicy,
+      appSettings: incoming.appSettings || dbState.appSettings,
       userRatings: incoming.userRatings || dbState.userRatings,
       customAdminPassword: dbState.customAdminPassword,
       passwordRecoveryRequests: dbState.passwordRecoveryRequests,

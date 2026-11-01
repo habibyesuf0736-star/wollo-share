@@ -19,6 +19,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "app:bundle": "node scripts/build-app-bundle.mjs",
     "admin:reset-password": "tsx scripts/reset-admin-password.ts",
     "db:status": "tsx scripts/supabase-sync.ts status",
     "db:init": "node scripts/supabase-init.mjs",
@@ -26,6 +27,8 @@
     "db:pull": "tsx scripts/supabase-sync.ts pull"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "bootstrap": "^5.3.8",
     "dotenv": "^18.0.8",
     "express": "^4.21.2",
@@ -36,6 +39,7 @@
     "react-dom": "^19.0.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.2",
