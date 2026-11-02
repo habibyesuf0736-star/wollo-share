@@ -1,65 +1,72 @@
-/* The app surface — "quiet paper". Deliberately nothing like the website: no shadows, no
-   gradients and no Bootstrap. One column, hairline panels, an accent the administrator owns
-   for the app alone, and a floating ink dock under the thumb. */
+/* The app surface — university blue as the default accent, admin-overridable at runtime.
+   Deliberately nothing like the website: no Bootstrap, no heavy shadows.
+   One column, hairline panels, a floating pill dock, and full light/dark support. */
 
+/* ================================================================= tokens */
 :root {
-  --a-bg: #f7f7f5;
+  --a-bg: #f0f4fc;
   --a-panel: #ffffff;
-  --a-raise: #eff0ec;
-  --a-ink: #14171a;
-  --a-quiet: #5c6a64;
-  --a-faint: #667269;
-  --a-line: #e3e5df;
-  --a-accent: #1d624f;
+  --a-raise: #e8edf8;
+  --a-ink: #0d1b2e;
+  --a-quiet: #4a5568;
+  --a-faint: #6b7a99;
+  --a-line: #dce3f0;
+  --a-accent: #1a4fa8;
   --a-keep-on-paper: 100%;
   --a-keep-on-night: 62%;
   --a-accent-text: color-mix(in oklab, var(--a-accent) var(--a-keep-on-paper), var(--a-ink));
   --a-on-accent: #ffffff;
   --a-tint: color-mix(in oklab, var(--a-accent) 10%, var(--a-panel));
   --a-tint-line: color-mix(in oklab, var(--a-accent) 32%, var(--a-line));
-  --a-bad: #b3261e;
-  --a-dock: #14171a;
-  --a-dock-quiet: rgba(255, 255, 255, 0.6);
+  --a-bad: #c0392b;
+  --a-good: #16a34a;
+  --a-dock: #0d1b2e;
+  --a-dock-quiet: rgba(255, 255, 255, 0.55);
   --a-r: 14px;
-  --a-dock-h: 78px;
+  --a-dock-h: 80px;
   color-scheme: light;
 }
 
+/* ---- explicit dark theme ---- */
 :root[data-a-theme="dark"] {
-  --a-bg: #0d0f11;
-  --a-panel: #16191d;
-  --a-raise: #1c2126;
-  --a-ink: #e9eef0;
-  --a-quiet: #99a5ab;
-  --a-faint: #7a868f;
-  --a-line: #262c33;
+  --a-bg: #080e1a;
+  --a-panel: #111827;
+  --a-raise: #1a2540;
+  --a-ink: #e8edf8;
+  --a-quiet: #8fa3c4;
+  --a-faint: #6b82a8;
+  --a-line: #1e2d4a;
   --a-accent-text: color-mix(in oklab, var(--a-accent) var(--a-keep-on-night), #ffffff);
-  --a-tint: color-mix(in oklab, var(--a-accent) 16%, var(--a-panel));
-  --a-bad: #ff8a80;
-  --a-dock: #1c2126;
-  --a-dock-quiet: rgba(233, 238, 240, 0.55);
+  --a-tint: color-mix(in oklab, var(--a-accent) 18%, var(--a-panel));
+  --a-bad: #ff6b6b;
+  --a-good: #4ade80;
+  --a-dock: #111827;
+  --a-dock-quiet: rgba(232, 237, 248, 0.5);
   color-scheme: dark;
 }
 
+/* ---- system dark mode (auto) ---- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-a-theme]),
   :root[data-a-theme="auto"] {
-    --a-bg: #0d0f11;
-    --a-panel: #16191d;
-    --a-raise: #1c2126;
-    --a-ink: #e9eef0;
-    --a-quiet: #99a5ab;
-    --a-faint: #7a868f;
-    --a-line: #262c33;
+    --a-bg: #080e1a;
+    --a-panel: #111827;
+    --a-raise: #1a2540;
+    --a-ink: #e8edf8;
+    --a-quiet: #8fa3c4;
+    --a-faint: #6b82a8;
+    --a-line: #1e2d4a;
     --a-accent-text: color-mix(in oklab, var(--a-accent) var(--a-keep-on-night), #ffffff);
-    --a-tint: color-mix(in oklab, var(--a-accent) 16%, var(--a-panel));
-    --a-bad: #ff8a80;
-    --a-dock: #1c2126;
-    --a-dock-quiet: rgba(233, 238, 240, 0.55);
+    --a-tint: color-mix(in oklab, var(--a-accent) 18%, var(--a-panel));
+    --a-bad: #ff6b6b;
+    --a-good: #4ade80;
+    --a-dock: #111827;
+    --a-dock-quiet: rgba(232, 237, 248, 0.5);
     color-scheme: dark;
   }
 }
 
+/* ================================================================= reset */
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -70,7 +77,8 @@ body {
   margin: 0;
   background: var(--a-bg);
   color: var(--a-ink);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Noto Sans Ethiopic", "Abyssinica SIL", sans-serif;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Noto Sans Ethiopic",
+    "Abyssinica SIL", sans-serif;
   font-size: 16px;
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
@@ -78,7 +86,7 @@ body {
 
 [data-lang="am"] {
   font-size: 15.5px;
-  line-height: 1.55;
+  line-height: 1.58;
 }
 
 button,
@@ -104,20 +112,21 @@ a {
   outline-offset: 2px;
 }
 
-/* ------------------------------------------------------------------- canvas */
+/* ================================================================= canvas */
 .a {
   min-height: 100dvh;
   max-width: 30rem;
   margin: 0 auto;
-  padding: 0 16px calc(var(--a-dock-h) + 22px + env(safe-area-inset-bottom));
+  padding: 0 16px calc(var(--a-dock-h) + 24px + env(safe-area-inset-bottom));
 }
 
+/* ================================================================= header */
 .a-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  padding: calc(18px + env(safe-area-inset-top)) 0 2px;
+  padding: calc(20px + env(safe-area-inset-top)) 0 4px;
 }
 
 .a-eyebrow {
@@ -131,8 +140,8 @@ a {
 
 .a-title {
   margin: 4px 0 0;
-  font-size: 27px;
-  font-weight: 700;
+  font-size: 28px;
+  font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.1;
 }
@@ -144,10 +153,10 @@ a {
 }
 
 .a-mark {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  border-radius: 11px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   background: var(--a-accent);
@@ -158,23 +167,23 @@ a {
 }
 
 .a-face {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
   border-radius: 50%;
   overflow: hidden;
   display: grid;
   place-items: center;
-  background: var(--a-panel);
-  border: 1px solid var(--a-line);
-  color: var(--a-quiet);
+  background: var(--a-tint);
+  border: 2px solid var(--a-tint-line);
+  color: var(--a-accent-text);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .a-face svg {
-  width: 17px;
-  height: 17px;
+  width: 20px;
+  height: 20px;
 }
 
 .a-face img {
@@ -183,12 +192,12 @@ a {
   object-fit: cover;
 }
 
-/* -------------------------------------------------------------- micro labels */
+/* ================================================================= micro labels */
 .a-label {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 24px 2px 8px;
+  margin: 26px 2px 9px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -202,6 +211,7 @@ a {
   height: 5px;
   border-radius: 2px;
   background: var(--a-accent-text);
+  flex-shrink: 0;
 }
 
 .a-count-line {
@@ -214,7 +224,7 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
-/* -------------------------------------------------------------------- panels */
+/* ================================================================= panels */
 .a-panel {
   border: 1px solid var(--a-line);
   border-radius: var(--a-r);
@@ -231,19 +241,21 @@ a {
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 11px 13px;
+  padding: 12px 14px;
   text-align: left;
   background: none;
+  min-height: 44px;
 }
 
 .a-item:active {
   background: var(--a-raise);
 }
 
+/* ================================================================= badge */
 .a-badge {
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   display: grid;
   place-items: center;
@@ -255,6 +267,33 @@ a {
   text-transform: uppercase;
 }
 
+/* file-type badge variants */
+.a-badge.pdf  { background: #fde8e8; color: #c0392b; }
+.a-badge.doc  { background: #e8f0fe; color: #1a4fa8; }
+.a-badge.ppt  { background: #fff0e6; color: #d35400; }
+.a-badge.xls  { background: #e6f9ee; color: #16a34a; }
+.a-badge.vid  { background: #f5e6ff; color: #7c3aed; }
+
+:root[data-a-theme="dark"] .a-badge.pdf  { background: #3d0e0e; color: #ff8a80; }
+:root[data-a-theme="dark"] .a-badge.doc  { background: #0e1d3d; color: #90b8ff; }
+:root[data-a-theme="dark"] .a-badge.ppt  { background: #3d1e0e; color: #ffa07a; }
+:root[data-a-theme="dark"] .a-badge.xls  { background: #0e2d1a; color: #4ade80; }
+:root[data-a-theme="dark"] .a-badge.vid  { background: #22103d; color: #c4b5fd; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-a-theme]) .a-badge.pdf,
+  :root[data-a-theme="auto"] .a-badge.pdf  { background: #3d0e0e; color: #ff8a80; }
+  :root:not([data-a-theme]) .a-badge.doc,
+  :root[data-a-theme="auto"] .a-badge.doc  { background: #0e1d3d; color: #90b8ff; }
+  :root:not([data-a-theme]) .a-badge.ppt,
+  :root[data-a-theme="auto"] .a-badge.ppt  { background: #3d1e0e; color: #ffa07a; }
+  :root:not([data-a-theme]) .a-badge.xls,
+  :root[data-a-theme="auto"] .a-badge.xls  { background: #0e2d1a; color: #4ade80; }
+  :root:not([data-a-theme]) .a-badge.vid,
+  :root[data-a-theme="auto"] .a-badge.vid  { background: #22103d; color: #c4b5fd; }
+}
+
+/* ================================================================= content */
 .a-main {
   flex: 1;
   min-width: 0;
@@ -300,13 +339,14 @@ a {
 }
 
 .a-act {
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   display: grid;
   place-items: center;
   color: var(--a-faint);
+  min-height: 44px;
 }
 
 .a-act.on {
@@ -314,10 +354,10 @@ a {
   background: var(--a-tint);
 }
 
-/* files nested under an open course */
+/* ================================================================= files list */
 .a-files {
-  margin: 0 13px 11px;
-  padding-left: 11px;
+  margin: 0 14px 12px;
+  padding-left: 12px;
   border-left: 2px solid var(--a-tint-line);
 }
 
@@ -333,7 +373,7 @@ a {
   margin: 8px 0;
 }
 
-/* home course strip */
+/* ================================================================= strip */
 .a-strip {
   display: flex;
   gap: 10px;
@@ -350,13 +390,14 @@ a {
 
 .a-card {
   flex: 0 0 auto;
-  width: 136px;
-  padding: 12px;
+  width: 140px;
+  padding: 14px;
   border: 1px solid var(--a-line);
   border-radius: var(--a-r);
   background: var(--a-panel);
   text-align: left;
   scroll-snap-align: start;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .a-card strong {
@@ -364,7 +405,7 @@ a {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  margin-top: 9px;
+  margin-top: 10px;
   font-weight: 600;
   font-size: 13.5px;
   line-height: 1.3;
@@ -384,7 +425,7 @@ a {
   background: var(--a-tint);
 }
 
-/* ------------------------------------------------------------------- notice */
+/* ================================================================= notice */
 .a-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -401,7 +442,7 @@ a {
   align-items: flex-start;
   gap: 10px;
   margin-top: 14px;
-  padding: 12px 13px;
+  padding: 13px 14px;
   border-radius: var(--a-r);
   border-left: 3px solid var(--a-accent);
   background: var(--a-tint);
@@ -418,6 +459,7 @@ a {
   margin: 0;
 }
 
+/* ================================================================= stats */
 .a-stats {
   display: flex;
   flex-wrap: wrap;
@@ -437,7 +479,7 @@ a {
 .a-stats b {
   display: block;
   font-size: 19px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--a-ink);
   font-variant-numeric: tabular-nums;
@@ -447,6 +489,37 @@ a {
   color: var(--a-accent-text);
 }
 
+/* ================================================================= stat card */
+.a-stat {
+  flex: 1;
+  min-width: 80px;
+  padding: 14px;
+  border: 1px solid var(--a-line);
+  border-radius: var(--a-r);
+  background: var(--a-panel);
+  text-align: center;
+}
+
+.a-stat b {
+  display: block;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--a-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.a-stat span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--a-faint);
+  margin-top: 2px;
+  display: block;
+}
+
+/* ================================================================= flag */
 .a-flag {
   display: flex;
   align-items: center;
@@ -460,16 +533,17 @@ a {
   color: var(--a-accent-text);
 }
 
-/* ------------------------------------------------------------------- inputs */
+/* ================================================================= inputs */
 .a-search {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 16px;
-  padding: 11px 15px;
+  padding: 12px 16px;
   border: 1px solid var(--a-line);
   border-radius: 999px;
   background: var(--a-panel);
+  transition: border-color 0.15s;
 }
 
 .a-search svg {
@@ -479,6 +553,7 @@ a {
 
 .a-search:focus-within {
   border-color: var(--a-accent-text);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--a-accent) 14%, transparent);
 }
 
 .a-search input {
@@ -491,8 +566,8 @@ a {
 }
 
 .a-clear {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -515,12 +590,14 @@ a {
 
 .a-chip {
   flex: 0 0 auto;
-  padding: 7px 14px;
+  padding: 8px 15px;
   border-radius: 999px;
   border: 1px solid var(--a-line);
   background: var(--a-panel);
   font-size: 13px;
   color: var(--a-quiet);
+  min-height: 36px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .a-chip.on {
@@ -542,11 +619,13 @@ a {
 
 .a-segbtn {
   flex: 1;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
   color: var(--a-quiet);
+  min-height: 44px;
+  transition: background 0.15s, color 0.15s;
 }
 
 .a-segbtn.on {
@@ -573,11 +652,12 @@ a {
 .a-field select,
 .a-field textarea {
   width: 100%;
-  padding: 12px 14px;
+  padding: 13px 14px;
   border-radius: 12px;
   border: 1px solid var(--a-line);
   background: var(--a-panel);
   outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .a-field textarea {
@@ -589,9 +669,10 @@ a {
 .a-field select:focus,
 .a-field textarea:focus {
   border-color: var(--a-accent-text);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--a-accent) 14%, transparent);
 }
 
-/* ------------------------------------------------------------------ buttons */
+/* ================================================================= buttons */
 .a-btn {
   display: flex;
   align-items: center;
@@ -599,11 +680,17 @@ a {
   gap: 8px;
   width: 100%;
   margin-top: 12px;
-  padding: 13px 16px;
+  padding: 14px 18px;
   border-radius: 999px;
-  font-weight: 650;
+  font-weight: 700;
   font-size: 15px;
   letter-spacing: -0.01em;
+  min-height: 50px;
+  transition: opacity 0.15s, background 0.15s, transform 0.1s;
+}
+
+.a-btn:active {
+  transform: scale(0.97);
 }
 
 .a-btn:disabled {
@@ -613,6 +700,7 @@ a {
 .a-btn.primary {
   background: var(--a-accent);
   color: var(--a-on-accent);
+  box-shadow: 0 4px 14px color-mix(in oklab, var(--a-accent) 40%, transparent);
 }
 
 .a-btn.primary:active {
@@ -644,20 +732,22 @@ a {
 .a-btn.row {
   width: auto;
   margin: 0;
-  padding: 8px 13px;
+  padding: 9px 14px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
   background: var(--a-tint);
   color: var(--a-accent-text);
+  border-radius: 999px;
+  min-height: 36px;
 }
 
-/* account rows */
+/* account key-value rows */
 .a-kv {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 14px;
-  padding: 11px 13px;
+  padding: 12px 14px;
 }
 
 .a-kv span {
@@ -684,8 +774,10 @@ a {
 
 .a-err {
   margin: 12px 0 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--a-bad);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-left: 3px solid var(--a-bad);
+  background: color-mix(in oklab, var(--a-bad) 10%, var(--a-panel));
   font-size: 13.5px;
   color: var(--a-bad);
 }
@@ -696,8 +788,8 @@ a {
 }
 
 .a-stars button {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border-radius: 12px;
@@ -709,7 +801,7 @@ a {
   background: var(--a-tint);
 }
 
-/* --------------------------------------------------------------------- dock */
+/* ================================================================= dock */
 .a-dock {
   position: fixed;
   left: 12px;
@@ -723,7 +815,7 @@ a {
   padding: 6px;
   border-radius: 999px;
   background: var(--a-dock);
-  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 12px 36px -16px rgba(0, 0, 0, 0.88);
 }
 
 .a-dock button {
@@ -732,12 +824,14 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   padding: 9px 4px;
   border-radius: 999px;
   color: var(--a-dock-quiet);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 650;
+  min-height: 44px;
+  transition: background 0.18s, color 0.18s;
 }
 
 .a-dock button span {
@@ -757,7 +851,7 @@ a {
   }
 }
 
-/* ------------------------------------------------------------------- sheets */
+/* ================================================================= sheets */
 .a-scrim {
   position: fixed;
   inset: 0;
@@ -765,7 +859,8 @@ a {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(8, 12, 10, 0.55);
+  background: rgba(8, 14, 26, 0.6);
+  backdrop-filter: blur(4px);
 }
 
 .a-sheet {
@@ -774,17 +869,17 @@ a {
   max-height: 88dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 6px 18px calc(22px + env(safe-area-inset-bottom));
-  border-radius: 22px 22px 0 0;
+  padding: 6px 18px calc(24px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
   background: var(--a-bg);
   animation: a-rise 0.22s cubic-bezier(0.22, 0.68, 0.36, 1);
 }
 
 .a-handle {
   display: block;
-  width: 36px;
+  width: 38px;
   height: 4px;
-  margin: 4px auto 12px;
+  margin: 4px auto 14px;
   border-radius: 2px;
   background: var(--a-line);
 }
@@ -806,15 +901,17 @@ a {
 }
 
 .a-close {
-  flex: 0 0 32px;
-  width: 32px;
-  height: 32px;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   border: 1px solid var(--a-line);
   background: var(--a-panel);
   color: var(--a-quiet);
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .a-item.pick.on {
@@ -825,6 +922,7 @@ a {
   color: var(--a-accent-text);
 }
 
+/* ================================================================= wait / countdown */
 .a-wait {
   display: flex;
   flex-direction: column;
@@ -843,7 +941,7 @@ a {
 
 .a-meter {
   width: 100%;
-  height: 3px;
+  height: 4px;
   margin-top: 16px;
   border-radius: 2px;
   background: var(--a-line);
@@ -857,7 +955,7 @@ a {
   transition: width 0.25s linear;
 }
 
-/* the two states that own the whole screen */
+/* ================================================================= stand / full-screen states */
 .a-stand {
   display: flex;
   flex-direction: column;
@@ -868,44 +966,326 @@ a {
   padding: 32px 24px calc(32px + env(safe-area-inset-bottom));
 }
 
+/* ================================================================= toast */
 .a-toast {
   position: fixed;
   left: 16px;
   right: 16px;
-  bottom: calc(var(--a-dock-h) + 8px + env(safe-area-inset-bottom));
+  bottom: calc(var(--a-dock-h) + 10px + env(safe-area-inset-bottom));
   z-index: 50;
   max-width: 28rem;
   margin: 0 auto;
-  padding: 11px 15px;
-  border-radius: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
   background: var(--a-ink);
   color: var(--a-bg);
   font-size: 13.5px;
   font-weight: 500;
+  animation: a-toast-in 0.24s cubic-bezier(0.22, 0.68, 0.36, 1);
 }
 
+/* ================================================================= skeleton */
 .a-skeleton {
-  height: 58px;
+  height: 60px;
   margin-top: 10px;
   border-radius: var(--a-r);
-  background: linear-gradient(90deg, var(--a-panel), var(--a-raise), var(--a-panel));
+  background: linear-gradient(
+    90deg,
+    var(--a-panel) 0%,
+    var(--a-raise) 40%,
+    var(--a-panel) 100%
+  );
   background-size: 200% 100%;
   animation: a-shimmer 1.3s linear infinite;
 }
 
-/* --------------------------------------------------------------- welcome */
-/* The six-screen introduction. It keeps its own palette rather than the app's accent, because the
-   brand is the point here: navy for authority, royal blue for action, gold only where a screen
-   needs one premium detail. Every moving part animates transform or opacity alone — no filters, no
-   blur, nothing that makes a low-end Android phone stutter on first launch. */
+/* ================================================================= feed */
+.a-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.a-feed-card {
+  border: 1px solid var(--a-line);
+  border-radius: var(--a-r);
+  background: var(--a-panel);
+  overflow: hidden;
+}
+
+.a-feed-img {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  display: block;
+}
+
+.a-feed-body {
+  padding: 14px 16px;
+}
+
+.a-feed-kicker {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--a-accent-text);
+  margin: 0 0 5px;
+}
+
+.a-feed-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin: 0 0 6px;
+  color: var(--a-ink);
+}
+
+.a-feed-cta {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--a-tint);
+  color: var(--a-accent-text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--a-tint-line);
+  min-height: 44px;
+  transition: opacity 0.15s;
+}
+
+.a-feed-cta:active {
+  opacity: 0.75;
+}
+
+/* ================================================================= carousel */
+.a-carousel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--a-r);
+  border: 1px solid var(--a-line);
+  margin-top: 16px;
+}
+
+.a-carousel-track {
+  display: flex;
+  transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.a-carousel-slide {
+  flex: 0 0 100%;
+  min-width: 100%;
+  position: relative;
+  background: var(--a-panel);
+}
+
+.a-carousel-slide img {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  display: block;
+}
+
+.a-carousel-slide .a-feed-body {
+  padding: 12px 14px 14px;
+}
+
+.a-carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  background: var(--a-panel);
+}
+
+.a-carousel-dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--a-line);
+  transition: width 0.28s ease, background 0.28s ease;
+  min-height: 0;
+}
+
+.a-carousel-dots button.on {
+  width: 24px;
+  background: var(--a-accent);
+}
+
+/* ================================================================= practice */
+.a-practice-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.a-practice-card {
+  border: 1px solid var(--a-line);
+  border-radius: var(--a-r);
+  background: var(--a-panel);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.a-practice-card .a-item {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.a-practice-card-body {
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--a-line);
+  background: var(--a-bg);
+}
+
+.a-practice-card-body p {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.a-practice-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--a-line);
+  background: var(--a-panel);
+  margin-bottom: 8px;
+  font-size: 14px;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  min-height: 44px;
+}
+
+.a-practice-option.selected {
+  border-color: var(--a-accent);
+  background: var(--a-tint);
+  font-weight: 600;
+}
+
+.a-practice-option.correct {
+  border-color: var(--a-good);
+  background: color-mix(in oklab, var(--a-good) 12%, var(--a-panel));
+  color: var(--a-good);
+  font-weight: 600;
+}
+
+.a-practice-option.wrong {
+  border-color: var(--a-bad);
+  background: color-mix(in oklab, var(--a-bad) 10%, var(--a-panel));
+  color: var(--a-bad);
+}
+
+.a-practice-result {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.a-practice-result.correct {
+  background: color-mix(in oklab, var(--a-good) 12%, var(--a-panel));
+  color: var(--a-good);
+  border: 1px solid color-mix(in oklab, var(--a-good) 40%, transparent);
+}
+
+.a-practice-result.wrong {
+  background: color-mix(in oklab, var(--a-bad) 10%, var(--a-panel));
+  color: var(--a-bad);
+  border: 1px solid color-mix(in oklab, var(--a-bad) 40%, transparent);
+}
+
+.a-practice-explanation {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--a-raise);
+  font-size: 13.5px;
+  color: var(--a-quiet);
+  line-height: 1.55;
+}
+
+/* ================================================================= leaderboard */
+.a-leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.a-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--a-line);
+  border-radius: var(--a-r);
+  background: var(--a-panel);
+}
+
+.a-leaderboard-rank {
+  flex: 0 0 26px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--a-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.a-leaderboard-rank.top {
+  color: var(--a-accent-text);
+}
+
+.a-leaderboard-pts {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--a-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================= keyframes */
+@keyframes a-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+@keyframes a-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes a-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ================================================================= onboarding (.ob-*)
+   The six-screen introduction keeps its own palette — navy for authority, royal blue for
+   action, gold only where a screen needs one premium detail.
+   All animations use transform/opacity only — no filters. */
 
 .ob {
   --ob-navy: #142b4a;
   --ob-blue: #2878d0;
   --ob-gold: #d9ad50;
 
-  /* sky layers: three gradients stacked, cross-faded by opacity so a screen change slides from one
-     field into the next instead of snapping */
   --ob-sky-deep: linear-gradient(163deg, #0b1b31 0%, #142b4a 38%, #1c5aa0 74%, #2878d0 100%);
   --ob-sky-light: linear-gradient(168deg, #f4f7fb 0%, #ffffff 52%, #e4eefa 100%);
   --ob-sky-warm: linear-gradient(168deg, #fbf6ea 0%, #ffffff 48%, #f3e6c8 100%);
@@ -920,7 +1300,6 @@ a {
   isolation: isolate;
 }
 
-/* tone: the deep navy field — welcome, courses, news */
 .ob--navy {
   --ob-ink: #ffffff;
   --ob-body: rgba(217, 232, 248, 0.82);
@@ -938,7 +1317,6 @@ a {
   --ob-sky-warm-on: 0;
 }
 
-/* tone: the soft paper field — materials, offline */
 .ob--light {
   --ob-ink: var(--ob-navy);
   --ob-body: #4c617d;
@@ -956,7 +1334,6 @@ a {
   --ob-sky-warm-on: 0;
 }
 
-/* tone: the gold field, saved for the last screen so joining feels like arriving */
 .ob--gold {
   --ob-ink: var(--ob-navy);
   --ob-body: #56617a;
@@ -1025,7 +1402,6 @@ a {
   animation: ob-drift 17s ease-in-out infinite alternate-reverse;
 }
 
-/* a single sheet of repeating shapes, used instead of a noise bitmap so first launch stays tiny */
 .ob-grain {
   position: absolute;
   inset: 0;
@@ -1079,6 +1455,7 @@ a {
   font-weight: 650;
   letter-spacing: 0.01em;
   transition: color 0.42s ease, background 0.2s ease, border-color 0.42s ease;
+  min-height: 44px;
 }
 
 .ob-lang {
@@ -1114,7 +1491,6 @@ a {
   text-align: center;
 }
 
-/* six scenes mounted at once means six loops running; only the one on screen may tick */
 .ob-page[aria-hidden="true"] * {
   animation-play-state: paused;
 }
@@ -1162,8 +1538,6 @@ a {
   overflow: visible;
 }
 
-/* a dropped-in 3D render sits under the animated prop layer, not instead of it */
-/* an SVG <image>, not an <img> — it has to paint between the disc and the prop chips */
 .ob-art-img {
   transform-box: fill-box;
   transform-origin: 50% 92%;
@@ -1213,6 +1587,7 @@ a {
   border-radius: 999px;
   background: var(--ob-dot);
   transition: width 0.3s ease, background 0.3s ease;
+  min-height: 0;
 }
 
 .ob-dots button.on {
@@ -1232,7 +1607,6 @@ a {
   margin-top: 0;
 }
 
-/* the app's own accent is a green the brand does not use — inside the welcome flow, action is blue */
 .ob .a-btn.primary {
   background: var(--ob-blue);
   color: #ffffff;
@@ -1284,7 +1658,7 @@ a {
   transition: color 0.42s ease;
 }
 
-/* ------------------------------------------------------------------ motion */
+/* ---- onboarding motion ---- */
 
 .ob-page:not([aria-hidden="true"]) .ob-step {
   animation: ob-in 0.4s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
@@ -1302,7 +1676,6 @@ a {
   animation: ob-in 0.46s 0.17s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-/* the figure breathes from its feet, so the whole body stays planted */
 .ob-figure {
   transform-box: fill-box;
   transform-origin: 50% 100%;
@@ -1386,205 +1759,96 @@ a {
 }
 
 @keyframes ob-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
+  from { opacity: 0; transform: translateY(10px); }
 }
 
 @keyframes ob-in-art {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.94);
-  }
+  from { opacity: 0; transform: translateY(14px) scale(0.94); }
 }
 
 @keyframes ob-breathe {
-  from {
-    transform: translateY(0) scale(1);
-  }
-
-  to {
-    transform: translateY(-2.5px) scale(1.012);
-  }
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(-2.5px) scale(1.012); }
 }
 
 @keyframes ob-breathe-img {
-  from {
-    transform: translateY(0) scale(1);
-  }
-
-  to {
-    transform: translateY(-3px) scale(1.015);
-  }
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(-3px) scale(1.015); }
 }
 
 @keyframes ob-blink {
-  0%,
-  88%,
-  100% {
-    transform: scaleY(1);
-  }
-
-  92%,
-  95% {
-    transform: scaleY(0.08);
-  }
+  0%, 88%, 100% { transform: scaleY(1); }
+  92%, 95%      { transform: scaleY(0.08); }
 }
 
 @keyframes ob-wave {
-  from {
-    transform: rotate(-13deg) translateY(1px);
-  }
-
-  to {
-    transform: rotate(15deg) translateY(-2px);
-  }
+  from { transform: rotate(-13deg) translateY(1px); }
+  to   { transform: rotate(15deg) translateY(-2px); }
 }
 
 @keyframes ob-cheer {
-  from {
-    transform: translateY(2px) rotate(-6deg);
-  }
-
-  to {
-    transform: translateY(-6px) rotate(6deg);
-  }
+  from { transform: translateY(2px) rotate(-6deg); }
+  to   { transform: translateY(-6px) rotate(6deg); }
 }
 
 @keyframes ob-float {
-  from {
-    transform: translateY(-8px);
-  }
-
-  to {
-    transform: translateY(9px);
-  }
+  from { transform: translateY(-8px); }
+  to   { transform: translateY(9px); }
 }
 
 @keyframes ob-slide {
-  from {
-    transform: translateX(-6px);
-  }
-
-  to {
-    transform: translateX(7px);
-  }
+  from { transform: translateX(-6px); }
+  to   { transform: translateX(7px); }
 }
 
 @keyframes ob-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes ob-halo {
-  from {
-    transform: scale(0.97);
-    opacity: 0.86;
-  }
-
-  to {
-    transform: scale(1.04);
-    opacity: 1;
-  }
+  from { transform: scale(0.97); opacity: 0.86; }
+  to   { transform: scale(1.04); opacity: 1; }
 }
 
 @keyframes ob-pulse {
-  from {
-    opacity: 0.24;
-    transform: scale(0.96);
-  }
-
-  to {
-    opacity: 0.4;
-    transform: scale(1.04);
-  }
+  from { opacity: 0.24; transform: scale(0.96); }
+  to   { opacity: 0.4;  transform: scale(1.04); }
 }
 
-/* a page catching light, not a page swinging off its spine */
 @keyframes ob-leaf {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-
-  38%,
-  62% {
-    opacity: 0.95;
-  }
+  0%, 100%  { opacity: 0.3; }
+  38%, 62%  { opacity: 0.95; }
 }
 
 @keyframes ob-load {
-  0% {
-    transform: scaleX(0.06);
-  }
-
-  70%,
-  100% {
-    transform: scaleX(1);
-  }
+  0%       { transform: scaleX(0.06); }
+  70%, 100% { transform: scaleX(1); }
 }
 
 @keyframes ob-drop {
-  0% {
-    transform: translateY(-12px);
-    opacity: 0;
-  }
-
-  22% {
-    opacity: 1;
-  }
-
-  72%,
-  100% {
-    transform: translateY(22px);
-    opacity: 0;
-  }
+  0%         { transform: translateY(-12px); opacity: 0; }
+  22%        { opacity: 1; }
+  72%, 100%  { transform: translateY(22px); opacity: 0; }
 }
 
 @keyframes ob-offline {
-  0%,
-  55%,
-  100% {
-    opacity: 1;
-  }
-
-  70%,
-  88% {
-    opacity: 0.15;
-  }
+  0%, 55%, 100% { opacity: 1; }
+  70%, 88%      { opacity: 0.15; }
 }
 
 @keyframes ob-confetti {
-  0% {
-    transform: translateY(-14px) rotate(0deg);
-    opacity: 0;
-  }
-
-  18% {
-    opacity: 1;
-  }
-
-  100% {
-    transform: translateY(46px) rotate(220deg);
-    opacity: 0;
-  }
+  0%   { transform: translateY(-14px) rotate(0deg); opacity: 0; }
+  18%  { opacity: 1; }
+  100% { transform: translateY(46px) rotate(220deg); opacity: 0; }
 }
 
 @keyframes ob-drift {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-
-  to {
-    transform: translate3d(-4%, 3%, 0);
-  }
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-4%, 3%, 0); }
 }
 
-/* ----------------------------------------------------------------- layout */
+/* ---- onboarding layout ---- */
 
-/* a tall phone has the room, so the illustration should take it rather than leave a gap */
 @media (min-height: 800px) {
   .ob-art {
     width: min(80vw, 312px);
@@ -1600,290 +1864,13 @@ a {
   }
 }
 
-/* tall phones have room to spare; short ones must not push the button under the thumb */
 @media (max-height: 700px) {
   .ob-art {
-    width: min(58vw, 208px);
-    margin-bottom: 14px;
-  }
-
-  .ob-foot {
-    gap: 13px;
-  }
-}
-
-@media (max-height: 600px) {
-  .ob-art {
-    width: min(46vw, 168px);
+    width: min(52vw, 180px);
     margin-bottom: 10px;
   }
 
   .ob-title {
-    font-size: 20px;
-  }
-
-  .ob-body {
-    font-size: 13px;
-  }
-
-  .ob-step {
-    display: none;
-  }
-}
-
-@media (max-width: 340px) {
-  .ob-page {
-    padding-inline: 18px;
-  }
-
-  .ob-art {
-    width: min(80vw, 232px);
-  }
-
-  .ob-top {
-    padding-inline: 14px;
-  }
-}
-
-/* a phone on its side reads as a card, not a column */
-@media (orientation: landscape) and (max-height: 520px) {
-  .ob-view {
-    align-items: flex-start;
-  }
-
-  .ob-page {
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: 22px;
-    padding: 4px 26px;
-    text-align: left;
-  }
-
-  .ob-step {
-    position: absolute;
-    top: 10px;
-    left: 18px;
-  }
-
-  .ob-art {
-    width: min(34vh, 178px);
-    margin-bottom: 0;
-    flex: 0 0 auto;
-  }
-
-  .ob-copy {
-    max-width: 32ch;
-  }
-
-  .ob-title {
-    font-size: 21px;
-  }
-
-  .ob-foot {
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-}
-
-@media (min-width: 620px) {
-  .ob-page {
-    max-width: 520px;
-    margin: 0 auto;
-  }
-
-  .ob-art {
-    width: min(46vw, 320px);
-    margin-bottom: 26px;
-  }
-
-  .ob-top,
-  .ob-foot {
-    padding-inline: max(28px, calc((100vw - 520px) / 2));
-  }
-}
-
-/* ------------------------------------------------------------------ themes */
-
-/* The two paper fields become night fields, and the characters keep their own light. The night
-   palette is declared once here and merely applied below, because it has to answer to both the
-   system preference and the theme switch the student sets inside the app. */
-.ob {
-  --ob-n-sky-light: linear-gradient(168deg, #0c1526 0%, #131e31 52%, #182742 100%);
-  --ob-n-sky-warm: linear-gradient(168deg, #1a1710 0%, #131e31 52%, #2a2318 100%);
-  --ob-n-ink: #eef4fb;
-  --ob-n-body: rgba(203, 219, 238, 0.76);
-  --ob-n-chip: rgba(255, 255, 255, 0.1);
-  --ob-n-chip-line: rgba(255, 255, 255, 0.2);
-  --ob-n-dot: rgba(255, 255, 255, 0.28);
-  --ob-n-disc-a: rgba(255, 255, 255, 0.16);
-  --ob-n-disc-b: rgba(124, 178, 226, 0.2);
-  --ob-n-disc-c: rgba(124, 178, 226, 0.04);
-}
-
-:root[data-a-theme="dark"] .ob--light,
-:root[data-a-theme="dark"] .ob--gold {
-  --ob-sky-light: var(--ob-n-sky-light);
-  --ob-sky-warm: var(--ob-n-sky-warm);
-  --ob-ink: var(--ob-n-ink);
-  --ob-body: var(--ob-n-body);
-  --ob-chip: var(--ob-n-chip);
-  --ob-chip-line: var(--ob-n-chip-line);
-  --ob-chip-ink: #dce8f6;
-  --ob-dot: var(--ob-n-dot);
-  --ob-dot-on: var(--ob-gold);
-  --ob-disc-a: var(--ob-n-disc-a);
-  --ob-disc-b: var(--ob-n-disc-b);
-  --ob-disc-c: var(--ob-n-disc-c);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-a-theme]) .ob--light,
-  :root:not([data-a-theme]) .ob--gold,
-  :root[data-a-theme="auto"] .ob--light,
-  :root[data-a-theme="auto"] .ob--gold {
-    --ob-sky-light: var(--ob-n-sky-light);
-    --ob-sky-warm: var(--ob-n-sky-warm);
-    --ob-ink: var(--ob-n-ink);
-    --ob-body: var(--ob-n-body);
-    --ob-chip: var(--ob-n-chip);
-    --ob-chip-line: var(--ob-n-chip-line);
-    --ob-chip-ink: #dce8f6;
-    --ob-dot: var(--ob-n-dot);
-    --ob-dot-on: var(--ob-gold);
-    --ob-disc-a: var(--ob-n-disc-a);
-    --ob-disc-b: var(--ob-n-disc-b);
-    --ob-disc-c: var(--ob-n-disc-c);
-  }
-}
-
-/* ----------------------------------------------------------- walkthrough */
-.tu-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: rgba(8, 11, 13, 0.62);
-}
-
-.tu {
-  width: 100%;
-  max-width: 30rem;
-  overflow: hidden;
-  background: var(--a-panel);
-  border-radius: 22px 22px 0 0;
-  padding: 14px 18px calc(20px + env(safe-area-inset-bottom));
-  box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.26);
-  animation: tu-rise 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.tu-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.tu-eyebrow {
-  margin: 0;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--a-faint);
-}
-
-.tu-track {
-  display: flex;
-  transition: transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.tu-page {
-  flex: 0 0 100%;
-  min-width: 100%;
-  display: flex;
-  align-items: flex-start;
-  gap: 13px;
-  min-height: 116px;
-  padding: 16px 2px 18px;
-}
-
-.tu-ico {
-  flex: 0 0 42px;
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
-  display: grid;
-  place-items: center;
-  background: var(--a-tint);
-  color: var(--a-accent-text);
-}
-
-.tu-title {
-  margin: 0 0 5px;
-  font-size: 16.5px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-}
-
-.tu-body {
-  margin: 0;
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--a-quiet);
-}
-
-.tu-meter {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 14px;
-}
-
-.tu-meter i {
-  flex: 1;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--a-line);
-  transition: background 0.25s ease;
-}
-
-.tu-meter i.on {
-  background: var(--a-accent);
-}
-
-@keyframes tu-rise {
-  from {
-    transform: translateY(100%);
-  }
-}
-
-@keyframes a-shimmer {
-  to {
-    background-position: -200% 0;
-  }
-}
-
-@keyframes a-rise {
-  from {
-    transform: translateY(14px);
-    opacity: 0.6;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
-  }
-
-  /* these two end their cycle at opacity 0, so freezing them would erase the prop instead of
-     stilling it — hold them at the visible middle of their travel */
-  .ob-drop,
-  .ob-confetti rect {
-    animation: none;
-    opacity: 1;
+    font-size: clamp(18px, 5vw, 22px);
   }
 }

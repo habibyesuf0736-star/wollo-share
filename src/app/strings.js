@@ -188,7 +188,21 @@ export const COPY = {
     deviceThis: "This phone",
     deviceOut: "Sign out",
     deviceOutAll: "Sign out of the others",
-    deviceNone: "No other device is signed in."
+    deviceNone: "No other device is signed in.",
+    practice: "Practice",
+    leaderboard: "Top Students",
+    questions: "Questions",
+    takeExam: "Take an Exam",
+    browseQ: "Browse Questions",
+    noQuestions: "No questions published yet.",
+    answer: "Answer",
+    submit: "Submit",
+    correct: "Correct!",
+    wrong: "Incorrect",
+    yourAnswer: "Your answer",
+    explanation: "Explanation",
+    points: "points",
+    newsSection: "News & Announcements"
   },
   am: {
     brand: "ወሎ ሼር",
