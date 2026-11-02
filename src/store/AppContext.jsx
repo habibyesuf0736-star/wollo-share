@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import universityEmblem from "../assets/images/wollo-university-emblem.png";
 import * as api from "../lib/api.js";
-import { DEFAULT_SUBCATEGORIES, isStaffOnlyCourse, nowStamp, triggerBrowserDownload, uniqueId } from "../lib/utils.js";
+import { DEFAULT_SUBCATEGORIES, isStaffOnlyCourse, namedFile, nowStamp, triggerBrowserDownload, uniqueId } from "../lib/utils.js";
 import {
   STORAGE_KEYS,
   readJson,
@@ -11,6 +12,7 @@ import {
   takeTabJson
 } from "../lib/storage.js";
 import { HELP_SEO, LIBRARY_SEO, PREMIUM_SEO, SITE_NAME, applyPageSeo, courseSlug, findCourseBySlug, seoForCourse } from "../lib/seo.js";
+import { cardSlug, cardState, feedCards, findCardBySlug } from "../lib/homeFeed.js";
 
 const AppContext = createContext(null);
 
@@ -24,6 +26,16 @@ export const DEFAULT_TEXTS = {
   loginLines: "",
   premiumPayment: ""
 };
+
+// A room with no published rules reads as an unmoderated one, so the list ships with a
+// starting point the administrator can rewrite rather than leaving empty.
+export const DEFAULT_CHAT_RULES = [
+  "Keep it respectful — no insults, harassment or hate speech.",
+  "Talk about courses and materials; no spam or advertising.",
+  "No violent, sexual or otherwise harmful images.",
+  "Never post another student's phone number, email or private details.",
+  "Report a message instead of arguing with it — the team reads every report."
+];
 
 export const DEFAULT_APPEARANCE = {
   primaryColor: "#1d624f",
@@ -113,9 +125,18 @@ function viewFromLocation() {
   if (pathname === "/help" || /^#\/help/.test(hash)) return { name: "help" };
   if (pathname === "/premium" || /^#\/premium/.test(hash)) return { name: "premium" };
   if (pathname === "/login" || /^#\/login/.test(hash)) return { name: "login" };
-  if (/^#\/profile/.test(hash)) return { name: "profile" };
+  // The chatroom is signed-in only, so its address is for coming back, not for sharing.
+  if (pathname === "/chat" || /^#\/chat/.test(hash)) return { name: "chat" };
+  // Practice is signed-in only too: its address is for coming back, not for sharing.
+  if (pathname === "/practice" || /^#\/practice/.test(hash)) return { name: "practice" };
+  if (pathname === "/downloads" || /^#\/downloads/.test(hash)) return { name: "downloads" };
+  // News is public and linkable, so an article keeps its own address under /news/<slug>.
+  const newsPath = pathname.match(/^\/news(?:\/([A-Za-z0-9_-]+))?/);
+  if (newsPath) return { name: "news", slug: newsPath[1] ? decodeURIComponent(newsPath[1]) : "" };
+  if (/^#\/news/.test(hash)) return { name: "news", slug: "" };
+  if (pathname === "/profile" || /^#\/profile/.test(hash)) return { name: "profile" };
   const match = hash.match(
-    /^#\/admin(?:\/(overview|reviews|courses|materials|appearance|downloads|users|mail|analytics|backup))?/
+    /^#\/admin(?:\/(overview|home|reviews|courses|materials|appearance|downloads|premium|payments|users|mail|analytics|audit|app|backup|practice|chat))?/
   );
   return match ? { name: "admin", courseId: null, tab: match[1] || "" } : { name: "library", courseId: null };
 }
@@ -167,6 +188,12 @@ export function AppProvider({ children }) {
   const [appSettings, setAppSettings] = useState(() =>
     normalizeAppSettings(readJson(STORAGE_KEYS.APP_SETTINGS, null))
   );
+  // Home-screen cards, the administrator's payment instructions, and this account's money
+  // record — all three arrive from the server, never from a value the device picked.
+  const [homeContent, setHomeContent] = useState(() => readJson(STORAGE_KEYS.HOME_CONTENT, []) || []);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [premiumPayments, setPremiumPayments] = useState([]);
+  const [subscription, setSubscription] = useState({ plan: "", live: false, expiry: null, title: "" });
   const [session, setSession] = useState(() => normalizeSession(readStoredSession()));
   const [studentPreview, setStudentPreview] = useState(false);
   const [view, setView] = useState(() => initialView());
@@ -268,7 +295,7 @@ export function AppProvider({ children }) {
       link.rel = "icon";
       document.head.appendChild(link);
     }
-    const href = tabPhoto || appearanceSettings.logoUrl || "/wollo-university-emblem.png";
+    const href = tabPhoto || appearanceSettings.logoUrl || universityEmblem;
     if (link.getAttribute("href") !== href) {
       link.setAttribute("href", href);
       if (tabPhoto) link.removeAttribute("type");
@@ -283,7 +310,7 @@ export function AppProvider({ children }) {
   // save can be rejected when somebody else wrote in the meantime.
   const fetchServerState = useCallback(
     (token) =>
-      api.fetchState(token).then((res) => {
+      api.fetchState(token, 9000).then((res) => {
         baseRevisionRef.current = Number(res && res.contentRevision) || baseRevisionRef.current;
         return res;
       }),
@@ -404,6 +431,160 @@ export function AppProvider({ children }) {
     [markDirty]
   );
 
+  // Content and money records only ever come off the server, so they are adopted on every
+  // read — an unsaved local edit cannot hold them back the way it can hold the library.
+  const adoptContent = useCallback((res) => {
+    if (!res || res.ok === false) return;
+    if (Array.isArray(res.homeContent)) {
+      setHomeContent(res.homeContent);
+      writeJson(STORAGE_KEYS.HOME_CONTENT, res.homeContent);
+    }
+    if (Array.isArray(res.paymentMethods)) setPaymentMethods(res.paymentMethods);
+    if (Array.isArray(res.premiumPayments)) setPremiumPayments(res.premiumPayments);
+    if (res.subscription && typeof res.subscription === "object")
+      setSubscription({
+        plan: String(res.subscription.plan || ""),
+        live: res.subscription.live === true,
+        expiry: res.subscription.expiry || null,
+        title: String(res.subscription.title || "")
+      });
+  }, []);
+
+  /* -------------------------------------------------------- home screen content */
+  const saveHomeCard = useCallback(
+    async (card) => {
+      if (!isStaff) return { ok: false, error: "Support team session required." };
+      const res = await api.saveHomeCard(card, session.authToken);
+      if (res && res.ok !== false && Array.isArray(res.homeContent)) setHomeContent(res.homeContent);
+      else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [isStaff, session, toast]
+  );
+
+  const deleteHomeCard = useCallback(
+    async (cardId) => {
+      if (!isAdmin) return { ok: false, error: "Administrator session required." };
+      const res = await api.deleteHomeCard(cardId, session.authToken);
+      if (res && res.ok !== false && Array.isArray(res.homeContent)) setHomeContent(res.homeContent);
+      else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [isAdmin, session, toast]
+  );
+
+  const moveHomeCard = useCallback(
+    async (cardId, direction) => {
+      if (!isStaff) return { ok: false, error: "Support team session required." };
+      const res = await api.moveHomeCard(cardId, direction, session.authToken);
+      if (res && res.ok !== false && Array.isArray(res.homeContent)) setHomeContent(res.homeContent);
+      return res;
+    },
+    [isStaff, session]
+  );
+
+  // A count is a courtesy to the administrator, not a reason to keep a student waiting.
+  const trackHome = useCallback(
+    (cardId, event) => {
+      if (!cardId) return;
+      api.trackHomeCard(cardId, event, session ? session.authToken : null);
+    },
+    [session]
+  );
+
+  const refreshContent = useCallback(async () => {
+    const res = await fetchServerState(session ? session.authToken : null);
+    adoptContent(res);
+    return res;
+  }, [adoptContent, fetchServerState, session]);
+
+  /* ------------------------------------------------------------ premium money */
+  const savePaymentMethod = useCallback(
+    async (method) => {
+      if (!isAdmin) return { ok: false, error: "Administrator session required." };
+      const res = await api.savePaymentMethod(method, session.authToken);
+      if (res && res.ok !== false && Array.isArray(res.paymentMethods)) setPaymentMethods(res.paymentMethods);
+      else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [isAdmin, session, toast]
+  );
+
+  const deletePaymentMethod = useCallback(
+    async (methodId) => {
+      if (!isAdmin) return { ok: false, error: "Administrator session required." };
+      const res = await api.deletePaymentMethod(methodId, session.authToken);
+      if (res && res.ok !== false && Array.isArray(res.paymentMethods)) setPaymentMethods(res.paymentMethods);
+      return res;
+    },
+    [isAdmin, session]
+  );
+
+  // Whatever this call returns, the account's own tier is re-read from the server rather
+  // than guessed from the answer, so the interface follows the record and not the message.
+  const refreshPremiumRecord = useCallback(
+    async (res) => {
+      adoptContent(res);
+      const state = await fetchServerState(session ? session.authToken : null);
+      if (state && state.ok !== false) {
+        if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
+        adoptContent(state);
+      }
+    },
+    [adoptContent, fetchServerState, session]
+  );
+
+  const submitPaymentProof = useCallback(
+    async (payload) => {
+      if (!session) return { ok: false, error: "Sign in first." };
+      const res = await api.submitPremiumPayment(payload, session.authToken);
+      if (res && res.ok !== false) {
+        const state = await fetchServerState(session.authToken);
+        if (state && Array.isArray(state.premiumPayments)) setPremiumPayments(state.premiumPayments);
+        toast(res.message || "Payment proof submitted.");
+      } else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [fetchServerState, session, toast]
+  );
+
+  const resubmitPaymentProof = useCallback(
+    async (paymentId, payload) => {
+      if (!session) return { ok: false, error: "Sign in first." };
+      const res = await api.resubmitPremiumPayment(paymentId, payload, session.authToken);
+      if (res && res.ok !== false) {
+        const state = await fetchServerState(session.authToken);
+        if (state && Array.isArray(state.premiumPayments)) setPremiumPayments(state.premiumPayments);
+      } else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [fetchServerState, session, toast]
+  );
+
+  const cancelPaymentProof = useCallback(
+    async (paymentId) => {
+      if (!session) return { ok: false, error: "Sign in first." };
+      const res = await api.cancelPremiumPayment(paymentId, session.authToken);
+      if (res && res.ok !== false) setPremiumPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, ...res.payment } : p)));
+      return res;
+    },
+    [session]
+  );
+
+  const decidePremiumPayment = useCallback(
+    async (paymentId, payload) => {
+      if (!isAdmin) return { ok: false, error: "Administrator session required." };
+      const res = await api.decidePremiumPayment(paymentId, payload, session.authToken);
+      if (res && res.ok !== false) {
+        const state = await fetchServerState(session.authToken);
+        if (state && Array.isArray(state.premiumPayments)) setPremiumPayments(state.premiumPayments);
+        if (state && Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
+      } else if (res && res.error) toast(res.error);
+      return res;
+    },
+    [fetchServerState, isAdmin, session, setUsersData, toast]
+  );
+
   /* -------------------------------------------------------------------- boot */
   useEffect(() => {
     let cancelled = false;
@@ -461,6 +642,9 @@ export function AppProvider({ children }) {
       ) {
         setDownloadPolicy(normalizeDownloadPolicy(res.downloadPolicy));
       }
+      // Home cards, payment methods and the subscription flag are never edited here, so a
+      // pending local save is no reason to hold back the server's copy of them.
+      adoptContent(res);
       if (!cancelled) setBooting(false);
     })();
     return () => {
@@ -537,6 +721,37 @@ export function AppProvider({ children }) {
     if (window.location.pathname !== "/help") window.history.pushState(null, "", "/help");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+  // The room keeps its own address so a student can come back to it from a bookmark; it is
+  // not shared publicly because reading it requires an account.
+  const goChat = useCallback(() => {
+    clearStaffHash();
+    setView({ name: "chat" });
+    if (window.location.pathname !== "/chat") window.history.pushState(null, "", "/chat");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  // Practice keeps its own address for a bookmark, and like the chatroom it stays behind sign-in.
+  const goPractice = useCallback(() => {
+    clearStaffHash();
+    setView({ name: "practice" });
+    if (window.location.pathname !== "/practice") window.history.pushState(null, "", "/practice");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  const goDownloads = useCallback(() => {
+    clearStaffHash();
+    setView({ name: "downloads" });
+    if (window.location.pathname !== "/downloads") window.history.pushState(null, "", "/downloads");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  // News and its articles are public pages with real addresses, so an announcement can be
+  // shared, bookmarked and — unlike a course — opened without an account.
+  const goNews = useCallback((card) => {
+    clearStaffHash();
+    const slug = card ? cardSlug(card) : "";
+    setView({ name: "news", slug });
+    const next = slug ? `/news/${slug}` : "/news";
+    if (window.location.pathname !== next) window.history.pushState(null, "", next);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   // A pasted or crawled /c/<slug> address arrives before the catalog is loaded, so the
   // slug is matched to a course as soon as the library data lands.
@@ -583,6 +798,35 @@ export function AppProvider({ children }) {
       applyPageSeo(HELP_SEO);
       return;
     }
+    if (view.name === "news") {
+      const found = view.slug ? findCardBySlug(homeContent, view.slug) : null;
+      // Only a card that is actually published gets its title into the document head — a
+      // draft, a scheduled one or a premium-only one must not leak through a guessed address.
+      const article =
+        found && cardState(found) === "published" && found.active !== false && !found.premiumOnly ? found : null;
+      applyPageSeo(
+        article
+          ? {
+              path: `/news/${view.slug}`,
+              title: `${article.title} — Wollo Share news | ${SITE_NAME}`,
+              description: String(article.summary || "").slice(0, 200)
+            }
+          : {
+              path: "/news",
+              title: `News and announcements | ${SITE_NAME}`,
+              description: "University, college and department announcements, academic events and Wollo Share updates in one feed."
+            }
+      );
+      return;
+    }
+    if (view.name === "practice") {
+      applyPageSeo({
+        path: "/practice",
+        title: `Practice questions & exams | ${SITE_NAME} — Wollo University`,
+        description: "Practice Wollo University course questions, take timed exams and climb the top-students leaderboard."
+      });
+      return;
+    }
     if (view.name === "deviceLogin") {
       applyPageSeo({
         path: "/authorize",
@@ -592,12 +836,12 @@ export function AppProvider({ children }) {
       });
       return;
     }
-    if (view.name === "profile" || view.name === "admin") {
+    if (view.name === "profile" || view.name === "chat" || view.name === "admin") {
       applyPageSeo({ ...LIBRARY_SEO, noindex: true });
       return;
     }
     applyPageSeo(LIBRARY_SEO);
-  }, [view, coursesData]);
+  }, [view, coursesData, homeContent]);
 
   // Editing or pasting an address like "#/admin/materials" or "/c/math1011" routes the
   // running app too, not just a fresh page load.
@@ -609,7 +853,11 @@ export function AppProvider({ children }) {
       else if (next.name === "profile") setView({ name: "profile" });
       else if (next.name === "support") setView({ name: "support" });
       else if (next.name === "help") setView({ name: "help" });
+      else if (next.name === "chat") setView({ name: "chat" });
+      else if (next.name === "practice") setView({ name: "practice" });
+      else if (next.name === "downloads") setView({ name: "downloads" });
       else if (next.name === "premium") setView({ name: "premium" });
+      else if (next.name === "news") setView({ name: "news", slug: next.slug });
       else if (next.name === "admin") setView({ name: "admin", courseId: null, tab: next.tab });
       else if (next.name === "sublist") setView({ name: "sublist", courseId: null, courseSlug: next.courseSlug, query: "", year: "" });
       else setView({ name: "library", courseId: null });
@@ -656,7 +904,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // Loading the account's own slice of shared state right after a sign-in keeps the library,
-  // the credits and the profile photo correct on the very first paint.
+  // the credits, the profile photo and the subscription tier correct on the very first paint.
   const settleSession = useCallback(
     async (rawSession) => {
       const saved = storeSession(rawSession);
@@ -666,10 +914,11 @@ export function AppProvider({ children }) {
         if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
         if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
         if (state.userRatings) setUserRatings((prev) => ({ ...prev, ...state.userRatings }));
+        adoptContent(state);
       }
       return saved;
     },
-    [storeSession]
+    [adoptContent, fetchServerState, storeSession]
   );
 
   const login = useCallback(
@@ -1050,7 +1299,7 @@ export function AppProvider({ children }) {
         : `data:text/plain;charset=utf-8,${encodeURIComponent(
             `Wollo Share Course Material\nFile: ${mat.name}\nYear: ${mat.year || "Year 1"}\nType: ${mat.type}\nSize: ${mat.size}`
           )}`;
-      triggerBrowserDownload(href, (sideMat || mat).name || "wollo-share-material");
+      triggerBrowserDownload(href, namedFile((sideMat || mat).name || "wollo-share-material", href, (sideMat || mat).type));
       // The phone surface keeps a list of what actually came down, and only this callback
       // knows the difference between a finished file and one the server refused.
       if (window.__WS_ON_DOWNLOAD__)
@@ -1076,6 +1325,29 @@ export function AppProvider({ children }) {
       return true;
     },
     [adoptLedger, activeUser, clearPendingDownload, commitUsers, coursesData, session, studentPreview, toast]
+  );
+
+  // The reader reads from the phone's own copy, and that copy is only pulled once the same
+  // server rule that gates a download has allowed the file. Credits spent here are spent for
+  // the copy, exactly as they would be for the download.
+  const allowFileFetch = useCallback(
+    async (courseId, materialId, sideMaterialId = "") => {
+      const course = coursesData.find((c) => c.id === courseId);
+      const mat = course ? (course.materials || []).find((m) => m.id === materialId) : null;
+      if (!mat) return { allowed: false, reason: "gone" };
+      if (session && activeUser && !studentPreview) {
+        const res = await api.authorizeDownload({ courseId, materialId }, session.authToken).catch(() => null);
+        adoptLedger(res);
+        if (res && res.allowed !== true) {
+          setGate({ type: "upgrade", courseId, materialId, sideMaterialId, title: mat.name || "Study Material" });
+          return { allowed: false, reason: res.reason || "" };
+        }
+      }
+      const file = (sideMaterialId ? (mat.sideMaterials || []).find((s) => s.id === sideMaterialId) : null) || mat;
+      const url = String(file.url || "");
+      return { allowed: true, url: url && !url.startsWith("#sample") ? url : "", name: file.name || "", course: course.name || "" };
+    },
+    [activeUser, adoptLedger, coursesData, session, setGate, studentPreview]
   );
 
   const requestDownload = useCallback(
@@ -1475,6 +1747,22 @@ export function AppProvider({ children }) {
     setBannerDismissed(true);
   }, []);
 
+  /* ---------------------------------------------------------------- chat rules */
+  const chatRules = useMemo(
+    () => (Array.isArray(pageTexts.__chatRules) && pageTexts.__chatRules.length ? pageTexts.__chatRules : DEFAULT_CHAT_RULES),
+    [pageTexts]
+  );
+  const saveChatRules = useCallback(
+    (rules) =>
+      commitPageTexts({
+        __chatRules: (Array.isArray(rules) ? rules : [])
+          .map((rule) => String(rule).trim().slice(0, 240))
+          .filter(Boolean)
+          .slice(0, 12)
+      }),
+    [commitPageTexts]
+  );
+
   /* ------------------------------------------------------------------- users */
   const saveUser = useCallback(
     (user) =>
@@ -1604,7 +1892,8 @@ export function AppProvider({ children }) {
     if (!state || state.ok === false) return;
     if (Array.isArray(state.coursesData)) setCoursesData(state.coursesData);
     if (Array.isArray(state.usersData) && state.usersData.length) setUsersData(state.usersData);
-  }, [session]);
+    adoptContent(state);
+  }, [adoptContent, fetchServerState, session]);
 
   const approveSubmission = useCallback(
     async (submissionId) => {
@@ -1664,10 +1953,20 @@ export function AppProvider({ children }) {
     }
   }, [appearanceSettings]);
 
-  // Premium accounts get their own chrome (gold accents, badge, hero tint).
+  // Premium accounts get their own chrome (gold accents, badge, hero tint). The switch is
+  // the server's subscription record, never a locally stored flag, so editing the device
+  // cache cannot buy a student the premium look — or the premium files behind it.
+  const isPremium = subscription.live === true && !studentPreview;
   useEffect(() => {
-    document.body.classList.toggle("is-premium", Boolean(downloadStatus.premium) && !studentPreview);
-  }, [downloadStatus.premium, studentPreview]);
+    document.body.classList.toggle("is-premium", isPremium);
+  }, [isPremium]);
+
+  // One feed, both surfaces: the website and the Android app read the same strips, and a
+  // strip with nothing live in it is dropped instead of leaving a hole on the home screen.
+  const homeFeed = useMemo(
+    () => feedCards(homeContent, { account: activeUser, premium: isPremium }),
+    [homeContent, activeUser, isPremium]
+  );
 
   /* --------------------------------------------------------------- library */
   const stats = useMemo(() => {
@@ -1700,6 +1999,23 @@ export function AppProvider({ children }) {
     commitDownloadPolicy,
     appSettings,
     commitAppSettings,
+    homeContent,
+    homeFeed,
+    paymentMethods,
+    premiumPayments,
+    subscription,
+    isPremium,
+    saveHomeCard,
+    deleteHomeCard,
+    moveHomeCard,
+    trackHome,
+    refreshContent,
+    savePaymentMethod,
+    deletePaymentMethod,
+    submitPaymentProof,
+    resubmitPaymentProof,
+    cancelPaymentProof,
+    decidePremiumPayment,
     ads,
     banner,
     stats,
@@ -1723,6 +2039,10 @@ export function AppProvider({ children }) {
     goProfile,
     goSupport,
     goHelp,
+    goChat,
+    goPractice,
+    goDownloads,
+    goNews,
     goPremium,
     login,
     signInWithCode,
@@ -1738,6 +2058,7 @@ export function AppProvider({ children }) {
     materialIsFree,
     canDownloadMaterial,
     requestDownload,
+    allowFileFetch,
     completePendingDownload,
     completeAdGate,
     mySubmissions,
@@ -1775,6 +2096,8 @@ export function AppProvider({ children }) {
     clearBanner,
     bannerDismissed,
     dismissBanner,
+    chatRules,
+    saveChatRules,
     commitPageTexts,
     commitAppearance,
     saveUser,

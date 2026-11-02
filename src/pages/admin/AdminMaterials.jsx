@@ -91,6 +91,7 @@ export default function AdminMaterials() {
           <div className="d-flex gap-2 flex-grow-1 justify-content-sm-end" style={{ minWidth: 0 }}>
             <select
               className="form-select form-select-sm"
+              aria-label="Add material to a course"
               style={{ width: "auto", maxWidth: "100%" }}
               value=""
               onChange={(e) => {
@@ -111,10 +112,10 @@ export default function AdminMaterials() {
 
         <div className="row g-2">
           <div className="col-12 col-md-4">
-            <input className="form-control form-control-sm" placeholder="Search title, format, semester…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className="form-control form-control-sm" aria-label="Search materials" placeholder="Search title, format, semester…" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="col-6 col-md-3">
-            <select className="form-select form-select-sm" value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)}>
+            <select className="form-select form-select-sm" aria-label="Filter by course" value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)}>
               <option value="All">All courses</option>
               {coursesData.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -124,7 +125,7 @@ export default function AdminMaterials() {
             </select>
           </div>
           <div className="col-3 col-md-2">
-            <select className="form-select form-select-sm" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <select className="form-select form-select-sm" aria-label="Filter by format" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
               <option value="All">Any format</option>
               {types.map((t) => (
                 <option key={t}>{t}</option>
@@ -132,7 +133,7 @@ export default function AdminMaterials() {
             </select>
           </div>
           <div className="col-3 col-md-3">
-            <select className="form-select form-select-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select className="form-select form-select-sm" aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All statuses</option>
               <option value="visible">Published only</option>
               <option value="hidden">Hidden only</option>

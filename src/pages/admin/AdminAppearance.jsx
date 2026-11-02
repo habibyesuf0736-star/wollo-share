@@ -152,24 +152,25 @@ export default function AdminAppearance() {
           <div className="row g-2">
             <div className="col-12 col-sm-6">
               <label className="form-label small fw-semibold">Site title</label>
-              <input className="form-control" value={brand.siteTitle} onChange={(e) => setBrand({ ...brand, siteTitle: e.target.value })} />
+              <input className="form-control" aria-label="Site title" value={brand.siteTitle} onChange={(e) => setBrand({ ...brand, siteTitle: e.target.value })} />
             </div>
             <div className="col-12 col-sm-6">
               <label className="form-label small fw-semibold">Tagline under the title</label>
-              <input className="form-control" value={brand.siteSubtitle} onChange={(e) => setBrand({ ...brand, siteSubtitle: e.target.value })} />
+              <input className="form-control" aria-label="Tagline under the title" value={brand.siteSubtitle} onChange={(e) => setBrand({ ...brand, siteSubtitle: e.target.value })} />
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Hero headline</label>
-              <input className="form-control" value={brand.welcomeTitle} onChange={(e) => setBrand({ ...brand, welcomeTitle: e.target.value })} />
+              <input className="form-control" aria-label="Hero headline" value={brand.welcomeTitle} onChange={(e) => setBrand({ ...brand, welcomeTitle: e.target.value })} />
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Hero description</label>
-              <textarea className="form-control" rows={2} value={brand.welcomeDesc} onChange={(e) => setBrand({ ...brand, welcomeDesc: e.target.value })} />
+              <textarea className="form-control" aria-label="Hero description" rows={2} value={brand.welcomeDesc} onChange={(e) => setBrand({ ...brand, welcomeDesc: e.target.value })} />
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Sign-in panel headline</label>
               <input
                 className="form-control"
+                aria-label="Sign-in panel headline"
                 placeholder="One account for the whole library"
                 value={brand.loginTitle}
                 onChange={(e) => setBrand({ ...brand, loginTitle: e.target.value })}
@@ -179,6 +180,7 @@ export default function AdminAppearance() {
               <label className="form-label small fw-semibold">Sign-in panel lines</label>
               <textarea
                 className="form-control"
+                aria-label="Sign-in panel lines"
                 rows={3}
                 placeholder={"Notes, exams and slides.\nFree for verified students."}
                 value={brand.loginLines}
@@ -188,12 +190,13 @@ export default function AdminAppearance() {
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Footer text</label>
-              <input className="form-control" value={brand.footerText} onChange={(e) => setBrand({ ...brand, footerText: e.target.value })} />
+              <input className="form-control" aria-label="Footer text" value={brand.footerText} onChange={(e) => setBrand({ ...brand, footerText: e.target.value })} />
             </div>
             <div className="col-12">
               <label className="form-label small fw-semibold">Premium payment note</label>
               <textarea
                 className="form-control"
+                aria-label="Premium payment note"
                 rows={2}
                 placeholder="Telebirr 1000 1234 5678 · Wollo Share"
                 value={brand.premiumPayment}
@@ -203,11 +206,11 @@ export default function AdminAppearance() {
             </div>
             <div className="col-4">
               <label className="form-label small fw-semibold">Accent colour</label>
-              <input type="color" className="form-control form-control-color w-100" value={brand.primaryColor} onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })} />
+              <input type="color" className="form-control form-control-color w-100" aria-label="Accent colour" value={brand.primaryColor} onChange={(e) => setBrand({ ...brand, primaryColor: e.target.value })} />
             </div>
             <div className="col-4">
               <label className="form-label small fw-semibold">Base size</label>
-              <select className="form-select" value={brand.fontSize} onChange={(e) => setBrand({ ...brand, fontSize: e.target.value })}>
+              <select className="form-select" aria-label="Base font size" value={brand.fontSize} onChange={(e) => setBrand({ ...brand, fontSize: e.target.value })}>
                 {["15px", "16px", "17px", "18px"].map((s) => (
                   <option key={s}>{s}</option>
                 ))}
@@ -215,7 +218,7 @@ export default function AdminAppearance() {
             </div>
             <div className="col-4">
               <label className="form-label small fw-semibold">Type style</label>
-              <select className="form-select" value={brand.fontStyle} onChange={(e) => setBrand({ ...brand, fontStyle: e.target.value })}>
+              <select className="form-select" aria-label="Type style" value={brand.fontStyle} onChange={(e) => setBrand({ ...brand, fontStyle: e.target.value })}>
                 <option value="sans">Sans (DM Sans)</option>
                 <option value="serif">Serif</option>
                 <option value="mono">Mono</option>
@@ -231,7 +234,7 @@ export default function AdminAppearance() {
               ) : (
                 <span className="tag">Default mark</span>
               )}
-              <input type="file" accept="image/*" className="form-control form-control-sm" onChange={uploadLogo} />
+              <input type="file" accept="image/*" className="form-control form-control-sm" aria-label="Site logo image file" onChange={uploadLogo} />
               {appearanceSettings.logoUrl ? (
                 <button
                   type="button"
@@ -298,6 +301,7 @@ export default function AdminAppearance() {
           </div>
           <textarea
             className="form-control"
+            aria-label="Announcement banner text"
             rows={2}
             placeholder="e.g. 2nd semester past exams for Year III are now published."
             value={bannerForm.text}
@@ -341,8 +345,8 @@ export default function AdminAppearance() {
 
         <form className="card p-3 d-flex flex-column gap-3" onSubmit={submitAd}>
           <div>
-            <h3 className="h6 mb-1">Advertisement slot</h3>
-            <p className="small text-secondary mb-0">Publish an image or text promo in the hero, middle or footer slot.</p>
+            <h3 className="h6 mb-1">Home page advertisement</h3>
+            <p className="small text-secondary mb-0">Publish an image or text promo on the home page, or in the library's middle and footer slots.</p>
           </div>
           {error ? <div className="alert alert-danger py-2 small mb-0">{error}</div> : null}
 
@@ -369,29 +373,30 @@ export default function AdminAppearance() {
             </div>
           </div>
 
-          <input className="form-control" placeholder="Ad title" value={adForm.title} onChange={(e) => setAdForm({ ...adForm, title: e.target.value })} />
-          <textarea className="form-control" rows={2} placeholder="Message" value={adForm.text} onChange={(e) => setAdForm({ ...adForm, text: e.target.value })} />
+          <input className="form-control" aria-label="Ad title" placeholder="Ad title" value={adForm.title} onChange={(e) => setAdForm({ ...adForm, title: e.target.value })} />
+          <textarea className="form-control" aria-label="Ad message" rows={2} placeholder="Message" value={adForm.text} onChange={(e) => setAdForm({ ...adForm, text: e.target.value })} />
 
           <div className="row g-2">
             <div className="col-12 col-md-6">
               <label className="form-label small fw-semibold">Badge / kicker</label>
-              <input className="form-control" placeholder="Advertisement" value={adForm.badge} onChange={(e) => setAdForm({ ...adForm, badge: e.target.value })} />
+              <input className="form-control" aria-label="Badge / kicker" placeholder="Advertisement" value={adForm.badge} onChange={(e) => setAdForm({ ...adForm, badge: e.target.value })} />
             </div>
             <div className="col-12 col-md-6">
               <label className="form-label small fw-semibold">Button label</label>
-              <input className="form-control" placeholder="Learn more" value={adForm.ctaLabel} onChange={(e) => setAdForm({ ...adForm, ctaLabel: e.target.value })} />
+              <input className="form-control" aria-label="Button label" placeholder="Learn more" value={adForm.ctaLabel} onChange={(e) => setAdForm({ ...adForm, ctaLabel: e.target.value })} />
             </div>
           </div>
 
           <div className="row g-2 align-items-end">
             <div className="col-12 col-md-7">
               <label className="form-label small fw-semibold">Link (https://)</label>
-              <input className="form-control" placeholder="https://…" value={adForm.linkUrl} onChange={(e) => setAdForm({ ...adForm, linkUrl: e.target.value })} />
+              <input className="form-control" aria-label="Advertisement link" placeholder="https://…" value={adForm.linkUrl} onChange={(e) => setAdForm({ ...adForm, linkUrl: e.target.value })} />
             </div>
             <div className="col-12 col-md-5">
               <label className="form-label small fw-semibold">Placement</label>
-              <select className="form-select" value={adForm.placement} onChange={(e) => setAdForm({ ...adForm, placement: e.target.value })}>
-                <option value="hero">Hero (top)</option>
+              <select className="form-select" aria-label="Advertisement placement" value={adForm.placement} onChange={(e) => setAdForm({ ...adForm, placement: e.target.value })}>
+                <option value="home">Home page (under the headline)</option>
+                <option value="hero">Hero (top of the library)</option>
                 <option value="middle">Middle of library</option>
                 <option value="footer">Footer</option>
                 <option value="premium">Premium promo (replaces the plan advert)</option>
@@ -399,7 +404,7 @@ export default function AdminAppearance() {
               <div className="form-text">
                 {adForm.placement === "premium"
                   ? "Shown to free accounts in the library and as the banner in the plans window. Pause it to hide the advert; leave Message blank to keep the automatic line."
-                  : "Pick Premium promo to write the plan advert students see instead of the Evangadi pack."}
+                  : "Pick Home page for the advert every visitor sees first, straight under the Wollo Share headline."}
               </div>
             </div>
           </div>
@@ -411,6 +416,7 @@ export default function AdminAppearance() {
                 <input
                   type="color"
                   className="form-control form-control-color"
+                  aria-label="Advertisement background colour"
                   value={adForm.color || "#1d624f"}
                   onChange={(e) => setAdForm({ ...adForm, color: e.target.value })}
                 />
@@ -425,6 +431,7 @@ export default function AdminAppearance() {
                 <input
                   type="color"
                   className="form-control form-control-color"
+                  aria-label="Advertisement text colour"
                   value={adForm.inkColor || "#ffffff"}
                   onChange={(e) => setAdForm({ ...adForm, inkColor: e.target.value })}
                 />
@@ -435,7 +442,7 @@ export default function AdminAppearance() {
             </div>
             <div className="col-12 col-md-4">
               <label className="form-label small fw-semibold">Image crop</label>
-              <select className="form-select" value={adForm.imageFit} onChange={(e) => setAdForm({ ...adForm, imageFit: e.target.value })}>
+              <select className="form-select" aria-label="Advertisement image crop" value={adForm.imageFit} onChange={(e) => setAdForm({ ...adForm, imageFit: e.target.value })}>
                 <option value="cover">Fill (crop)</option>
                 <option value="contain">Fit (show all)</option>
               </select>
@@ -452,6 +459,7 @@ export default function AdminAppearance() {
               type="file"
               accept="image/*"
               className="form-control form-control-sm"
+              aria-label="Advertisement image file"
               onChange={(event) => {
                 const file = event.target.files && event.target.files[0];
                 readImage(file, 2 * 1024 * 1024, setError, (dataUrl) => setAdForm((prev) => ({ ...prev, imageUrl: dataUrl })));

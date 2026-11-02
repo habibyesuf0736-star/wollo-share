@@ -318,7 +318,7 @@ export default function AdminBackup() {
         </ul>
       </div>
 
-      <input ref={fileInputRef} type="file" accept="application/json,.json" className="d-none" onChange={onFileChosen} />
+      <input ref={fileInputRef} type="file" accept="application/json,.json" aria-label="Backup file to restore" className="d-none" onChange={onFileChosen} />
 
       <Modal
         open={Boolean(pending)}

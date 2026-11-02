@@ -1,46 +1,83 @@
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+// Installed on a phone the surface is served from the device's own origin, so a root-relative
+// path would ask the local asset server for API data. The site is spelled out for that one
+// caller; in a browser window.location.origin is the site already, so nothing changes there.
+export function apiOrigin() {
+  if (typeof window === "undefined") return "";
+  if (window.Capacitor?.isNativePlatform?.() === true) return "https://wollo-share.vercel.app";
+  return window.location.origin;
+}
+
+function endpoint(path) {
+  return /^https?:/i.test(path) ? path : apiOrigin() + path;
+}
+
 function authHeaders(session) {
   return session ? { ...JSON_HEADERS, Authorization: `Bearer ${session}` } : { ...JSON_HEADERS };
 }
 
 async function request(url, options = {}) {
-  const res = await fetch(url, { ...options, headers: { ...JSON_HEADERS, ...(options.headers || {}) } });
+  // A phone with no signal must not wait forever on a request that will never be answered:
+  // the deadline lets the screen fall back to its offline wording instead of hanging.
+  const { timeoutMs = 20000, ...fetchOptions } = options;
+  const call = endpoint(url);
+  let response = null;
+  try {
+    response = await race(fetch(call, { ...fetchOptions, headers: { ...JSON_HEADERS, ...(fetchOptions.headers || {}) } }), timeoutMs);
+  } catch {
+    response = null;
+  }
+  if (!response) return { ok: false, status: 0, offline: true, error: "No connection." };
   let payload = null;
   try {
-    payload = await res.json();
+    payload = await response.json();
   } catch {
     payload = null;
   }
-  if (!res.ok && (!payload || payload.ok !== true)) {
-    const message = (payload && payload.error) || `Request failed (${res.status})`;
+  if (!response.ok && (!payload || payload.ok !== true)) {
+    const message = (payload && payload.error) || `Request failed (${response.status})`;
     // Keep server flags such as needsRecovery so a screen can react to them.
-    return { ...(payload || {}), ok: false, status: res.status, error: message };
+    return { ...(payload || {}), ok: false, status: response.status, error: message };
   }
   return payload || { ok: true };
 }
 
-export function fetchState(session) {
-  return request("/api/state", { headers: session ? { Authorization: `Bearer ${session}` } : {} });
+// A settled value, or null once the deadline passes. A dead network rejects almost at once and
+// a hanging one resolves never, so both have to end up in the caller's offline branch.
+function race(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    );
+  });
+}
+
+export function fetchState(session, timeoutMs) {
+  return request("/api/state", { timeoutMs, headers: session ? { Authorization: `Bearer ${session}` } : {} });
 }
 
 export function pushState(payload, session) {
   return request("/api/state", { method: "PUT", headers: authHeaders(session), body: JSON.stringify(payload) });
 }
 
-// Replays an admin save that was interrupted by a reload. Runs while the page is
-// alive, so a normal request is used (the state body is larger than the keepalive cap).
-export async function replayPendingState(payload, session) {
-  try {
-    const res = await fetch("/api/state", {
-      method: "PUT",
-      headers: authHeaders(session),
-      body: JSON.stringify(payload)
-    });
-    return await res.json();
-  } catch {
-    return { ok: false, error: "Could not replay the saved changes." };
-  }
+// Replays an admin save that was interrupted by a reload. Runs while the page is alive, so
+// it gets a longer deadline than a read — the state body is larger than the keepalive cap.
+export function replayPendingState(payload, session) {
+  return request("/api/state", {
+    method: "PUT",
+    timeoutMs: 30000,
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
 }
 
 export function login(identifier, password) {
@@ -147,7 +184,7 @@ export function getBackupInfo(session) {
 
 export async function getAccountsCsv(session) {
   try {
-    const res = await fetch("/api/admin/backup/accounts.csv", { headers: authHeaders(session) });
+    const res = await fetch(endpoint("/api/admin/backup/accounts.csv"), { headers: authHeaders(session) });
     if (!res.ok) return { ok: false, error: `Request failed (${res.status})` };
     return { ok: true, text: await res.text() };
   } catch {
@@ -157,7 +194,7 @@ export async function getAccountsCsv(session) {
 
 export async function getSubmissionsCsv(session) {
   try {
-    const res = await fetch("/api/admin/backup/submissions.csv", { headers: authHeaders(session) });
+    const res = await fetch(endpoint("/api/admin/backup/submissions.csv"), { headers: authHeaders(session) });
     if (!res.ok) return { ok: false, error: `Request failed (${res.status})` };
     return { ok: true, text: await res.text() };
   } catch {
@@ -416,4 +453,320 @@ export function rejectMaterialSubmission(submissionId, reason, session) {
     headers: authHeaders(session),
     body: JSON.stringify({ reason })
   });
+}
+
+/* --------------------------------------------------------- home screen content */
+
+export function saveHomeCard(card, session) {
+  return request("/api/admin/home/content", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(card)
+  });
+}
+
+export function deleteHomeCard(cardId, session) {
+  return request("/api/admin/home/content/delete", {
+    method: "POST",
+    timeoutMs: 30000,
+    headers: authHeaders(session),
+    body: JSON.stringify({ id: cardId })
+  });
+}
+
+export function moveHomeCard(cardId, direction, session) {
+  return request("/api/admin/home/content/move", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ id: cardId, direction })
+  });
+}
+
+// A view or a tap is reported and then forgotten: a screen must never wait on a counter.
+export function trackHomeCard(cardId, event, session) {
+  return request("/api/home/stats", {
+    method: "POST",
+    timeoutMs: 6000,
+    headers: authHeaders(session),
+    body: JSON.stringify({ id: cardId, event })
+  }).catch(() => null);
+}
+
+/* --------------------------------------------------------- payment methods */
+
+export function savePaymentMethod(method, session) {
+  return request("/api/admin/payment-methods", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(method)
+  });
+}
+
+export function deletePaymentMethod(methodId, session) {
+  return request("/api/admin/payment-methods/delete", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ id: methodId })
+  });
+}
+
+/* --------------------------------------------------------- premium payments */
+
+export function submitPremiumPayment(payload, session) {
+  return request("/api/premium/payments", {
+    method: "POST",
+    // The picture rides in the body, so this is the one premium call that needs room.
+    timeoutMs: 60000,
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function resubmitPremiumPayment(paymentId, payload, session) {
+  return request(`/api/premium/payments/${encodeURIComponent(paymentId)}/resubmit`, {
+    method: "POST",
+    timeoutMs: 60000,
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function cancelPremiumPayment(paymentId, session) {
+  return request(`/api/premium/payments/${encodeURIComponent(paymentId)}/cancel`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
+export function readPremiumScreenshot(paymentId, session) {
+  return request(`/api/premium/payments/${encodeURIComponent(paymentId)}/screenshot`, {
+    method: "GET",
+    timeoutMs: 45000,
+    headers: authHeaders(session)
+  });
+}
+
+export function decidePremiumPayment(paymentId, payload, session) {
+  return request(`/api/admin/premium/payments/${encodeURIComponent(paymentId)}/decision`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listAuditLog(session) {
+  return request("/api/admin/audit", { method: "GET", headers: authHeaders(session) });
+}
+
+/* -------------------------------------------------------------- profile email */
+
+export function requestEmailChange(email, session) {
+  return request("/api/profile/email", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ email })
+  });
+}
+
+export function confirmEmailChange(code, session) {
+  return request("/api/profile/email/confirm", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ code })
+  });
+}
+
+/* ------------------------------------------------------------------- chatroom */
+
+export function readChat(session, options = {}) {
+  const params = new URLSearchParams();
+  if (options.before) params.set("before", options.before);
+  if (options.limit) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return request(`/api/chat${query ? `?${query}` : ""}`, { method: "GET", headers: authHeaders(session) });
+}
+
+// One held request replaces the two-seconds-every-poll the room would otherwise need, so
+// the deadline has to outlive the server's own wait window.
+export function watchChat(session, { since = "", rev = 0 } = {}) {
+  const params = new URLSearchParams();
+  if (since) params.set("since", since);
+  if (rev) params.set("rev", String(rev));
+  return request(`/api/chat/updates?${params}`, {
+    method: "GET",
+    timeoutMs: 32000,
+    headers: authHeaders(session)
+  });
+}
+
+export function searchChat(term, session) {
+  return request(`/api/chat/search?q=${encodeURIComponent(term)}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function sendChat(payload, session) {
+  return request("/api/chat", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function reportChatMessage(messageId, reason, session) {
+  return request(`/api/chat/${encodeURIComponent(messageId)}/report`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ reason })
+  });
+}
+
+export function deleteChatMessage(messageId, session) {
+  return request(`/api/chat/${encodeURIComponent(messageId)}`, { method: "DELETE", headers: authHeaders(session) });
+}
+
+export function pinChatMessage(messageId, pinned, session) {
+  return request(`/api/chat/${encodeURIComponent(messageId)}/pin`, {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ pinned })
+  });
+}
+
+export function readChatReports(session, includeReviewed = false) {
+  return request(`/api/chat/reports${includeReviewed ? "?all=1" : ""}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function resolveChatReport(reportId, session) {
+  return request(`/api/chat/reports/${encodeURIComponent(reportId)}/resolve`, {
+    method: "POST",
+    headers: authHeaders(session)
+  });
+}
+
+export function restrictChatUser(payload, session) {
+  return request("/api/chat/actions", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function liftChatAction(actionId, session) {
+  return request(`/api/chat/actions/${encodeURIComponent(actionId)}`, { method: "DELETE", headers: authHeaders(session) });
+}
+
+/* --------------------------------------------------------- practice & examination */
+
+function practiceQuery(filters = {}) {
+  const params = new URLSearchParams();
+  Object.keys(filters).forEach((key) => {
+    const value = filters[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "") params.set(key, String(value));
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export function listPracticeQuestions(filters, session) {
+  return request(`/api/practice/questions${practiceQuery(filters)}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function getPracticeQuestion(id, session) {
+  return request(`/api/practice/question/${encodeURIComponent(id)}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function listPracticeExams(courseId, session) {
+  return request(`/api/practice/exams${practiceQuery(courseId ? { courseId } : {})}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function startPracticeExam(id, session) {
+  return request(`/api/practice/exam/${encodeURIComponent(id)}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function submitPractice(payload, session) {
+  return request("/api/practice/submit", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listPracticeAttempts(session) {
+  return request("/api/practice/attempts", { method: "GET", headers: authHeaders(session) });
+}
+
+export function getPracticeLeaderboard(scope, session) {
+  return request(`/api/practice/leaderboard?scope=${scope === "weekly" ? "weekly" : "overall"}`, {
+    method: "GET",
+    headers: authHeaders(session)
+  });
+}
+
+export function listPracticeFavorites(session) {
+  return request("/api/practice/favorites", { method: "GET", headers: authHeaders(session) });
+}
+
+export function togglePracticeFavorite(questionId, session) {
+  return request("/api/practice/favorite", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify({ questionId })
+  });
+}
+
+/* --------------------------------------------------------- practice admin */
+
+export function listAdminPracticeQuestions(filters, session) {
+  return request(`/api/admin/practice/questions${practiceQuery(filters)}`, { method: "GET", headers: authHeaders(session) });
+}
+
+export function createPracticeQuestion(body, session) {
+  return request("/api/admin/practice/questions", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(body)
+  });
+}
+
+export function updatePracticeQuestion(id, patch, session) {
+  return request(`/api/admin/practice/questions/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: authHeaders(session),
+    body: JSON.stringify(patch)
+  });
+}
+
+export function deletePracticeQuestion(id, session) {
+  return request(`/api/admin/practice/questions/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(session) });
+}
+
+export function listAdminPracticeExams(session) {
+  return request("/api/admin/practice/exams", { method: "GET", headers: authHeaders(session) });
+}
+
+export function createPracticeExam(body, session) {
+  return request("/api/admin/practice/exams", {
+    method: "POST",
+    headers: authHeaders(session),
+    body: JSON.stringify(body)
+  });
+}
+
+export function updatePracticeExam(id, patch, session) {
+  return request(`/api/admin/practice/exams/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: authHeaders(session),
+    body: JSON.stringify(patch)
+  });
+}
+
+export function deletePracticeExam(id, session) {
+  return request(`/api/admin/practice/exams/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders(session) });
+}
+
+export function getPracticeStats(session) {
+  return request("/api/admin/practice/stats", { method: "GET", headers: authHeaders(session) });
+}
+
+export function listAdminPracticeAttempts(session) {
+  return request("/api/admin/practice/attempts", { method: "GET", headers: authHeaders(session) });
 }

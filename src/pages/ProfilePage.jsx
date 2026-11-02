@@ -248,14 +248,14 @@ export default function ProfilePage() {
                   <label className="form-label small fw-semibold">Signed in as</label>
                   <div className="ws-field-icon">
                     <ShieldCheck size={16} aria-hidden="true" />
-                    <input className="form-control" value={displayName} readOnly disabled />
+                    <input className="form-control" aria-label="Signed in as" value={displayName} readOnly disabled />
                   </div>
                 </div>
                 <div className="col-12">
                   <label className="form-label small fw-semibold">Email</label>
                   <div className="ws-field-icon">
                     <Mail size={16} aria-hidden="true" />
-                    <input className="form-control" value={session.email || ""} readOnly disabled />
+                    <input className="form-control" aria-label="Email" value={session.email || ""} readOnly disabled />
                   </div>
                 </div>
                 <div className="col-12">
@@ -322,7 +322,7 @@ export default function ProfilePage() {
                     <label className="form-label small fw-semibold">Email (used to sign in)</label>
                     <div className="ws-field-icon">
                       <Mail size={16} aria-hidden="true" />
-                      <input className="form-control" value={session.email || ""} readOnly disabled />
+                      <input className="form-control" aria-label="Email (used to sign in)" value={session.email || ""} readOnly disabled />
                     </div>
                     <p className="small text-secondary mb-0 mt-1">Ask the administrator to change this.</p>
                   </div>

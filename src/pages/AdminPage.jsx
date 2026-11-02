@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BarChart3, Crown, DatabaseBackup, Download, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Palette, Smartphone, Users } from "lucide-react";
+import { BarChart3, ClipboardList, Crown, DatabaseBackup, Download, FolderOpen, GraduationCap, Inbox, LayoutDashboard, Mail, Megaphone, MessageSquare, Palette, Smartphone, Users } from "lucide-react";
 import { useApp } from "../store/AppContext.jsx";
 import * as api from "../lib/api.js";
 import AdminCommandBar from "../components/AdminCommandBar.jsx";
@@ -8,26 +8,36 @@ import AdminCourses from "./admin/AdminCourses.jsx";
 import AdminMaterials from "./admin/AdminMaterials.jsx";
 import AdminSubmissions from "./admin/AdminSubmissions.jsx";
 import AdminAppearance from "./admin/AdminAppearance.jsx";
+import AdminHomeContent from "./admin/AdminHomeContent.jsx";
 import AdminDownloads from "./admin/AdminDownloads.jsx";
 import AdminUsers from "./admin/AdminUsers.jsx";
 import AdminMail from "./admin/AdminMail.jsx";
 import AdminAnalytics from "./admin/AdminAnalytics.jsx";
 import AdminBackup from "./admin/AdminBackup.jsx";
 import AdminPremiumOrders from "./admin/AdminPremiumOrders.jsx";
+import AdminPremiumPayments from "./admin/AdminPremiumPayments.jsx";
+import AdminAudit from "./admin/AdminAudit.jsx";
 import AdminApp from "./admin/AdminApp.jsx";
+import AdminChat from "./admin/AdminChat.jsx";
+import AdminPractice from "./admin/AdminPractice.jsx";
 
 const TABS = [
   ["overview", "Overview", LayoutDashboard],
+  ["home", "Home screen", Megaphone],
   ["reviews", "Material reviews", Inbox],
   ["premium", "Premium orders", Crown],
+  ["payments", "Payment proofs", Download],
   ["courses", "Courses", GraduationCap],
   ["materials", "Materials", FolderOpen],
   ["downloads", "Downloads", Download],
   ["appearance", "Branding & ads", Palette],
   ["app", "App", Smartphone],
+  ["chat", "Chatroom", MessageSquare],
+  ["practice", "Practice", ClipboardList],
   ["users", "Students", Users],
   ["mail", "Email delivery", Mail],
   ["analytics", "Analytics", BarChart3],
+  ["audit", "Audit log", DatabaseBackup],
   ["backup", "Backup", DatabaseBackup]
 ];
 
@@ -45,6 +55,8 @@ export default function AdminPage() {
     ads,
     view,
     session,
+    homeContent,
+    premiumPayments,
     goLibrary,
     goLogin,
     goSublist,
@@ -109,9 +121,12 @@ export default function AdminPage() {
   }, [ownerIsAdmin, studentPreview, tab]);
 
   const materialCount = coursesData.reduce((sum, c) => sum + (c.materials || []).length, 0);
+  const waitingProofs = premiumPayments.filter((p) => ["pending", "under_review", "resubmission_required"].includes(p.status)).length;
   const counts = {
+    home: homeContent.filter((card) => card.status === "published" && card.active !== false).length,
     reviews: pendingReviews,
     premium: premiumOrders,
+    payments: waitingProofs,
     courses: coursesData.length,
     materials: materialCount,
     appearance: ads.filter((a) => a.active).length,
@@ -193,6 +208,18 @@ export default function AdminPage() {
         </div>
       ) : null}
 
+      {waitingProofs > 0 && tab !== "payments" ? (
+        <div className="banner warn mb-3 d-flex flex-wrap align-items-center gap-2" role="status">
+          <Crown size={16} aria-hidden="true" />
+          <span>
+            <strong>{waitingProofs}</strong> payment proof{waitingProofs === 1 ? "" : "s"} waiting to be checked against the bank or telebirr record.
+          </span>
+          <button type="button" className="btn btn-sm btn-primary ms-auto" onClick={() => selectTab("payments")}>
+            Open proofs
+          </button>
+        </div>
+      ) : null}
+
       <nav className="admin-nav my-3" aria-label="Admin sections">
         {TABS.map(([key, label, Icon]) => (
           <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => selectTab(key)}>
@@ -204,16 +231,21 @@ export default function AdminPage() {
       </nav>
 
       {tab === "overview" ? <AdminOverview onNavigate={selectTab} /> : null}
+      {tab === "home" ? <AdminHomeContent /> : null}
       {tab === "reviews" ? <AdminSubmissions /> : null}
       {tab === "premium" ? <AdminPremiumOrders onCountChange={setPremiumOrders} /> : null}
+      {tab === "payments" ? <AdminPremiumPayments /> : null}
       {tab === "courses" ? <AdminCourses /> : null}
       {tab === "materials" ? <AdminMaterials /> : null}
       {tab === "downloads" ? <AdminDownloads onNavigate={selectTab} /> : null}
       {tab === "appearance" ? <AdminAppearance /> : null}
       {tab === "app" ? <AdminApp /> : null}
+      {tab === "chat" ? <AdminChat /> : null}
+      {tab === "practice" ? <AdminPractice /> : null}
       {tab === "users" ? <AdminUsers /> : null}
       {tab === "mail" ? <AdminMail /> : null}
       {tab === "analytics" ? <AdminAnalytics /> : null}
+      {tab === "audit" ? <AdminAudit /> : null}
       {tab === "backup" ? <AdminBackup /> : null}
     </div>
   );

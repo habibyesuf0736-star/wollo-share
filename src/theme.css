@@ -1,28 +1,31 @@
 /* ==========================================================================
    Wollo Share — React + Bootstrap theme layer
-   Single accent source: --green (overridden at runtime by admin settings).
-   Every accent-derived colour is mixed from it so the theme stays coherent.
+   University-blue default. Admin can override --primary at runtime.
+   Dark-mode support via [data-theme="dark"] on <html>.
    ========================================================================== */
 :root {
-  --ink: #101a17;
-  --ink-soft: #2b3a35;
-  --muted: #64756e;
-  --paper: #f4f7f4;
+  /* ---------------------------------------------------------------- palette */
+  --ink: #0d1b2a;
+  --ink-soft: #243447;
+  --muted: #5a7184;
+  --paper: #f2f5fa;
   --surface: #ffffff;
-  --surface-subtle: #f1f4ee;
-  --surface-raised: #fbfcfa;
-  --line: #e2e7df;
-  --line-hover: #c3cfc2;
-  --green: #1d624f;
-  --lime: #d7ed85;
-  --coral: #e87558;
+  --surface-subtle: #eef2f8;
+  --surface-raised: #f8fafd;
+  --line: #dce3ee;
+  --line-hover: #b8c5d8;
+
+  /* university blue — the admin's primaryColor CSS var takes precedence */
+  --green: #1a4fa8;          /* default accent when admin hasn't changed it */
+  --lime: #63b3ed;
+  --coral: #e85858;
   --gold: #e0a92b;
   --danger: #a13c2b;
 
-  /* accent ramp derived from --green */
+  /* accent ramp derived from --green (= whatever the current brand colour is) */
   --accent: var(--green);
-  --accent-strong: color-mix(in oklab, var(--green) 82%, #04120d);
-  --accent-deep: color-mix(in oklab, var(--green) 55%, #061410);
+  --accent-strong: color-mix(in oklab, var(--green) 82%, #04080d);
+  --accent-deep: color-mix(in oklab, var(--green) 55%, #040810);
   --accent-bright: color-mix(in oklab, var(--green) 78%, #ffffff);
   --accent-pale: color-mix(in oklab, var(--green) 22%, #ffffff);
   --accent-soft: color-mix(in srgb, var(--green) 10%, transparent);
@@ -32,29 +35,32 @@
 
   --coral-soft: color-mix(in srgb, var(--coral) 13%, transparent);
 
-  /* legacy token aliases — older inline styles still reference these */
+  /* legacy token aliases */
   --green-soft: var(--accent-soft);
   --green-hover: var(--accent-strong);
-
   --primary: var(--green);
   --primary-hover: var(--accent-strong);
   --primary-soft: var(--accent-soft);
 
-  --radius-xl: 14px;
-  --radius-lg: 11px;
-  --radius-md: 9px;
-  --radius-sm: 7px;
+  /* radii */
+  --radius-xl: 16px;
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+
+  /* shadows */
   --shadow-xs: none;
-  --shadow-sm: 0 1px 2px rgba(16, 40, 32, 0.05);
-  --shadow-md: 0 1px 2px rgba(16, 40, 32, 0.05);
-  --shadow-lg: 0 2px 10px -6px rgba(11, 33, 26, 0.22);
+  --shadow-sm: 0 1px 3px rgba(10, 30, 60, 0.06);
+  --shadow-md: 0 2px 8px rgba(10, 30, 60, 0.08);
+  --shadow-lg: 0 4px 16px -4px rgba(10, 30, 60, 0.16);
   --shadow-accent: none;
   --ring: 0 0 0 2px color-mix(in srgb, var(--green) 26%, transparent);
 
   --ease: cubic-bezier(0.22, 0.68, 0.36, 1);
 
+  /* bootstrap overrides */
   --bs-primary: var(--green);
-  --bs-primary-rgb: 29, 98, 79;
+  --bs-primary-rgb: 26, 79, 168;
   --bs-link-color: var(--green);
   --bs-link-hover-color: var(--accent-strong);
   --bs-body-color: var(--ink);
@@ -66,6 +72,98 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
+
+/* ============================================================ dark mode */
+/* Activated by adding data-theme="dark" to <html>. The toggle writes this
+   attribute and also saves the preference to localStorage. */
+[data-theme="dark"] {
+  --ink: #e8edf5;
+  --ink-soft: #b0bdd0;
+  --muted: #7a93ad;
+  --paper: #0f1520;
+  --surface: #18202e;
+  --surface-subtle: #1e2a3a;
+  --surface-raised: #1a2333;
+  --line: #263347;
+  --line-hover: #3a4f6a;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px -4px rgba(0, 0, 0, 0.4);
+
+  --bs-body-color: var(--ink);
+  --bs-body-bg: var(--paper);
+  --bs-border-color: var(--line);
+  --bs-emphasis-color: var(--ink);
+  --bs-secondary-color: var(--muted);
+  color-scheme: dark;
+}
+[data-theme="dark"] .card {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select {
+  background-color: var(--surface-subtle);
+  border-color: var(--line);
+  color: var(--ink);
+}
+[data-theme="dark"] .form-control::placeholder { color: var(--muted); }
+[data-theme="dark"] .btn-outline-secondary {
+  color: var(--ink-soft);
+  border-color: var(--line-hover);
+}
+[data-theme="dark"] .btn-outline-secondary:hover {
+  background: var(--surface-subtle);
+  color: var(--ink);
+}
+[data-theme="dark"] .list-group-item {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+[data-theme="dark"] .modal-content {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+[data-theme="dark"] .badge.text-bg-light {
+  background: var(--surface-subtle) !important;
+  color: var(--ink-soft) !important;
+}
+[data-theme="dark"] .dropdown-menu {
+  background: var(--surface);
+  border-color: var(--line);
+}
+[data-theme="dark"] .dropdown-item { color: var(--ink); }
+[data-theme="dark"] .dropdown-item:hover { background: var(--surface-subtle); }
+[data-theme="dark"] .table { color: var(--ink); border-color: var(--line); }
+[data-theme="dark"] .table > :not(caption) > * > * { background: var(--surface); border-color: var(--line); }
+[data-theme="dark"] .ws-topline {
+  background: var(--surface) !important;
+  border-bottom-color: var(--line) !important;
+}
+[data-theme="dark"] .ws-footer { background: #0a1020; }
+[data-theme="dark"] .ws-hero { background: var(--surface-subtle); }
+[data-theme="dark"] .ws-hero::before { opacity: 0.4; }
+
+/* ============================================================ dark-toggle button */
+.ws-theme-toggle {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.ws-theme-toggle:hover { color: var(--ink); background: var(--surface-subtle); }
+
 
 * {
   scrollbar-width: none;
@@ -2766,6 +2864,13 @@ footer.ws-footer .ws-page {
     flex: 1 1 auto;
     white-space: nowrap;
   }
+  /* A button carrying only an icon must not stretch into a full-width slab when the
+     chips wrap — it reads as a broken control the student cannot name. */
+  .ws-nav .ws-nav-compact {
+    flex: 0 0 auto;
+    min-width: 40px;
+    justify-content: center;
+  }
   .ws-nav-divider {
     display: none;
   }
@@ -3369,6 +3474,426 @@ body.is-premium .access-tag.is-premium {
   color: #3f5407;
 }
 
+/* --- Home screen feed ------------------------------------------------------ */
+/* One card shape for the website, the phone and the admin preview, so what an
+   administrator sees stacked is what a student sees served. */
+.ws-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-feed-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+}
+.ws-feed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  text-align: left;
+  width: 100%;
+  transition: transform var(--dur-fast, 140ms) var(--ease-out, ease), box-shadow var(--dur-fast, 140ms) ease, border-color var(--dur-fast, 140ms) ease;
+}
+.ws-feed-card:hover,
+.ws-feed-card:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--accent-line);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.06));
+}
+.ws-feed-card.is-banner {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 14px;
+  padding: 0;
+  overflow: hidden;
+}
+.ws-feed-card.is-poster {
+  padding: 0;
+  overflow: hidden;
+}
+/* An advert with no picture uploaded still has to look placed, not left over. */
+.ws-feed-card.is-ad {
+  background: linear-gradient(140deg, var(--accent-soft), transparent 55%), var(--surface-raised);
+  border-color: var(--accent-line);
+}
+.ws-feed-card h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.ws-feed-card p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+.ws-feed-media {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  background: var(--surface-subtle);
+}
+.ws-feed-card.is-banner .ws-feed-media {
+  width: min(46%, 260px);
+  aspect-ratio: auto;
+  min-height: 108px;
+}
+.ws-feed-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  min-width: 0;
+}
+.ws-feed-card.is-banner .ws-feed-body,
+.ws-feed-card.is-poster .ws-feed-body {
+  padding: 12px;
+}
+.ws-feed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+/* An advertisement is labelled before anything else on the card, so it cannot be read as
+   a university announcement. */
+.ws-ad-flag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Rotating banner: the strip slides, the dots follow, and the animation is transform-only
+   so it never fights the theme's reduced-motion rule. */
+.ws-carousel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.ws-carousel-track {
+  display: flex;
+  transition: transform 420ms var(--ease-out, cubic-bezier(0.22, 0.61, 0.36, 1));
+}
+.ws-carousel-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+.ws-carousel-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding: 8px 0 10px;
+}
+.ws-carousel-dots button {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--line-strong, rgba(0, 0, 0, 0.18));
+  opacity: 0.6;
+}
+.ws-carousel-dots button[aria-current="true"] {
+  opacity: 1;
+  background: var(--accent);
+  width: 18px;
+  border-radius: 999px;
+}
+
+/* The article a news card opens. */
+.ws-article {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-article img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+.ws-article p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+/* Admin preview mirror — same shapes, no interactive lift. */
+.ws-home-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.ws-home-preview-wide {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 14px;
+  padding: 0;
+  overflow: hidden;
+}
+.ws-home-preview-img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+.ws-home-preview-wide .ws-home-preview-img {
+  width: min(46%, 260px);
+  aspect-ratio: auto;
+  min-height: 108px;
+  border-radius: 0;
+}
+.ws-home-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* The administrator's one-stop advert panel: what is running, and the button that starts
+   a new one. */
+.ws-ad-console {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, var(--accent-soft), transparent 60%), var(--surface);
+}
+.ws-ad-console-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-ad-console-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 10px 5px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease);
+}
+.ws-ad-console-chip:hover {
+  border-color: var(--line-hover);
+  box-shadow: var(--shadow-sm);
+}
+.ws-ad-console-chip img {
+  width: 26px;
+  height: 20px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.ws-ad-console-mark {
+  width: 26px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-pale);
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+.ws-ad-console-where {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+}
+
+/* ------------------------------------------------------------------ chatroom */
+.ws-chat-shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-chat-list {
+  overflow-y: auto;
+  /* A fixed height keeps the composer on screen on a phone; the room is read by
+     scrolling inside itself, not by scrolling the whole page. */
+  height: min(58vh, 560px);
+  overscroll-behavior: contain;
+  background: var(--surface-raised);
+}
+
+.ws-chat-day {
+  text-align: center;
+  margin: 6px 0 2px;
+}
+.ws-chat-day span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-subtle);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.ws-chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ws-chat-row.is-mine {
+  flex-direction: row-reverse;
+}
+.ws-chat-row.is-deleted {
+  padding-left: 44px;
+}
+.ws-chat-row.is-mine.is-deleted {
+  padding-left: 0;
+  padding-right: 44px;
+  text-align: right;
+}
+
+.ws-chat-bubble {
+  min-width: 0;
+  max-width: min(560px, 84%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 8px 11px;
+  box-shadow: var(--shadow-xs);
+}
+.ws-chat-row.is-mine .ws-chat-bubble {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.ws-chat-row.is-pinned .ws-chat-bubble {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.ws-chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.ws-chat-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.ws-chat-time {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.ws-chat-pin-flag {
+  font-size: 0.62rem;
+}
+
+.ws-chat-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+}
+.ws-chat-reply-line {
+  border-left: 2px solid var(--accent-line);
+  padding-left: 7px;
+  margin-bottom: 3px;
+  font-style: italic;
+}
+
+.ws-chat-image {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  display: block;
+  margin-top: 6px;
+  object-fit: cover;
+}
+.ws-chat-image-link {
+  display: block;
+  min-width: 0;
+}
+.ws-chat-image-pending {
+  max-height: 120px;
+  width: auto;
+  margin-top: 0;
+}
+
+.ws-chat-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+/* The tools are always reachable by keyboard; hiding them on hover only tidies the mouse. */
+.ws-chat-row:hover .ws-chat-tools,
+.ws-chat-row:focus-within .ws-chat-tools {
+  opacity: 1;
+}
+.ws-chat-tool {
+  font-size: 0.7rem;
+  color: var(--muted);
+  padding: 1px 6px;
+}
+.ws-chat-tool:hover {
+  color: var(--accent-strong);
+}
+
+.ws-chat-report {
+  border-top: 1px dashed var(--line);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.ws-chat-composer {
+  background: var(--surface);
+}
+
+.ws-chat-pinned {
+  border-left: 3px solid var(--accent-line);
+}
+
+@media (max-width: 640px) {
+  .ws-chat-bubble {
+    max-width: 88%;
+  }
+  .ws-chat-list {
+    height: min(52vh, 460px);
+  }
+  .ws-chat-tools {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -3378,4 +3903,368 @@ body.is-premium .access-tag.is-premium {
     animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ================================================================ PRACTICE */
+
+/* ---- leaderboard (top students) ---------------------------------------- */
+.ws-leaderboard { margin-top: 1.5rem; }
+
+.ws-leaderboard-row {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: none;
+}
+.ws-leaderboard-row::-webkit-scrollbar { display: none; }
+
+.ws-leader-card {
+  flex: 0 0 auto;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0.75rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+  transition: box-shadow 0.15s, transform 0.15s;
+  position: relative;
+  overflow: visible;
+}
+.ws-leader-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.ws-leader-rank {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  border: 2px solid var(--surface);
+  background: var(--surface-subtle);
+  font-family: "IBM Plex Mono", monospace;
+}
+.ws-leader-body { width: 100%; }
+.ws-leader-name {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-leader-dept {
+  display: block;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.ws-leader-stats {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.ws-leader-stats span { display: inline-flex; align-items: center; gap: 2px; }
+
+/* ---- question browser -------------------------------------------------- */
+.ws-practice-filters { }
+
+.ws-question-list { display: flex; flex-direction: column; gap: 1rem; }
+
+.ws-question {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s;
+}
+.ws-question:focus-within { box-shadow: var(--shadow-md); }
+
+.ws-question-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.ws-question-index {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 7px;
+  border-radius: 99px;
+}
+.ws-question-body {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.ws-question-image {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  display: block;
+  margin-bottom: 0.75rem;
+}
+.ws-favorite { color: var(--muted); }
+.ws-favorite:hover { color: var(--accent); }
+
+/* options */
+.ws-options { display: flex; flex-direction: column; gap: 0.5rem; }
+.ws-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  background: var(--surface);
+  user-select: none;
+}
+.ws-option input[type="radio"] { display: none; }
+.ws-option:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.ws-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ws-option.is-disabled { cursor: default; opacity: 0.85; }
+.ws-option-mark {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--muted);
+}
+.ws-option.is-selected .ws-option-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.ws-option-text { font-size: 0.9rem; line-height: 1.45; padding-top: 1px; }
+
+/* answer review (shown after submit) */
+.ws-answer-review {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--line);
+  background: var(--surface-subtle);
+}
+.ws-answer-review.is-correct { border-color: color-mix(in srgb, #1db954 40%, transparent); background: color-mix(in srgb, #1db954 8%, var(--surface)); }
+.ws-answer-review.is-wrong   { border-color: color-mix(in srgb, var(--coral) 40%, transparent); background: color-mix(in srgb, var(--coral) 7%, var(--surface)); }
+.ws-answer-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+.ws-answer-review.is-correct .ws-answer-line:first-child { color: #137a3c; }
+.ws-answer-review.is-wrong   .ws-answer-line:first-child { color: var(--coral); }
+.ws-explanation {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* ---- exam grid ---------------------------------------------------------- */
+.ws-exam-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.ws-exam-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+.ws-exam-head { margin-bottom: 0.5rem; }
+.ws-exam-meta { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+/* ---- runner (answering) ------------------------------------------------- */
+.ws-runner { }
+.ws-runner-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  position: sticky;
+  top: 4px;
+  z-index: 10;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- results ------------------------------------------------------------ */
+.ws-results { }
+.ws-results-hero {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- history ------------------------------------------------------------ */
+.ws-history-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.ws-history-row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+}
+
+/* ---- admin practice ----------------------------------------------------- */
+.ws-practice-row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.ws-practice-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  user-select: none;
+}
+.ws-practice-row-head:hover { background: var(--surface-subtle); }
+.ws-practice-row-body {
+  padding: 0.75rem 1rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+.ws-exam-question-picker {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+}
+.ws-exam-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.ws-exam-picker-row:last-child { border-bottom: none; }
+.ws-exam-picker-row:hover { background: var(--surface-subtle); }
+.ws-exam-picker-row.is-selected { background: var(--accent-soft); }
+
+/* ================================================================ DOWNLOADS */
+.ws-download-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.ws-download-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 0.9rem 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s;
+}
+.ws-download-row:hover { box-shadow: var(--shadow-md); }
+.ws-download-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.ws-download-name {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+.ws-download-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.ws-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+@media (max-width: 480px) {
+  .ws-download-row { flex-wrap: wrap; }
+  .ws-download-actions { width: 100%; }
+}
+
+/* spinning icon for loading states */
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+.spin { animation: ws-spin 0.8s linear infinite; }
+
+/* ================================================================ SKELETON */
+.ws-skeleton {
+  display: block;
+  background: linear-gradient(90deg, var(--surface-subtle) 25%, var(--line) 50%, var(--surface-subtle) 75%);
+  background-size: 200% 100%;
+  animation: ws-shimmer 1.2s infinite;
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+@keyframes ws-shimmer { to { background-position: -200% 0; } }
+
+/* ================================================================ TOPBAR: Practice + DL + Theme toggle */
+/* These are small additions to the existing topbar that override nothing. */
+@media (max-width: 900px) {
+  .ws-nav .btn { padding-left: 0.45rem; padding-right: 0.45rem; font-size: 0.8rem; }
 }

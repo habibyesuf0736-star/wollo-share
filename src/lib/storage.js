@@ -15,6 +15,9 @@ export const STORAGE_KEYS = {
   DISMISSED_ADS: "wollo_ads_dismissed_v1",
   PENDING_DOWNLOAD: "wollo_lib_pending_dl_v1",
   PENDING_ADMIN_STATE: "wollo_lib_admin_pending_state_v1",
+  // The last cards the phone was handed, so the home screen still says something with no
+  // signal. Money records are never kept on the device — they are read from the server.
+  HOME_CONTENT: "wollo_lib_home_content_v1",
   VIDEO_PROGRESS: "wollo_lib_video_progress_v1"
 };
 

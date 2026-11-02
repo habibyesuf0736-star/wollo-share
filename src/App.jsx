@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useEffect } from "react";
 import { AppProvider, useApp } from "./store/AppContext.jsx";
 import TopBar from "./components/TopBar.jsx";
 import Footer from "./components/Footer.jsx";
@@ -23,6 +23,10 @@ const AdminPage = lazy(() => import("./pages/AdminPage.jsx"));
 const SupportPage = lazy(() => import("./pages/SupportPage.jsx"));
 const PremiumPage = lazy(() => import("./pages/PremiumPage.jsx"));
 const HelpPage = lazy(() => import("./pages/HelpPage.jsx"));
+const NewsPage = lazy(() => import("./pages/NewsPage.jsx"));
+const ChatPage = lazy(() => import("./pages/ChatPage.jsx"));
+const PracticePage = lazy(() => import("./pages/PracticePage.jsx"));
+const DownloadsPage = lazy(() => import("./pages/DownloadsPage.jsx"));
 
 function PageFallback() {
   return (
@@ -35,7 +39,15 @@ function PageFallback() {
 }
 
 function Shell() {
-  const { booting, view } = useApp();
+  const { booting, view, toast } = useApp();
+
+  // Allow components that don't have direct context access (e.g. inside lazy-loaded pages)
+  // to fire a toast by dispatching a custom event — used by the timed exam auto-submit.
+  useEffect(() => {
+    const handler = (event) => { if (event.detail) toast(String(event.detail)); };
+    window.addEventListener("wollo:toast", handler);
+    return () => window.removeEventListener("wollo:toast", handler);
+  }, [toast]);
 
   if (booting) {
     return (
@@ -63,6 +75,10 @@ function Shell() {
             {view.name === "profile" ? <ProfilePage /> : null}
             {view.name === "support" ? <SupportPage /> : null}
             {view.name === "help" ? <HelpPage /> : null}
+            {view.name === "news" ? <NewsPage key={view.slug || "index"} /> : null}
+            {view.name === "chat" ? <ChatPage /> : null}
+            {view.name === "practice" ? <PracticePage /> : null}
+            {view.name === "downloads" ? <DownloadsPage /> : null}
             {view.name === "premium" ? <PremiumPage /> : null}
             {view.name === "admin" ? <AdminPage /> : null}
             {view.name === "library" ? <LibraryPage /> : null}

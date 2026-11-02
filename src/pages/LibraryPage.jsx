@@ -10,6 +10,7 @@ import MaterialRow from "../components/MaterialRow.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import CourseFormModal from "../components/CourseFormModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
+import { AdCarousel, HomeNews } from "../components/HomeFeedSections.jsx";
 import { matchDepartmentPrograms, normalizeDepartment, isProgramCourse } from "../lib/departments.js";
 import {
   courseAverageRating,
@@ -320,6 +321,7 @@ export default function LibraryPage() {
         </div>
       </section>
 
+      <AdSlot placement="home" />
       <AdSlot placement="hero" />
       <PlanPromo />
 
@@ -552,6 +554,8 @@ export default function LibraryPage() {
         <section id="ws-colleges" aria-label="Colleges, institutes and schools">{renderColleges()}</section>
       )}
 
+      {!resultsMode && !activeCollege ? <HomeNews /> : null}
+
       <AdSlot placement="middle" />
 
       {modules.docs ? (
@@ -570,19 +574,20 @@ export default function LibraryPage() {
                 </span>
                 <input
                   className="form-control form-control-sm"
+                  aria-label="Search all documents"
                   placeholder="Search all documents"
                   value={docQuery}
                   onChange={(e) => setDocQuery(e.target.value)}
                 />
               </span>
-              <select className="form-select form-select-sm" style={{ width: "auto" }} value={docFormat} onChange={(e) => setDocFormat(e.target.value)}>
+              <select className="form-select form-select-sm" aria-label="Filter documents by format" style={{ width: "auto" }} value={docFormat} onChange={(e) => setDocFormat(e.target.value)}>
                 {["All", "PDF", "PPT", "DOC", "XLS", "Video", "Other"].map((f) => (
                   <option key={f} value={f}>
                     {f === "All" ? "Any format" : f}
                   </option>
                 ))}
               </select>
-              <select className="form-select form-select-sm" style={{ width: "auto" }} value={docSemester} onChange={(e) => setDocSemester(e.target.value)}>
+              <select className="form-select form-select-sm" aria-label="Filter documents by semester" style={{ width: "auto" }} value={docSemester} onChange={(e) => setDocSemester(e.target.value)}>
                 {["All", "First Semester", "Second Semester"].map((s) => (
                   <option key={s} value={s}>
                     {s === "All" ? "Any semester" : s}
@@ -612,6 +617,8 @@ export default function LibraryPage() {
           </div>
         </section>
       ) : null}
+
+      {!resultsMode && !activeCollege ? <AdCarousel /> : null}
 
       <AdSlot placement="footer" />
 

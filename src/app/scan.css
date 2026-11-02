@@ -1,0 +1,144 @@
+/* The Android camera preview is drawn behind the WebView, so while a scan is running the page
+   has to stop painting altogether: no paper, no dock, only the viewfinder and its controls. */
+
+html.sc-live,
+html.sc-live body {
+  background: transparent !important;
+}
+
+html.sc-live .a-dock {
+  visibility: hidden;
+}
+
+.sc {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+  color: #fff;
+}
+
+.sc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sc-brand {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.sc-pill {
+  padding: 10px 15px;
+  border-radius: 999px;
+  background: rgba(10, 12, 14, 0.62);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.sc-pill.on {
+  background: #ffd36b;
+  color: #1a1a1a;
+}
+
+.sc-ghost {
+  background: none;
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 600;
+}
+
+.sc-frame {
+  position: relative;
+  width: min(72vw, 310px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  border-radius: 20px;
+  box-shadow: 0 0 0 100vmax rgba(6, 8, 10, 0.45);
+}
+
+.sc-frame i {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 2.5px solid #fff;
+}
+
+.sc-frame i:nth-child(1) {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 20px 0 0 0;
+}
+
+.sc-frame i:nth-child(2) {
+  top: 0;
+  right: 0;
+  border-left: 0;
+  border-bottom: 0;
+  border-radius: 0 20px 0 0;
+}
+
+.sc-frame i:nth-child(3) {
+  bottom: 0;
+  left: 0;
+  border-right: 0;
+  border-top: 0;
+  border-radius: 0 0 0 20px;
+}
+
+.sc-frame i:nth-child(4) {
+  bottom: 0;
+  right: 0;
+  border-left: 0;
+  border-top: 0;
+  border-radius: 0 0 20px 0;
+}
+
+.sc-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+
+.sc-tools {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sc-zoom {
+  display: flex;
+  gap: 6px;
+}
+
+.sc-code {
+  font-size: 12.5px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.sc-paste {
+  display: block;
+  margin-top: 18px;
+}
+
+.sc-file {
+  display: none;
+}

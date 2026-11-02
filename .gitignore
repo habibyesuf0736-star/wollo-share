@@ -18,4 +18,10 @@ mobile-app/app-dist/
 # Hand-built debug APKs are copied here for installation, never committed
 mobile-app/*.apk
 
+# pdf.js assets are copied out of node_modules by npm run pdfjs:assets before every build
+public/pdfjs/
+
 .vercel
+
+# Throwaway copies used for local verification only
+.scratch/

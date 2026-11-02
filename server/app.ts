@@ -8,6 +8,50 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { remoteEnabled, loadRemoteState, queueRemoteSave, flushRemoteSaves } from "./state-store.ts";
+import {
+  activeActionsFor,
+  changedSince,
+  chatRevision,
+  chatStats,
+  getPinnedMessages,
+  getMessage,
+  insertAction,
+  insertMessage,
+  insertReport,
+  liftAction,
+  listActions,
+  listMessages,
+  listReports,
+  resolveReport,
+  searchMessages,
+  setMessagePinned,
+  softDeleteMessage,
+  waitForChatChange
+} from "./chat.ts";
+import {
+  deleteQuestion,
+  deleteExam,
+  getExam,
+  getQuestion,
+  gradeAndRecordAttempt,
+  insertExam,
+  insertQuestion,
+  leaderboard,
+  listAttempts,
+  listAllAttempts,
+  listExams,
+  listFavorites,
+  listQuestions,
+  listQuestionsByIds,
+  practiceStats,
+  safeQuestion,
+  toggleFavorite,
+  updateExam,
+  updateQuestion,
+  type QuestionFilter,
+  type PracticeQuestion,
+  type PracticeExam
+} from "./practice.ts";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Serverless bundles do not necessarily carry the JSON file next to the entry, so the
@@ -831,6 +875,9 @@ interface CourseMaterial {
   // Set by the administrator on the Materials page: anyone, signed in or not, may take
   // this file without credits, a plan or the sponsor slot.
   free?: boolean;
+  // Premium tier only. The address is left out of the catalog for every other account, so
+  // the file cannot be fetched even by someone who edits the flags in their own browser.
+  premiumOnly?: boolean;
   ratingAvg: number;
   ratingCount: number;
   ratingsByUser?: Record<string, number>;
@@ -904,6 +951,16 @@ interface UserAccount {
   addedByAdmin?: boolean;
   // A small data URL the student uploads themselves; Google sign-in may bring a photo too.
   avatarUrl?: string;
+  // Where the student sits in the university. Home cards can be aimed at any of these.
+  college?: string;
+  academicYear?: string;
+  bio?: string;
+  browsePrefs?: { semester: string; subcategory: string };
+  // An address change is not applied until the new mailbox produces the code sent to it.
+  pendingEmail?: string;
+  emailChangeCode?: string;
+  emailChangeExpiresAt?: string;
+  emailCodeAttempts?: number;
 }
 
 // A complaint or problem a student left for the support team. Staff reply in-thread;
@@ -930,6 +987,7 @@ interface SupportTicket {
   replies: SupportReply[];
   // Set only when the student ordered a plan from the premium page.
   premiumPlan?: string;
+  premiumPaymentId?: string;
   premiumPrice?: string;
   premiumReference?: string;
   premiumConfirmedAt?: string;
@@ -1000,6 +1058,366 @@ function normalizeAppSettings(raw: unknown): AppSettings {
   };
 }
 
+// One card on the home screen. The website and the Android app read the same rows, so an
+// administrator publishes once and both surfaces change.
+interface HomeCard {
+  id: string;
+  kind: "announcement" | "news" | "event" | "update" | "promo" | "premium";
+  placement: "hero" | "carousel" | "feed" | "library" | "premium";
+  status: "draft" | "pending" | "published" | "scheduled" | "expired" | "archived";
+  title: string;
+  summary: string;
+  body: string;
+  imageUrl: string;
+  linkUrl: string;
+  ctaLabel: string;
+  badge: string;
+  author: string;
+  style: "banner" | "card" | "poster";
+  pinned: boolean;
+  active: boolean;
+  premiumOnly: boolean;
+  order: number;
+  audience: { scope: "all" | "college" | "department" | "year"; colleges: string[]; departments: string[]; years: string[] };
+  publishedAt: string;
+  expiresAt: string;
+  impressions: number;
+  clicks: number;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+const HOME_KINDS = ["announcement", "news", "event", "update", "promo", "premium"] as const;
+const HOME_PLACEMENTS = ["hero", "carousel", "feed", "library", "premium"] as const;
+const HOME_STYLES = ["banner", "card", "poster"] as const;
+const HOME_STATUSES = ["draft", "pending", "published", "scheduled", "expired", "archived"] as const;
+const HOME_SCOPES = ["all", "college", "department", "year"] as const;
+const HOME_IMAGE_CHARS = 2_600_000;
+const HOME_MAX_CARDS = 120;
+
+const HOME_FIELD_LIMITS: Record<string, number> = { title: 140, summary: 280, body: 6000, ctaLabel: 40, badge: 32, author: 80 };
+
+// "One view per viewer per card" lives in memory only: it is an abuse brake on the
+// counters, not a ledger anyone reports from, so a cold instance may recount.
+const homeStatSeen = new Map<string, number>();
+
+function homeText(value: unknown, limit: number): string {
+  return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, limit) : "";
+}
+
+// An image is either an uploaded data URL or an address the administrator typed. Anything
+// else — a javascript: URL reaching a student's img tag, for instance — is dropped.
+function homeImage(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  if (raw.startsWith("data:"))
+    return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(raw) && raw.length <= HOME_IMAGE_CHARS ? raw : "";
+  return /^https:\/\/[^\s]{1,3000}$/.test(raw) ? raw : "";
+}
+
+function homeLink(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  if (/^\/[A-Za-z0-9\-_./?#@%=&+]*$/.test(raw)) return raw.slice(0, 600);
+  return /^https:\/\/[^\s]{1,600}$/.test(raw) ? raw : "";
+}
+
+function homeList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const text = typeof item === "string" ? item.trim().slice(0, 120) : "";
+    if (text && !out.includes(text)) out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function homeStamp(value: unknown): string {
+  const ms = typeof value === "string" || typeof value === "number" ? Date.parse(String(value)) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+}
+
+function normalizeHomeCard(raw: unknown): HomeCard | null {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, any>;
+  if (!source || typeof source !== "object") return null;
+  const id = homeText(source.id, 60);
+  if (!id) return null;
+  const audience = (source.audience && typeof source.audience === "object" ? source.audience : {}) as Record<string, any>;
+  const scope = HOME_SCOPES.includes(audience.scope) ? audience.scope : "all";
+  const kind = HOME_KINDS.includes(source.kind) ? source.kind : "announcement";
+  const now = new Date().toISOString();
+  return {
+    id,
+    kind,
+    placement: HOME_PLACEMENTS.includes(source.placement) ? source.placement : kind === "promo" || kind === "premium" ? "carousel" : "feed",
+    status: HOME_STATUSES.includes(source.status) ? source.status : "draft",
+    title: homeText(source.title, HOME_FIELD_LIMITS.title),
+    summary: homeText(source.summary, HOME_FIELD_LIMITS.summary),
+    body: homeText(source.body, HOME_FIELD_LIMITS.body),
+    imageUrl: homeImage(source.imageUrl),
+    linkUrl: homeLink(source.linkUrl),
+    ctaLabel: homeText(source.ctaLabel, HOME_FIELD_LIMITS.ctaLabel),
+    author: homeText(source.author, HOME_FIELD_LIMITS.author),
+    badge: homeText(source.badge, HOME_FIELD_LIMITS.badge) || (kind === "promo" || kind === "premium" ? "Advertisement" : ""),
+    style: HOME_STYLES.includes(source.style) ? source.style : "card",
+    pinned: Boolean(source.pinned),
+    active: source.active !== false,
+    premiumOnly: Boolean(source.premiumOnly),
+    order: Number.isFinite(Number(source.order)) ? Math.round(Number(source.order)) : 0,
+    audience: {
+      scope,
+      colleges: homeList(audience.colleges, 12),
+      departments: homeList(audience.departments, 24),
+      years: homeList(audience.years, 8)
+    },
+    publishedAt: homeStamp(source.publishedAt),
+    expiresAt: homeStamp(source.expiresAt),
+    impressions: Number.isFinite(Number(source.impressions)) && Number(source.impressions) >= 0 ? Math.round(Number(source.impressions)) : 0,
+    clicks: Number.isFinite(Number(source.clicks)) && Number(source.clicks) >= 0 ? Math.round(Number(source.clicks)) : 0,
+    createdAt: homeStamp(source.createdAt) || now,
+    updatedAt: homeStamp(source.updatedAt) || now,
+    updatedBy: homeText(source.updatedBy, 80)
+  };
+}
+
+// The row says what the administrator last chose; the clock says what a student sees now.
+function homeCardState(card: HomeCard, now = Date.now()): HomeCard["status"] {
+  if (card.status === "archived" || card.status === "draft" || card.status === "pending") return card.status;
+  if (card.publishedAt && Date.parse(card.publishedAt) > now) return "scheduled";
+  if (card.expiresAt && Date.parse(card.expiresAt) <= now) return "expired";
+  return "published";
+}
+
+const sameLabel = (a: unknown, b: unknown) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+function homeCardForAccount(card: HomeCard, account: Record<string, any> | null, planLive: boolean): boolean {
+  if (card.premiumOnly && !planLive) return false;
+  const { scope, colleges, departments, years } = card.audience;
+  if (scope === "all") return true;
+  // A targeted card has no audience to match against until somebody signs in.
+  if (!account) return false;
+  if (scope === "college") return colleges.length === 0 || colleges.some((label) => sameLabel(label, account.college));
+  if (scope === "department")
+    return departments.length === 0 || departments.some((label) => sameLabel(label, account.department));
+  return years.length === 0 || years.some((label) => sameLabel(label, account.academicYear));
+}
+
+// What a reader is handed: an administrator sees every row including drafts and counters,
+// anyone else only the cards that are live for them right now, stripped of the ledger.
+function homeFeedFor(session: ReturnType<typeof verifyRequestSession>): Record<string, unknown>[] {
+  const now = Date.now();
+  const account = session ? dbState.usersData.find((user) => user.id === session.id) || null : null;
+  const admin = Boolean(session && session.role === "admin");
+  const live = planIsLive(account || {});
+  return dbState.homeContent
+    .filter((card) => (admin ? true : homeCardState(card, now) === "published" && card.active && homeCardForAccount(card, account, live)))
+    .slice()
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order || String(b.publishedAt || b.updatedAt).localeCompare(String(a.publishedAt || a.updatedAt)))
+    .map((card) =>
+      admin
+        ? { ...card, state: homeCardState(card, now) }
+        : {
+            id: card.id,
+            kind: card.kind,
+            placement: card.placement,
+            title: card.title,
+            summary: card.summary,
+            body: card.body,
+            imageUrl: card.imageUrl,
+            linkUrl: card.linkUrl,
+            ctaLabel: card.ctaLabel,
+            badge: card.badge,
+            style: card.style,
+            pinned: card.pinned,
+            premiumOnly: card.premiumOnly,
+            publishedAt: card.publishedAt
+          }
+    );
+}
+
+// How a student is told to send money. Nothing here is written into the app: an
+// administrator types the account details and both surfaces read them from the store.
+interface PaymentMethod {
+  id: string;
+  name: string;
+  provider: string;
+  destination: string;
+  holderName: string;
+  instructions: string;
+  qrImageUrl: string;
+  active: boolean;
+  order: number;
+  updatedAt: string;
+}
+
+// The money ledger. A screenshot is only a hint — the row is closed by an administrator
+// who checked the payment against the provider, and who did it is recorded here.
+interface PremiumPayment {
+  id: string;
+  reference: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  plan: string;
+  planTitle: string;
+  amountBirr: number;
+  methodId: string;
+  methodName: string;
+  transactionId: string;
+  screenshot: string;
+  status: "pending" | "under_review" | "approved" | "rejected" | "resubmission_required" | "cancelled";
+  createdAt: string;
+  submittedAt: string;
+  reviewedAt: string;
+  reviewedBy: string;
+  reason: string;
+  note: string;
+  supersededBy: string;
+  activatedAt: string;
+  expiresAt: string;
+}
+
+interface AuditEntry {
+  id: string;
+  at: string;
+  actor: string;
+  actorRole: string;
+  action: string;
+  target: string;
+  detail: string;
+}
+
+const AUDIT_MAX = 1500;
+
+function normalizeAuditEntry(raw: unknown): AuditEntry | null {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, any>;
+  const action = homeText(source.action, 60);
+  if (!action) return null;
+  return {
+    id: homeText(source.id, 40) || `aud-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`,
+    at: homeStamp(source.at) || new Date().toISOString(),
+    actor: homeText(source.actor, 120),
+    actorRole: homeText(source.actorRole, 20),
+    action,
+    target: homeText(source.target, 120),
+    detail: homeText(source.detail, 500)
+  };
+}
+
+// Appended, never edited: the point of the trail is that a later save cannot rewrite history.
+function recordAudit(session: { id: string; email: string; role: string }, action: string, target: string, detail: string) {
+  dbState.auditLog = [
+    ...dbState.auditLog,
+    { id: `aud-${Date.now().toString(36)}-${crypto.randomInt(100, 999)}`, at: new Date().toISOString(), actor: session.email || session.id, actorRole: String(session.role || ""), action, target: homeText(target, 120), detail: homeText(detail, 500) }
+  ].slice(-AUDIT_MAX);
+}
+
+function normalizePaymentMethod(raw: unknown): PaymentMethod | null {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, any>;
+  const id = homeText(source.id, 60);
+  if (!id) return null;
+  return {
+    id,
+    name: homeText(source.name, 60),
+    provider: homeText(source.provider, 60),
+    destination: homeText(source.destination, 120),
+    holderName: homeText(source.holderName, 80),
+    instructions: homeText(source.instructions, 600),
+    qrImageUrl: homeImage(source.qrImageUrl),
+    active: source.active !== false,
+    order: Number.isFinite(Number(source.order)) ? Math.round(Number(source.order)) : 0,
+    updatedAt: homeStamp(source.updatedAt) || new Date().toISOString()
+  };
+}
+
+const PAYMENT_STATUSES = ["pending", "under_review", "approved", "rejected", "resubmission_required", "cancelled"] as const;
+
+function normalizePremiumPayment(raw: unknown): PremiumPayment | null {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, any>;
+  const id = homeText(source.id, 60);
+  if (!id) return null;
+  return {
+    id,
+    reference: homeText(source.reference, 80),
+    userId: homeText(source.userId, 60),
+    userEmail: homeText(source.userEmail, 200),
+    userName: homeText(source.userName, 80),
+    plan: homeText(source.plan, 40),
+    planTitle: homeText(source.planTitle, 60),
+    amountBirr: Number.isFinite(Number(source.amountBirr)) ? Math.max(0, Math.round(Number(source.amountBirr))) : 0,
+    methodId: homeText(source.methodId, 60),
+    methodName: homeText(source.methodName, 60),
+    transactionId: homeText(source.transactionId, 80),
+    // The picture is kept for the ledger but is never handed out except to its owner and
+    // to an administrator who asks for this one row.
+    screenshot: homeImage(source.screenshot) && String(source.screenshot).length <= 2_000_000 ? String(source.screenshot) : "",
+    status: PAYMENT_STATUSES.includes(source.status) ? source.status : "pending",
+    createdAt: homeStamp(source.createdAt) || new Date().toISOString(),
+    submittedAt: homeStamp(source.submittedAt) || "",
+    reviewedAt: homeStamp(source.reviewedAt) || "",
+    reviewedBy: homeText(source.reviewedBy, 120),
+    reason: homeText(source.reason, 300),
+    note: homeText(source.note, 300),
+    supersededBy: homeText(source.supersededBy, 60),
+    activatedAt: homeStamp(source.activatedAt) || "",
+    expiresAt: homeStamp(source.expiresAt) || ""
+  };
+}
+
+// The money a student has offered. Nobody else's rows are ever in the list, and the
+// picture itself stays out of every bulk payload — it is fetched per row, by the person
+// who is allowed to see that one row.
+function premiumLedgerFor(session: ReturnType<typeof verifyRequestSession>) {
+  const admin = Boolean(session && session.role === "admin");
+  const rows = dbState.premiumPayments
+    .filter((payment) => (admin ? true : payment.userId === String(session?.id || "")))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, admin ? 400 : 60);
+  return rows.map(premiumPaymentView);
+}
+
+function premiumPaymentView(payment: PremiumPayment) {
+  const { screenshot, ...rest } = payment;
+  return { ...rest, hasScreenshot: Boolean(screenshot) };
+}
+
+// Which tier a reader is really in, as the server last decided. The app builds its
+// interface from this and from nothing else, so a value typed into local storage can
+// neither buy Premium nor take it away.
+function subscriptionView(session: ReturnType<typeof verifyRequestSession>) {
+  const account = session ? dbState.usersData.find((candidate) => candidate.id === session.id) || null : null;
+  const live = Boolean(account && planIsLive(account));
+  const plan = live ? String(account?.accountPlan || "") : "";
+  return {
+    plan,
+    live,
+    expiry: live && account?.subscriptionExpiry ? String(account.subscriptionExpiry) : null,
+    title: plan && PREMIUM_PLANS[plan] ? PREMIUM_PLANS[plan].title : ""
+  };
+}
+
+// A Premium file is still listed to everybody — that is how a student sees what they are
+// missing — but only the address of a file they may open travels to their device.
+function mayOpenPremiumFiles(session: ReturnType<typeof verifyRequestSession>): boolean {
+  if (!session) return false;
+  if (isStaffSession(session)) return true;
+  const account = dbState.usersData.find((candidate) => candidate.id === session.id) || null;
+  return Boolean(account && planIsLive(account));
+}
+
+function withoutLockedLinks(course: Course, allowed: boolean): Course {
+  const premiumFiles = (course.materials || []).filter((material) => material.premiumOnly);
+  if (allowed || premiumFiles.length === 0) return course;
+  return {
+    ...course,
+    materials: (course.materials || []).map((material) =>
+      material.premiumOnly ? { ...material, url: "", sideMaterials: [] } : material
+    )
+  };
+}
+
 interface DatabaseSchema {
   coursesData: Course[];
   usersData: UserAccount[];
@@ -1015,6 +1433,10 @@ interface DatabaseSchema {
   mailSettings?: MailSettings;
   downloadPolicy?: DownloadPolicy;
   appSettings?: AppSettings;
+  homeContent: HomeCard[];
+  paymentMethods: PaymentMethod[];
+  premiumPayments: PremiumPayment[];
+  auditLog: AuditEntry[];
   updatedAt?: number;
   // Bumped only by admin wholesale state saves. `updatedAt` moves on every student
   // write too, so it cannot tell a stale admin editor from normal traffic.
@@ -1140,10 +1562,13 @@ function buildDefaultDatabase(): DatabaseSchema {
     supportTickets: [],
     mailSettings: {},
     downloadPolicy: { ...DEFAULT_DOWNLOAD_POLICY },
-    appSettings: { ...DEFAULT_APP_SETTINGS }
+    appSettings: { ...DEFAULT_APP_SETTINGS },
+    homeContent: [],
+    paymentMethods: [],
+    premiumPayments: [],
+    auditLog: []
   };
 }
-
 function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
   const defaults = buildDefaultDatabase();
   const coursesData: Course[] = Array.isArray(raw.coursesData) && raw.coursesData.length > 0
@@ -1316,6 +1741,18 @@ function normalizeDatabase(raw: Partial<DatabaseSchema>): DatabaseSchema {
     mailSettings: normalizeMailSettings(raw.mailSettings),
     downloadPolicy: normalizeDownloadPolicy(raw.downloadPolicy),
     appSettings: normalizeAppSettings(raw.appSettings),
+    homeContent: Array.isArray(raw.homeContent)
+      ? raw.homeContent.slice(0, HOME_MAX_CARDS).map(normalizeHomeCard).filter((card): card is HomeCard => Boolean(card))
+      : [],
+    paymentMethods: Array.isArray(raw.paymentMethods)
+      ? raw.paymentMethods.slice(0, 24).map(normalizePaymentMethod).filter((m): m is PaymentMethod => Boolean(m))
+      : [],
+    premiumPayments: Array.isArray(raw.premiumPayments)
+      ? raw.premiumPayments.slice(0, 2000).map(normalizePremiumPayment).filter((p): p is PremiumPayment => Boolean(p))
+      : [],
+    auditLog: Array.isArray(raw.auditLog)
+      ? raw.auditLog.slice(-AUDIT_MAX).map(normalizeAuditEntry).filter((a): a is AuditEntry => Boolean(a))
+      : [],
     updatedAt: Number(raw.updatedAt) || 0,
     contentRevision: Number(raw.contentRevision) || 0
   };
@@ -1897,7 +2334,7 @@ export async function createApp() {
             (course) => !isEvangadiCourse(course) || Boolean(grantedCourseIds?.has(String(course.id)))
           );
     res.json({
-      coursesData: visibleCourses,
+      coursesData: visibleCourses.map((course) => withoutLockedLinks(course, mayOpenPremiumFiles(session))),
       usersData: visibleUsers,
       pageTexts: dbState.pageTexts,
       appearanceSettings: dbState.appearanceSettings,
@@ -1905,6 +2342,15 @@ export async function createApp() {
       // explain why a file is closed.
       downloadPolicy: downloadPolicy(),
       appSettings: normalizeAppSettings(dbState.appSettings),
+      // Admins get every card with its counters; a student gets only what is live for them.
+      homeContent: homeFeedFor(session),
+      // The plan, the price and the account details are the administrator's to write and
+      // the student's to read — nothing about paying is baked into the app.
+      paymentMethods: dbState.paymentMethods
+        .filter((method) => (session && session.role === "admin" ? true : method.active && Boolean(method.destination)))
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)),
+      premiumPayments: premiumLedgerFor(session),
+      subscription: subscriptionView(session),
       userRatings: dbState.userRatings,
       updatedAt: dbState.updatedAt || 0,
       contentRevision: dbState.contentRevision || 0
@@ -2022,16 +2468,145 @@ export async function createApp() {
       materialSubmissions: dbState.materialSubmissions,
       supportTickets: dbState.supportTickets,
       mailSettings: dbState.mailSettings,
+      // Home cards have their own endpoints, and a student only ever receives the live
+      // subset — a wholesale save from an admin tab must not write that shorter list back.
+      homeContent: dbState.homeContent,
+      paymentMethods: dbState.paymentMethods,
+      premiumPayments: dbState.premiumPayments,
+      auditLog: dbState.auditLog,
       contentRevision: serverRevision + 1
     });
     saveDatabase(dbState);
     res.json({ ok: true, updatedAt: dbState.updatedAt, contentRevision: dbState.contentRevision });
   });
 
+  // Home-screen cards: one store feeds the website and the Android app. Support staff may
+  // write a draft, but only an administrator can release it to students.
+  app.post("/api/admin/home/content", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const incoming = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, any>;
+    const card = normalizeHomeCard({ ...incoming, updatedBy: session.email });
+    if (!card) {
+      res.status(400).json({ ok: false, error: "That card needs an id." });
+      return;
+    }
+    if (session.role !== "admin" && ["published", "scheduled"].includes(card.status)) {
+      res.status(403).json({ ok: false, error: "Only an administrator can publish a card." });
+      return;
+    }
+    if (!card.title) {
+      res.status(400).json({ ok: false, error: "Add a title before saving." });
+      return;
+    }
+    const existing = dbState.homeContent.find((item) => item.id === card.id);
+    card.createdAt = existing ? existing.createdAt : card.createdAt;
+    card.updatedAt = new Date().toISOString();
+    card.impressions = existing?.impressions || 0;
+    card.clicks = existing?.clicks || 0;
+    if (existing) dbState.homeContent = dbState.homeContent.map((item) => (item.id === card.id ? card : item));
+    else if (dbState.homeContent.length >= HOME_MAX_CARDS) {
+      res.status(429).json({ ok: false, error: "There are already 120 cards. Archive one first." });
+      return;
+    } else dbState.homeContent = [...dbState.homeContent, card];
+    recordAudit(
+      session,
+      existing ? "home.update" : "home.create",
+      card.id,
+      `${card.kind} · ${card.status} · ${card.title}`
+    );
+    saveDatabase(dbState);
+    res.json({ ok: true, card, homeContent: homeFeedFor(session) });
+  });
+
+  app.post("/api/admin/home/content/delete", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const id = homeText(req.body?.id, 60);
+    dbState.homeContent = dbState.homeContent.filter((card) => card.id !== id);
+    saveDatabase(dbState);
+    res.json({ ok: true, homeContent: homeFeedFor(session) });
+  });
+
+  // Moving a card swaps its order value with the neighbour it passed, so the whole strip
+  // never has to be rewritten and a second tab's edit cannot be shuffled by this one.
+  app.post("/api/admin/home/content/move", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    const id = homeText(req.body?.id, 60);
+    const up = req.body?.direction === "up";
+    const cards = dbState.homeContent.slice().sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt));
+    const index = cards.findIndex((card) => card.id === id);
+    const swap = up ? index - 1 : index + 1;
+    if (index < 0 || swap < 0 || swap >= cards.length) {
+      res.json({ ok: true, homeContent: homeFeedFor(session) });
+      return;
+    }
+    const moved = cards[index];
+    const other = cards[swap];
+    // Equal order values are common in a freshly built list, so fall back to a renumber.
+    if (moved.order === other.order) {
+      cards.forEach((card, position) => {
+        card.order = position * 10;
+      });
+      const reindex = cards.findIndex((card) => card.id === id);
+      const target = up ? reindex - 1 : reindex + 1;
+      if (target >= 0 && target < cards.length) cards.splice(target, 0, cards.splice(reindex, 1)[0]);
+      cards.forEach((card, position) => {
+        card.order = position * 10;
+      });
+    } else {
+      const order = moved.order;
+      moved.order = other.order;
+      other.order = order;
+    }
+    dbState.homeContent = cards;
+    saveDatabase(dbState);
+    res.json({ ok: true, homeContent: homeFeedFor(session) });
+  });
+
+  // The counters are the only thing a student can write about a card, and only for a card
+  // that really is on their screen right now — so a viewer cannot inflate a private draft.
+  app.post("/api/home/stats", (req, res) => {
+    const session = verifyRequestSession(req);
+    const id = homeText(req.body?.id, 60);
+    const event = req.body?.event === "click" ? "click" : "impression";
+    const card = dbState.homeContent.find((item) => item.id === id);
+    if (!card) {
+      res.status(404).json({ ok: false, error: "That card is no longer here." });
+      return;
+    }
+    const visible = homeFeedFor(session).some((item) => item.id === id);
+    if (!visible) {
+      res.status(404).json({ ok: false, error: "That card is no longer here." });
+      return;
+    }
+    const key = `${id}|${event}|${session?.id || req.ip}`;
+    const last = homeStatSeen.get(key) || 0;
+    if (Date.now() - last < (event === "click" ? 5_000 : 60_000)) {
+      res.json({ ok: true, counted: false });
+      return;
+    }
+    homeStatSeen.set(key, Date.now());
+    if (homeStatSeen.size > 20_000) homeStatSeen.clear();
+    if (event === "click") card.clicks += 1;
+    else card.impressions += 1;
+    saveDatabase(dbState);
+    res.json({ ok: true, counted: true });
+  });
+
   // Admin-only account removal: PUT /api/state intentionally never deletes
   // accounts, so the workspace needs an explicit endpoint for it.
-  app.delete("/api/users/:userId", (req, res) => {
-    const session = verifyRequestSession(req);
+  app.delete("/api/users/:userId", (req, res) => {    const session = verifyRequestSession(req);
     if (!session || session.role !== "admin") {
       res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
       return;
@@ -2044,9 +2619,9 @@ export async function createApp() {
       return;
     }
     dbState = normalizeDatabase({ ...dbState, usersData: remaining });
+    recordAudit(session, "account.delete", userId, `Removed ${before.length - remaining.length} account`);
     saveDatabase(dbState);
-    res.json({ ok: true, removed: before.length - remaining.length });
-  });
+    res.json({ ok: true, removed: before.length - remaining.length });  });
 
   app.patch("/api/profile", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -2093,6 +2668,19 @@ export async function createApp() {
     user.name = name.slice(0, 80);
     user.department = department.slice(0, 80) || user.department;
     if (phoneSupplied) user.phone = phone.slice(0, 32);
+    // Everything below is the student's own choice. Role, plan, credits and the verified
+    // address are never read from this body, so a profile edit cannot raise privileges.
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "college"))
+      user.college = String(req.body?.college ?? "").trim().slice(0, 120);
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "academicYear"))
+      user.academicYear = String(req.body?.academicYear ?? "").trim().slice(0, 40);
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "bio")) user.bio = String(req.body?.bio ?? "").trim().slice(0, 280);
+    const prefs = req.body?.browsePrefs;
+    if (prefs && typeof prefs === "object") {
+      const semester = String((prefs as any).semester ?? "").trim().slice(0, 60);
+      const subcategory = String((prefs as any).subcategory ?? "").trim().slice(0, 60);
+      user.browsePrefs = { semester, subcategory };
+    }
     if (avatarProvided) {
       if (avatarRaw) user.avatarUrl = avatarRaw;
       else delete user.avatarUrl;
@@ -2108,6 +2696,121 @@ export async function createApp() {
     ];
     saveDatabase(dbState);
     res.json({ ok: true, user: safeUserAccount(user), message: "Profile saved." });
+  });
+
+  const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+
+  // Changing the address is the one edit that cannot take effect on the spot: the new
+  // mailbox has to prove it receives our mail before it becomes how the account is found.
+  app.post("/api/profile/email", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in to change your email." });
+      return;
+    }
+    const address = String(req.body?.email ?? "").trim().toLowerCase();
+    if (!EMAIL_SHAPE.test(address) || address.length > 200) {
+      res.status(400).json({ ok: false, error: "That does not look like an email address." });
+      return;
+    }
+    if (address === user.email.toLowerCase()) {
+      res.json({ ok: true, unchanged: true, message: "That is already your address." });
+      return;
+    }
+    if (dbState.usersData.some((account) => account.email.toLowerCase() === address)) {
+      res.status(409).json({ ok: false, error: "Another account already uses that address." });
+      return;
+    }
+    const limitKey = `${requestClientIp(req)}|${user.id}`;
+    const limitNow = Date.now();
+    const window = codeRateLimitMap.get(limitKey);
+    if (!window || limitNow - window.windowStartedAt >= 10 * 60 * 1000) {
+      pruneRateMap(codeRateLimitMap, 10 * 60 * 1000);
+      codeRateLimitMap.set(limitKey, { count: 1, windowStartedAt: limitNow });
+    } else if (window.count >= 3) {
+      res.status(429).json({ ok: false, error: "Too many codes requested. Please wait a few minutes." });
+      return;
+    } else {
+      window.count++;
+    }
+    const code = sixDigitCode();
+    user.pendingEmail = address;
+    user.emailChangeCode = hashPassword(code, `email:${user.id}`);
+    user.emailChangeExpiresAt = new Date(Date.now() + VERIFICATION_CODE_TTL_MS).toISOString();
+    user.emailCodeAttempts = 0;
+    const delivery = await sendMail({
+      to: address,
+      ...signupCodeEmail({ name: user.name, email: address, code, minutesLeft: Math.round(VERIFICATION_CODE_TTL_MS / 60000) })
+    });
+    if (!delivery.ok) {
+      delete user.pendingEmail;
+      delete user.emailChangeCode;
+      delete user.emailChangeExpiresAt;
+      saveDatabase(dbState);
+      res.status(502).json({ ok: false, error: "The code could not be emailed. Try again in a few minutes." });
+      return;
+    }
+    saveDatabase(dbState);
+    res.json({ ok: true, sentTo: address, message: "Enter the 6-digit code we just emailed to the new address." });
+  });
+
+  app.post("/api/profile/email/confirm", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in to change your email." });
+      return;
+    }
+    const code = String(req.body?.code ?? "").replace(/\D/g, "");
+    if (!user.pendingEmail || !user.emailChangeCode) {
+      res.status(400).json({ ok: false, error: "Ask for a code first." });
+      return;
+    }
+    if (Date.parse(String(user.emailChangeExpiresAt || "")) < Date.now()) {
+      res.status(400).json({ ok: false, error: "That code has expired. Request a new one." });
+      return;
+    }
+    user.emailCodeAttempts = Number(user.emailCodeAttempts || 0) + 1;
+    if (user.emailCodeAttempts > VERIFICATION_MAX_ATTEMPTS) {
+      delete user.pendingEmail;
+      delete user.emailChangeCode;
+      delete user.emailChangeExpiresAt;
+      saveDatabase(dbState);
+      res.status(429).json({ ok: false, error: "Too many attempts. Ask again for a new code." });
+      return;
+    }
+    if (hashPassword(code, `email:${user.id}`) !== user.emailChangeCode) {
+      saveDatabase(dbState);
+      res.status(401).json({ ok: false, error: "That code does not match." });
+      return;
+    }
+    const previous = user.email;
+    user.email = user.pendingEmail;
+    user.emailVerified = true;
+    delete user.emailUnconfirmed;
+    delete user.pendingEmail;
+    delete user.emailChangeCode;
+    delete user.emailChangeExpiresAt;
+    delete user.emailCodeAttempts;
+    // Every live token carries the old address, so they all stop working with it. Signing
+    // in again is the only way back in — which is the point of changing the address.
+    dbState.loginDevices = dbState.loginDevices.map((device) =>
+      device.accountId === user.id && !device.revokedAt ? { ...device, revokedAt: new Date().toISOString() } : device
+    );
+    user.activityLog = [
+      {
+        id: "act-" + Date.now(),
+        type: "Email Changed",
+        detail: `Address moved from ${previous} to ${user.email}; every signed-in device was signed out.`,
+        timestamp: new Date().toISOString().slice(0, 16).replace("T", " ")
+      },
+      ...(user.activityLog || []).slice(-40)
+    ];
+    saveDatabase(dbState);
+    res.json({ ok: true, user: safeUserAccount(user), message: "Address updated. Sign in again with your new email." });
   });
 
   // Every screen the account holder is signed in on. A token carries the id of its own
@@ -2414,6 +3117,7 @@ export async function createApp() {
         passwordRecoveryRequests: dbState.passwordRecoveryRequests,
         supportTickets: dbState.supportTickets,
         mailSettings: dbState.mailSettings,
+        homeContent: dbState.homeContent,
         contentRevision: dbState.contentRevision || 0,
         updatedAt: dbState.updatedAt || 0
       }
@@ -4252,6 +4956,7 @@ export async function createApp() {
       return;
     }
     target.role = role;
+    recordAudit(session, "user.role", target.email, `Access set to ${role}`);
     target.activityLog = [
       {
         id: "act-" + Date.now(),
@@ -4430,6 +5135,410 @@ export async function createApp() {
     res.json({ ok: true, ticket });
   });
 
+  // ==========================================================================
+  // CHATROOM — one university-wide room for signed-in students, moderated by staff.
+  // The rows live in their own tables (see server/chat.ts) because a busy room writes
+  // constantly and none of that traffic belongs in the shared state document.
+  // ==========================================================================
+
+  const CHAT_BODY_LIMIT = 1200;
+  const CHAT_IMAGE_CHARS = 700 * 1024; // ~500 KB of base64, so a phone photo still fits
+  const CHAT_WINDOW_MS = 60 * 1000;
+  const CHAT_MAX_PER_WINDOW = 20;
+  // Two messages a second from one account would let anyone bury the room in spam,
+  // so there is also a floor between sends rather than only a per-minute ceiling.
+  const CHAT_MIN_GAP_MS = 1500;
+  const chatSendMap = new Map<string, { count: number; windowStartedAt: number; lastSentAt: number }>();
+
+  function chatImage(value: unknown): string {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    if (raw.startsWith("data:")) {
+      return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(raw) && raw.length <= CHAT_IMAGE_CHARS ? raw : "";
+    }
+    return /^https:\/\/[^\s]{1,2000}$/.test(raw) ? raw : "";
+  }
+
+  // A deleted line keeps its shape so replies and reports still resolve, but the text
+  // and the picture are gone from the payload the moment staff remove it.
+  function presentChatMessage(row: { body: string; deleted: boolean; [key: string]: any }) {
+    if (!row.deleted) return row;
+    return {
+      id: row.id,
+      author_id: row.author_id,
+      author_name: row.author_name,
+      body: "",
+      image: null,
+      reply_to: row.reply_to,
+      reply_to_name: row.reply_to_name,
+      pinned: false,
+      created_at: row.created_at,
+      deleted: true
+    };
+  }
+
+  app.get("/api/chat", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to read the chatroom." });
+      return;
+    }
+    const limit = Math.min(120, Math.max(10, Number(req.query.limit) || 60));
+    const before = String(req.query.before || "").trim();
+    try {
+      const [rows, pinned, actions, stats] = await Promise.all([
+        listMessages(limit, before),
+        getPinnedMessages(),
+        activeActionsFor(session.id),
+        chatStats()
+      ]);
+      res.json({
+        ok: true,
+        messages: rows.map(presentChatMessage),
+        pinned: pinned.map(presentChatMessage),
+        stats,
+        // The student is told what applies to them rather than discovering it on send.
+        restricted: actions.map((a) => ({ kind: a.kind, until: a.until, reason: a.reason })),
+        staff: isStaffSession(session),
+        hasMore: rows.length === limit
+      });
+    } catch (err) {
+      console.error("chat list failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The chatroom could not be reached. Try again in a moment." });
+    }
+  });
+
+  // Long polling, not Supabase Realtime: this project talks to Postgres through the REST
+  // layer with a service key, and a socket the browser could open would need an anon
+  // policy over a table that holds every student's words. One held request per open room
+  // is a fraction of the load of the polling it replaces and keeps the table private.
+  app.get("/api/chat/updates", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to read the chatroom." });
+      return;
+    }
+    const since = String(req.query.since || "").trim();
+    const stamp = Number(req.query.rev) || chatRevision();
+    const waitMs = Math.min(25000, Math.max(1000, Number(req.query.wait) || 20000));
+    try {
+      const changed = await waitForChatChange(stamp, waitMs);
+      if (!changed) {
+        res.json({ ok: true, changed: false, rev: chatRevision() });
+        return;
+      }
+      const fresh = (await listMessages(60)).filter((m) => !since || m.created_at > since);
+      const [pinned, removed] = await Promise.all([getPinnedMessages(), changedSince(since)]);
+      res.json({
+        ok: true,
+        changed: true,
+        rev: chatRevision(),
+        messages: fresh.map(presentChatMessage),
+        pinned: pinned.map(presentChatMessage),
+        removed: removed.removed
+      });
+    } catch (err) {
+      console.error("chat updates failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The chatroom could not be reached." });
+    }
+  });
+
+  app.get("/api/chat/search", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to search the chatroom." });
+      return;
+    }
+    const term = String(req.query.q || "").trim();
+    if (term.length < 2) {
+      res.json({ ok: true, messages: [] });
+      return;
+    }
+    try {
+      const rows = await searchMessages(term, 60);
+      res.json({ ok: true, messages: rows.map(presentChatMessage) });
+    } catch (err) {
+      console.error("chat search failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The chatroom could not be reached." });
+    }
+  });
+
+  app.post("/api/chat", async (req, res) => {
+    const session = verifyRequestSession(req);
+    // The owner account is not a row in usersData, so it needs the same synthetic identity
+    // the other authenticated routes give it — otherwise the administrator cannot speak in
+    // the room they moderate.
+    const user =
+      session && session.id === "admin-owner"
+        ? { id: "admin-owner", name: "Habib Yesuf", email: ADMIN_EMAIL, role: "admin" }
+        : session
+          ? dbState.usersData.find((account) => account.id === session.id)
+          : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in before sending to the chatroom." });
+      return;
+    }
+    const body = String(req.body?.body ?? "").replace(/\0/g, "").trim().slice(0, CHAT_BODY_LIMIT);
+    const image = chatImage(req.body?.image);
+    if (!body && !image) {
+      res.status(400).json({ ok: false, error: "Write something or attach a picture first." });
+      return;
+    }
+    if (!body && image && String(req.body?.replyTo || "").trim()) {
+      res.status(400).json({ ok: false, error: "Add a few words when you reply with a picture." });
+      return;
+    }
+
+    try {
+      const active = await activeActionsFor(user.id);
+      if (active.some((a) => a.kind === "ban")) {
+        res.status(403).json({ ok: false, error: "This account is removed from the chatroom. Contact the support team." });
+        return;
+      }
+      if (active.some((a) => a.kind === "suspend")) {
+        res.status(403).json({ ok: false, error: "This account is suspended from the chatroom for now." });
+        return;
+      }
+      if (active.some((a) => a.kind === "mute")) {
+        const until = active.find((a) => a.kind === "mute")?.until;
+        res.status(403).json({
+          ok: false,
+          error: until ? `You are muted in the chatroom until ${until.slice(0, 16).replace("T", " ")}.` : "You are muted in the chatroom."
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const key = user.id;
+      const bucket = chatSendMap.get(key) || { count: 0, windowStartedAt: now, lastSentAt: 0 };
+      pruneRateMap(chatSendMap, CHAT_WINDOW_MS);
+      if (now - bucket.lastSentAt < CHAT_MIN_GAP_MS) {
+        res.status(429).json({ ok: false, error: "Slow down a moment — one message at a time." });
+        return;
+      }
+      if (now - bucket.windowStartedAt > CHAT_WINDOW_MS) {
+        bucket.count = 0;
+        bucket.windowStartedAt = now;
+      }
+      if (bucket.count >= CHAT_MAX_PER_WINDOW) {
+        res.status(429).json({ ok: false, error: "That is enough for one minute. The room will still be here." });
+        return;
+      }
+      bucket.count += 1;
+      bucket.lastSentAt = now;
+      chatSendMap.set(key, bucket);
+
+      const replyTo = String(req.body?.replyTo || "").trim().slice(0, 60);
+      let replyToName: string | null = null;
+      if (replyTo) {
+        const parent = await getMessage(replyTo);
+        if (!parent || parent.deleted) {
+          res.status(404).json({ ok: false, error: "That message is no longer in the room." });
+          return;
+        }
+        replyToName = parent.author_name;
+      }
+
+      const created = new Date().toISOString();
+      const row = await insertMessage({
+        id: "msg-" + created.replace(/[-:.TZ]/g, "").slice(0, 14) + "-" + crypto.randomInt(100000, 999999).toString(36),
+        author_id: user.id,
+        // The name travels with the message: a student who changes their display name or
+        // deletes their account must not rewrite or erase what they already said.
+        author_name: String(user.name || "Student").slice(0, 60),
+        body,
+        image: image || null,
+        reply_to: replyTo || null,
+        reply_to_name: replyToName,
+        created_at: created
+      });
+      res.json({ ok: true, message: row });
+    } catch (err) {
+      console.error("chat send failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Your message was not sent. Try again." });
+    }
+  });
+
+  app.post("/api/chat/:messageId/report", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to report a message." });
+      return;
+    }
+    const target = await getMessage(req.params.messageId);
+    if (!target || target.deleted) {
+      res.status(404).json({ ok: false, error: "That message is no longer in the room." });
+      return;
+    }
+    const reason = String(req.body?.reason || "").replace(/\0/g, "").trim().slice(0, 300);
+    if (reason.length < 3) {
+      res.status(400).json({ ok: false, error: "Say what is wrong with it so the team can judge." });
+      return;
+    }
+    try {
+      await insertReport({ message_id: target.id, reporter_id: session.id, reason });
+      res.json({ ok: true, message: "Reported. The support team will look at it." });
+    } catch (err) {
+      console.error("chat report failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The report was not saved. Try again." });
+    }
+  });
+
+  // The author may retract their own line; staff may remove anyone's. Both are soft
+  // deletes so a reply thread does not point at nothing.
+  app.delete("/api/chat/:messageId", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to remove a message." });
+      return;
+    }
+    const target = await getMessage(req.params.messageId);
+    if (!target) {
+      res.status(404).json({ ok: false, error: "That message is no longer in the room." });
+      return;
+    }
+    if (target.author_id !== session.id && !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the author or the support team can remove that." });
+      return;
+    }
+    try {
+      await softDeleteMessage(target.id, session.id);
+      if (target.author_id !== session.id) {
+        recordAudit(session as any, "chat.message.delete", target.id, `Removed a message from ${target.author_name}`);
+        saveDatabase(dbState);
+      }
+      res.json({ ok: true, id: target.id });
+    } catch (err) {
+      console.error("chat delete failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The message was not removed. Try again." });
+    }
+  });
+
+  app.post("/api/chat/:messageId/pin", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can pin an announcement." });
+      return;
+    }
+    const pinned = req.body?.pinned !== false;
+    try {
+      const ok = await setMessagePinned(req.params.messageId, pinned);
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "That message is no longer in the room." });
+        return;
+      }
+      recordAudit(session as any, pinned ? "chat.message.pin" : "chat.message.unpin", req.params.messageId, "");
+      saveDatabase(dbState);
+      res.json({ ok: true, pinned });
+    } catch (err) {
+      console.error("chat pin failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "That did not stick. Try again." });
+    }
+  });
+
+  // ------------------------------------------------------------------ moderation
+  app.get("/api/chat/reports", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const [reports, actions, stats] = await Promise.all([
+        listReports(Boolean(req.query.all)),
+        listActions(100),
+        chatStats()
+      ]);
+      res.json({ ok: true, reports, actions, stats });
+    } catch (err) {
+      console.error("chat reports failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The moderation queue could not be read." });
+    }
+  });
+
+  app.post("/api/chat/reports/:reportId/resolve", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can close a report." });
+      return;
+    }
+    try {
+      const ok = await resolveReport(req.params.reportId, session.id);
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "That report is already gone." });
+        return;
+      }
+      recordAudit(session as any, "chat.report.resolve", req.params.reportId, "");
+      saveDatabase(dbState);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("chat report resolve failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The report was not closed. Try again." });
+    }
+  });
+
+  const CHAT_ACTION_KINDS = ["mute", "suspend", "ban"];
+  // A mute without an end date is a ban wearing a different name, so the window is
+  // clamped and staff must choose one.
+  const CHAT_ACTION_MAX_MINUTES = 30 * 24 * 60;
+
+  app.post("/api/chat/actions", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can restrict an account." });
+      return;
+    }
+    const kind = String(req.body?.kind || "").trim();
+    if (!CHAT_ACTION_KINDS.includes(kind)) {
+      res.status(400).json({ ok: false, error: "Choose mute, suspend or ban." });
+      return;
+    }
+    const userId = String(req.body?.userId || "").trim();
+    const account = dbState.usersData.find((u) => u.id === userId);
+    if (!account) {
+      res.status(404).json({ ok: false, error: "That account is not in the list." });
+      return;
+    }
+    // Staff cannot turn on each other — that would let a support login silence the owner.
+    if (isStaffSession({ role: account.role })) {
+      res.status(403).json({ ok: false, error: "The support team does not moderate its own members." });
+      return;
+    }
+    const minutes = Math.min(CHAT_ACTION_MAX_MINUTES, Math.max(kind === "ban" ? 0 : 5, Number(req.body?.minutes) || (kind === "ban" ? 0 : 60)));
+    const reason = String(req.body?.reason || "").replace(/\0/g, "").trim().slice(0, 300);
+    const until = kind === "ban" && !minutes ? null : new Date(Date.now() + minutes * 60000).toISOString();
+    try {
+      const row = await insertAction({ user_id: account.id, kind: kind as any, reason, issued_by: session.id, until });
+      recordAudit(session as any, `chat.${kind}`, account.id, `${account.name || account.email}${reason ? ` — ${reason}` : ""}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, action: row });
+    } catch (err) {
+      console.error("chat action failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "That restriction was not saved. Try again." });
+    }
+  });
+
+  app.delete("/api/chat/actions/:actionId", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "Only the support team can lift a restriction." });
+      return;
+    }
+    try {
+      const ok = await liftAction(req.params.actionId);
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "That restriction is already gone." });
+        return;
+      }
+      recordAudit(session as any, "chat.action.lift", req.params.actionId, "");
+      saveDatabase(dbState);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("chat lift failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The restriction was not lifted. Try again." });
+    }
+  });
+
   // A premium order is a support ticket carrying the plan, so the team reads it in the
   // same inbox while the administrator gets a dedicated orders queue.
   app.post("/api/premium/requests", (req, res) => {
@@ -4529,6 +5638,362 @@ export async function createApp() {
     ];
     saveDatabase(dbState);
     res.json({ ok: true, ticket, user: safeUserAccount(user) });
+  });
+
+  /* --------------------------------------------------------- payment methods */
+
+  // The account a student pays into is written by an administrator and read back out of
+  // the store, so a new telebirr or CBE number never needs an app release.
+  app.post("/api/admin/payment-methods", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const method = normalizePaymentMethod({ ...req.body, updatedAt: new Date().toISOString() });
+    if (!method || !method.name) {
+      res.status(400).json({ ok: false, error: "Give the payment method a name." });
+      return;
+    }
+    const exists = dbState.paymentMethods.some((item) => item.id === method.id);
+    dbState.paymentMethods = exists
+      ? dbState.paymentMethods.map((item) => (item.id === method.id ? method : item))
+      : [...dbState.paymentMethods, method];
+    recordAudit(session, "payment_method.save", method.id, `${method.name} via ${method.provider || "unspecified"}`);
+    saveDatabase(dbState);
+    res.json({ ok: true, method, paymentMethods: dbState.paymentMethods });
+  });
+
+  app.post("/api/admin/payment-methods/delete", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const id = homeText(req.body?.id, 60);
+    dbState.paymentMethods = dbState.paymentMethods.filter((method) => method.id !== id);
+    recordAudit(session, "payment_method.delete", id, "");
+    saveDatabase(dbState);
+    res.json({ ok: true, paymentMethods: dbState.paymentMethods });
+  });
+
+  /* ----------------------------------------------------------- payment proof */
+
+  const SCREENSHOT_MAX_CHARS = 2_000_000;
+  const SCREENSHOT_SHAPE = /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=]+$/i;
+
+  function premiumPaymentId(): string {
+    return `pay-${Date.now().toString(36)}-${crypto.randomInt(1000, 9999)}`;
+  }
+
+  // A reference the student can be quoted back, short enough to read out over the phone.
+  function premiumReference(): string {
+    return `WS${String(Date.now()).slice(-7)}${crypto.randomInt(10, 99)}`;
+  }
+
+  function paymentScreenshot(raw: unknown): string | null {
+    const text = typeof raw === "string" ? raw.trim() : "";
+    if (!text) return "";
+    if (!SCREENSHOT_SHAPE.test(text)) return null;
+    if (text.length > SCREENSHOT_MAX_CHARS) return null;
+    return text;
+  }
+
+  // Proof of payment arrives here. The row is opened as pending and nothing about the
+  // account changes — only an administrator's decision can do that.
+  app.post("/api/premium/payments", (req, res) => {
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in before sending your payment proof." });
+      return;
+    }
+    const planKey = String(req.body?.plan || "").trim();
+    const plan = PREMIUM_PLANS[planKey];
+    if (!plan) {
+      res.status(400).json({ ok: false, error: "Choose one of the plans first." });
+      return;
+    }
+    const screenshot = paymentScreenshot(req.body?.screenshot);
+    if (screenshot === null) {
+      res.status(400).json({ ok: false, error: "Attach a PNG, JPEG or WebP screenshot of the payment." });
+      return;
+    }
+    if (!screenshot) {
+      res.status(400).json({ ok: false, error: "Add the payment screenshot before submitting." });
+      return;
+    }
+    // A live plan is not a reason to refuse a new order — buying the same plan again is how
+    // a student renews, and approval runs the new days on from the date it was granted.
+    const open = dbState.premiumPayments.filter(
+      (payment) => payment.userId === user.id && ["pending", "under_review", "resubmission_required"].includes(payment.status)
+    );
+    if (open.length >= 3) {
+      res.status(429).json({ ok: false, error: "You already have 3 payments waiting on the team." });
+      return;
+    }
+    const method = dbState.paymentMethods.find((item) => item.id === String(req.body?.methodId || ""));
+    const now = new Date().toISOString();
+    const payment: PremiumPayment = {
+      id: premiumPaymentId(),
+      reference: premiumReference(),
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      plan: planKey,
+      planTitle: plan.title,
+      amountBirr: planPriceBirr(planKey),
+      methodId: method ? method.id : "",
+      methodName: method ? method.name : "",
+      transactionId: homeText(req.body?.transactionId, 80),
+      screenshot,
+      status: "pending",
+      createdAt: now,
+      submittedAt: now,
+      reviewedAt: "",
+      reviewedBy: "",
+      reason: "",
+      note: "",
+      supersededBy: "",
+      activatedAt: "",
+      expiresAt: ""
+    };
+    const ticket: SupportTicket = {
+      id: "trk-" + Date.now() + "-" + crypto.randomInt(100, 999),
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      category: "Account or payment",
+      message: `Payment proof for ${plan.title} (${plan.price}) — reference ${payment.reference}. Account: ${user.email}.`,
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+      replies: [],
+      premiumPlan: planKey,
+      premiumPrice: plan.price,
+      premiumReference: payment.reference,
+      premiumPaymentId: payment.id
+    };
+    dbState.premiumPayments = [payment, ...dbState.premiumPayments].slice(0, 2000);
+    dbState.supportTickets = [...dbState.supportTickets, ticket];
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Payment Submitted", detail: `${plan.title} — ${plan.price} (ref ${payment.reference})`, timestamp: now.slice(0, 16).replace("T", " ") },
+      ...(user.activityLog || []).slice(-40)
+    ];
+    saveDatabase(dbState);
+    res.json({
+      ok: true,
+      payment: { ...payment, screenshot: undefined, hasScreenshot: true },
+      message: "Your payment proof has been submitted successfully. Your Premium subscription will be activated after administrator verification."
+    });
+  });
+
+  // A rejected order is not the end of the thread: the same row gains the new picture so
+  // the team still sees one order per plan, with the reason kept for the student to read.
+  app.post("/api/premium/payments/:id/resubmit", (req, res) => {
+    const session = verifyRequestSession(req);
+    const user = session ? dbState.usersData.find((account) => account.id === session.id) : null;
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in before sending your payment proof." });
+      return;
+    }
+    const payment = dbState.premiumPayments.find((item) => item.id === req.params.id);
+    if (!payment || payment.userId !== user.id) {
+      res.status(404).json({ ok: false, error: "That payment is no longer here." });
+      return;
+    }
+    if (!["rejected", "resubmission_required", "cancelled"].includes(payment.status)) {
+      res.status(409).json({ ok: false, error: "That payment is already with the team." });
+      return;
+    }
+    const screenshot = paymentScreenshot(req.body?.screenshot);
+    if (!screenshot) {
+      res.status(400).json({ ok: false, error: screenshot === null ? "That screenshot is not a usable image." : "Add the payment screenshot." });
+      return;
+    }
+    const now = new Date().toISOString();
+    payment.screenshot = screenshot;
+    payment.transactionId = homeText(req.body?.transactionId, 80) || payment.transactionId;
+    payment.status = "pending";
+    payment.reason = "";
+    payment.submittedAt = now;
+    payment.reviewedAt = "";
+    payment.reviewedBy = "";
+    const ticket = dbState.supportTickets.find((item) => item.premiumPaymentId === payment.id);
+    if (ticket) {
+      ticket.status = "open";
+      ticket.updatedAt = now;
+      ticket.premiumConfirmedAt = undefined;
+    }
+    user.activityLog = [
+      { id: "act-" + Date.now(), type: "Payment Resubmitted", detail: `${payment.planTitle} — reference ${payment.reference}`, timestamp: now.slice(0, 16).replace("T", " ") },
+      ...(user.activityLog || []).slice(-40)
+    ];
+    saveDatabase(dbState);
+    res.json({ ok: true, payment: { ...payment, screenshot: undefined, hasScreenshot: true } });
+  });
+
+  app.post("/api/premium/payments/:id/cancel", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in first." });
+      return;
+    }
+    const payment = dbState.premiumPayments.find((item) => item.id === req.params.id);
+    if (!payment || payment.userId !== session.id) {
+      res.status(404).json({ ok: false, error: "That payment is no longer here." });
+      return;
+    }
+    if (!["pending", "under_review", "resubmission_required"].includes(payment.status)) {
+      res.status(409).json({ ok: false, error: "That payment has already been decided." });
+      return;
+    }
+    payment.status = "cancelled";
+    payment.reviewedAt = new Date().toISOString();
+    payment.reviewedBy = session.email || "student";
+    payment.reason = "Cancelled by the student.";
+    saveDatabase(dbState);
+    res.json({ ok: true, payment: { ...payment, screenshot: undefined } });
+  });
+
+  // The picture is the private part of the record, so it is fetched one row at a time by
+  // the person who owns it or by an administrator who is looking at that order.
+  app.get("/api/premium/payments/:id/screenshot", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in first." });
+      return;
+    }
+    const payment = dbState.premiumPayments.find((item) => item.id === req.params.id);
+    if (!payment || !payment.screenshot) {
+      res.status(404).json({ ok: false, error: "That payment is no longer here." });
+      return;
+    }
+    const owner = payment.userId === session.id;
+    if (!owner && session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "Only the student who paid or an administrator can open that." });
+      return;
+    }
+    if (!owner) recordAudit(session, "payment.screenshot_view", payment.id, `${payment.reference} opened for review`);
+    res.json({ ok: true, screenshot: payment.screenshot, status: payment.status });
+  });
+
+  // Every money decision goes through here: it is the only door to a paid plan.
+  app.post("/api/admin/premium/payments/:id/decision", (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const payment = dbState.premiumPayments.find((item) => item.id === req.params.id);
+    if (!payment) {
+      res.status(404).json({ ok: false, error: "That payment is no longer in the queue." });
+      return;
+    }
+    const action = String(req.body?.action || "").trim();
+    if (!["review", "approve", "reject", "resubmit", "cancel"].includes(action)) {
+      res.status(400).json({ ok: false, error: "Choose what to do with this payment." });
+      return;
+    }
+    if (payment.userId === session.id) {
+      res.status(403).json({ ok: false, error: "You cannot confirm your own payment." });
+      return;
+    }
+    const user = dbState.usersData.find((account) => account.id === payment.userId);
+    const plan = PREMIUM_PLANS[payment.plan];
+    if (!user || !plan) {
+      res.status(404).json({ ok: false, error: "That student account is no longer in the library." });
+      return;
+    }
+    const reason = homeText(req.body?.reason, 300);
+    const note = homeText(req.body?.note, 300);
+    const now = new Date().toISOString();
+
+    if (action === "review") {
+      payment.status = "under_review";
+      payment.note = note || payment.note;
+      saveDatabase(dbState);
+      res.json({ ok: true, payment: premiumPaymentView(payment) });
+      return;
+    }
+    if (action === "approve") {
+      if (payment.status === "approved") {
+        res.status(409).json({ ok: false, error: "This payment was already confirmed." });
+        return;
+      }
+      user.accountPlan = payment.plan;
+      user.paymentStatus = "paid";
+      user.downloadOnlyAccount = false;
+      user.category = plan.category;
+      // A renewal runs on from whatever is still live instead of starting from today, so
+      // buying early does not throw away the days already paid for.
+      const current = Date.parse(String(user.subscriptionExpiry || ""));
+      const base = Number.isFinite(current) && current > Date.now() ? current : Date.now();
+      user.subscriptionExpiry = plan.days ? new Date(base + plan.days * 86_400_000).toISOString() : null;
+      payment.status = "approved";
+      payment.reviewedAt = now;
+      payment.reviewedBy = session.email || "administrator";
+      payment.reason = note;
+      payment.activatedAt = now;
+      payment.expiresAt = user.subscriptionExpiry || "";
+      const ticket = dbState.supportTickets.find((item) => item.premiumPaymentId === payment.id);
+      if (ticket) {
+        ticket.premiumConfirmedAt = now;
+        ticket.status = "answered";
+        ticket.updatedAt = now;
+        ticket.replies = [
+          ...(ticket.replies || []),
+          { id: "rpy-" + Date.now() + "-" + crypto.randomInt(100, 999), text: `Payment confirmed — ${plan.title} is active on your account.`, authorName: "Support team", by: "staff", createdAt: now }
+        ];
+      }
+      user.activityLog = [
+        { id: "act-" + Date.now(), type: "Premium Activated", detail: `${plan.title} — ${plan.price} confirmed by ${payment.reviewedBy}`, timestamp: now.slice(0, 16).replace("T", " ") },
+        ...(user.activityLog || []).slice(-40)
+      ];
+      recordAudit(session, "payment.approve", payment.id, `${payment.reference} · ${user.email} · ${plan.title} · ${payment.amountBirr} Birr`);
+      saveDatabase(dbState);
+      res.json({ ok: true, payment: premiumPaymentView(payment), user: safeUserAccount(user), message: `${plan.title} is active.` });
+      return;
+    }
+    if (action === "reject" || action === "resubmit" || action === "cancel") {
+      if (!reason) {
+        res.status(400).json({ ok: false, error: "Say why, so the student knows what to fix." });
+        return;
+      }
+      payment.status = action === "reject" ? "rejected" : action === "resubmit" ? "resubmission_required" : "cancelled";
+      payment.reviewedAt = now;
+      payment.reviewedBy = session.email || "administrator";
+      payment.reason = reason;
+      payment.note = note || payment.note;
+      const ticket = dbState.supportTickets.find((item) => item.premiumPaymentId === payment.id);
+      if (ticket) {
+        ticket.updatedAt = now;
+        ticket.replies = [
+          ...(ticket.replies || []),
+          { id: "rpy-" + Date.now() + "-" + crypto.randomInt(100, 999), text: reason, authorName: "Support team", by: "staff", createdAt: now }
+        ];
+      }
+      user.activityLog = [
+        { id: "act-" + Date.now(), type: "Payment Not Accepted", detail: `${plan.title} — ${reason}`, timestamp: now.slice(0, 16).replace("T", " ") },
+        ...(user.activityLog || []).slice(-40)
+      ];
+      recordAudit(session, `payment.${action}`, payment.id, `${payment.reference} · ${user.email} · ${reason}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, payment: premiumPaymentView(payment), message: "The student can see your note." });
+      return;
+    }
+  });
+
+  app.get("/api/admin/audit", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    res.json({ ok: true, entries: dbState.auditLog.slice(-limit).reverse() });
   });
 
   // Staff cannot use the administrator's wholesale state save, so the library writes
@@ -4856,6 +6321,8 @@ export async function createApp() {
       if (material && material.free === true) allowed = true;
       // Support staff have to open files to review them.
       else if (isStaffSession(session)) allowed = true;
+      // Premium-only is a property of the file, so it outranks even a free-for-all policy.
+      else if (material && material.premiumOnly) reason = "This file is kept for Premium accounts.";
       else if (plan === "free_unlimited" || policy.mode === "free") allowed = true;
       else if (policy.mode === "credits" && (Number(user.downloadCredits) || 0) > 0) allowed = true;
       else if (policy.mode === "premium") reason = "The administrator has the library open to Premium accounts only.";
@@ -4877,6 +6344,426 @@ export async function createApp() {
     user.downloadsCount = (Number(user.downloadsCount) || 0) + 1;
     saveDatabase(dbState);
     res.json({ ok: true, allowed: true, spent: spend, ...submissionCreditState(user) });
+  });
+
+  // ============================================================================
+  // PRACTICE & EXAMINATION
+  // ============================================================================
+  // The correct answers and explanations never travel to a student until they submit. The
+  // catalog/browsing queries strip both; the submit endpoint is the only door that returns them.
+
+  function practiceUser(session: ReturnType<typeof verifyRequestSession>) {
+    if (!session) return null;
+    if (session.id === "admin-owner") {
+      return { id: "admin-owner", name: "Habib Yesuf", email: ADMIN_EMAIL, role: "admin", department: "" };
+    }
+    const account = dbState.usersData.find((account) => account.id === session.id);
+    return account
+      ? { id: account.id, name: account.name || account.email, email: account.email, role: account.role || "user", department: account.department || "" }
+      : { id: session.id, name: session.email || "Student", email: session.email || "", role: session.role || "user", department: "" };
+  }
+
+  function questionFiltersFromQuery(query: any, status: "any" | "draft" | "published"): QuestionFilter {
+    return {
+      status,
+      courseId: String(query.courseId || "").trim() || undefined,
+      college: String(query.college || "").trim() || undefined,
+      department: String(query.department || "").trim() || undefined,
+      program: String(query.program || "").trim() || undefined,
+      academicYear: String(query.academicYear || "").trim() || undefined,
+      semester: String(query.semester || "").trim() || undefined,
+      chapter: String(query.chapter || "").trim() || undefined,
+      category: String(query.category || "").trim() || undefined,
+      kind: (String(query.kind || "").trim() || undefined) as QuestionFilter["kind"],
+      search: String(query.search || "").trim() || undefined,
+      limit: Math.min(500, Math.max(1, Number(query.limit) || 200))
+    };
+  }
+
+  app.get("/api/practice/questions", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to browse practice questions." });
+      return;
+    }
+    try {
+      // Students see published questions only, and never the answer or explanation.
+      const rows = await listQuestions(questionFiltersFromQuery(req.query, "published"));
+      res.json({ ok: true, questions: rows.map((q) => safeQuestion(q)) });
+    } catch (err) {
+      console.error("practice questions failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The practice bank could not be reached." });
+    }
+  });
+
+  app.get("/api/practice/question/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to view a practice question." });
+      return;
+    }
+    try {
+      const q = await getQuestion(String(req.params.id || ""));
+      if (!q || q.status !== "published") {
+        res.status(404).json({ ok: false, error: "That question is not available." });
+        return;
+      }
+      res.json({ ok: true, question: safeQuestion(q) });
+    } catch (err) {
+      console.error("practice question failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The practice bank could not be reached." });
+    }
+  });
+
+  app.get("/api/practice/exams", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to view practice exams." });
+      return;
+    }
+    try {
+      const rows = await listExams({ status: "published", courseId: String(req.query.courseId || "").trim() || undefined });
+      res.json({ ok: true, exams: rows });
+    } catch (err) {
+      console.error("practice exams failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exams could not be reached." });
+    }
+  });
+
+  // Starting an exam hands the student its questions stripped of answers/explanations, even
+  // when the exam's reveal policy is "always" — the policy governs the result screen, not the
+  // secret half of each question during the attempt.
+  app.get("/api/practice/exam/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to start an exam." });
+      return;
+    }
+    try {
+      const exam = await getExam(String(req.params.id || ""));
+      if (!exam || exam.status !== "published") {
+        res.status(404).json({ ok: false, error: "That exam is not available." });
+        return;
+      }
+      let ids = exam.question_ids.length ? exam.question_ids : [];
+      if (!ids.length) {
+        // No hand-picked set: pull from the bank by the exam's own filters.
+        const pool = await listQuestions({ status: "published", courseId: exam.course_id || undefined, college: exam.college || undefined, department: exam.department || undefined, chapter: exam.chapter || undefined, category: exam.category || undefined, limit: 500 });
+        ids = pool.map((q) => q.id);
+      }
+      let chosen = ids;
+      if (exam.shuffle && chosen.length > 1) {
+        chosen = [...chosen].sort(() => Math.random() - 0.5);
+      }
+      if (exam.question_count > 0 && chosen.length > exam.question_count) {
+        chosen = chosen.slice(0, exam.question_count);
+      }
+      const questions = await listQuestionsByIds(chosen);
+      res.json({ ok: true, exam, questions: questions.filter((q) => q.status === "published").map((q) => safeQuestion(q)) });
+    } catch (err) {
+      console.error("practice exam start failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exam could not be started." });
+    }
+  });
+
+  // The grading door. The server owns the answers, so the score is computed here and the
+  // correct answers + explanations come back only for the questions that were submitted.
+  app.post("/api/practice/submit", async (req, res) => {
+    const session = verifyRequestSession(req);
+    const user = practiceUser(session);
+    if (!session || !user) {
+      res.status(401).json({ ok: false, error: "Sign in to submit your answers." });
+      return;
+    }
+    const body = req.body || {};
+    const answers = Array.isArray(body.answers) ? body.answers : [];
+    if (!answers.length) {
+      res.status(400).json({ ok: false, error: "Send the answers you want graded." });
+      return;
+    }
+    try {
+      const { attempt, result } = await gradeAndRecordAttempt({
+        user_id: user.id,
+        user_name: user.name,
+        user_department: user.department,
+        exam_id: body.examId ? String(body.examId) : null,
+        title: String(body.title || "Practice"),
+        mode: body.mode === "exam" ? "exam" : "practice",
+        answers: answers.map((a: any) => ({ questionId: String(a.questionId || ""), given: String(a.given || "") })),
+        duration_seconds: Math.max(0, Math.round(Number(body.durationSeconds) || 0)),
+        started_at: String(body.startedAt || new Date().toISOString())
+      });
+      res.json({ ok: true, attempt, result });
+    } catch (err) {
+      console.error("practice submit failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Your answers could not be graded. Try again." });
+    }
+  });
+
+  app.get("/api/practice/attempts", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see your practice history." });
+      return;
+    }
+    try {
+      const rows = await listAttempts(session.id, 100);
+      res.json({ ok: true, attempts: rows });
+    } catch (err) {
+      console.error("practice attempts failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Your practice history could not be read." });
+    }
+  });
+
+  app.get("/api/practice/leaderboard", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see the leaderboard." });
+      return;
+    }
+    const scope = String(req.query.scope || "overall") === "weekly" ? "weekly" : "overall";
+    try {
+      // Names and avatars come from the account list, never invented; attempts supply the numbers.
+      const users = dbState.usersData.map((u) => ({ id: u.id, name: u.name || u.email, department: u.department || "", avatarUrl: u.avatarUrl || "" }));
+      const rows = await leaderboard(scope, users, 50);
+      res.json({ ok: true, scope, leaderboard: rows });
+    } catch (err) {
+      console.error("practice leaderboard failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The leaderboard could not be read." });
+    }
+  });
+
+  app.get("/api/practice/favorites", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to see your saved questions." });
+      return;
+    }
+    try {
+      const favorites = await listFavorites(session.id);
+      const questions = await listQuestionsByIds(favorites.map((f) => f.question_id));
+      res.json({ ok: true, favorites: favorites.map((f) => f.question_id), questions: questions.map((q) => safeQuestion(q)) });
+    } catch (err) {
+      console.error("practice favorites failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Your saved questions could not be read." });
+    }
+  });
+
+  app.post("/api/practice/favorite", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session) {
+      res.status(401).json({ ok: false, error: "Sign in to save a question." });
+      return;
+    }
+    const questionId = String(req.body?.questionId || "").trim();
+    if (!questionId) {
+      res.status(400).json({ ok: false, error: "Choose a question to save." });
+      return;
+    }
+    try {
+      const favorited = await toggleFavorite(session.id, questionId);
+      res.json({ ok: true, favorited });
+    } catch (err) {
+      console.error("practice favorite failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "That could not be saved. Try again." });
+    }
+  });
+
+  // ---------------------------------------------------------------- practice admin
+  app.get("/api/admin/practice/questions", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const rows = await listQuestions(questionFiltersFromQuery(req.query, "any"));
+      res.json({ ok: true, questions: rows });
+    } catch (err) {
+      console.error("admin practice questions failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The practice bank could not be read." });
+    }
+  });
+
+  app.post("/api/admin/practice/questions", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const body = req.body || {};
+      if (session.role !== "admin" && body.status === "published") {
+        res.status(403).json({ ok: false, error: "Only an administrator can publish a question." });
+        return;
+      }
+      const row = await insertQuestion({ ...body, author_id: session.id, author_name: session.email || "Administrator" } as any);
+      recordAudit(session, "practice.question.create", row.id, `${row.kind} · ${row.status} · ${row.chapter || "untitled"}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, question: row });
+    } catch (err) {
+      console.error("admin practice question create failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The question could not be saved." });
+    }
+  });
+
+  app.patch("/api/admin/practice/questions/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const existing = await getQuestion(String(req.params.id || ""));
+      if (!existing) {
+        res.status(404).json({ ok: false, error: "That question is not in the bank." });
+        return;
+      }
+      if (session.role !== "admin" && req.body?.status === "published" && existing.status !== "published") {
+        res.status(403).json({ ok: false, error: "Only an administrator can publish a question." });
+        return;
+      }
+      const row = await updateQuestion(String(req.params.id), req.body || {});
+      recordAudit(session, "practice.question.update", String(req.params.id), `${row?.kind || ""} · ${row?.status || ""}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, question: row });
+    } catch (err) {
+      console.error("admin practice question update failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The question could not be saved." });
+    }
+  });
+
+  app.delete("/api/admin/practice/questions/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    try {
+      const ok = await deleteQuestion(String(req.params.id || ""));
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "That question is not in the bank." });
+        return;
+      }
+      recordAudit(session, "practice.question.delete", String(req.params.id), "");
+      saveDatabase(dbState);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("admin practice question delete failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The question could not be removed." });
+    }
+  });
+
+  app.get("/api/admin/practice/exams", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const rows = await listExams({ status: "any" });
+      res.json({ ok: true, exams: rows });
+    } catch (err) {
+      console.error("admin practice exams failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exams could not be read." });
+    }
+  });
+
+  app.post("/api/admin/practice/exams", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      if (session.role !== "admin" && req.body?.status === "published") {
+        res.status(403).json({ ok: false, error: "Only an administrator can publish an exam." });
+        return;
+      }
+      const row = await insertExam({ ...(req.body || {}), author_id: session.id, author_name: session.email || "Administrator" } as any);
+      recordAudit(session, "practice.exam.create", row.id, `${row.title} · ${row.status}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, exam: row });
+    } catch (err) {
+      console.error("admin practice exam create failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exam could not be saved." });
+    }
+  });
+
+  app.patch("/api/admin/practice/exams/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const existing = await getExam(String(req.params.id || ""));
+      if (!existing) {
+        res.status(404).json({ ok: false, error: "That exam is not in the list." });
+        return;
+      }
+      if (session.role !== "admin" && req.body?.status === "published" && existing.status !== "published") {
+        res.status(403).json({ ok: false, error: "Only an administrator can publish an exam." });
+        return;
+      }
+      const row = await updateExam(String(req.params.id), req.body || {});
+      recordAudit(session, "practice.exam.update", String(req.params.id), `${row?.title || ""} · ${row?.status || ""}`);
+      saveDatabase(dbState);
+      res.json({ ok: true, exam: row });
+    } catch (err) {
+      console.error("admin practice exam update failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exam could not be saved." });
+    }
+  });
+
+  app.delete("/api/admin/practice/exams/:id", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || session.role !== "admin") {
+      res.status(403).json({ ok: false, error: "An authenticated administrator session is required." });
+      return;
+    }
+    try {
+      const ok = await deleteExam(String(req.params.id || ""));
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "That exam is not in the list." });
+        return;
+      }
+      recordAudit(session, "practice.exam.delete", String(req.params.id), "");
+      saveDatabase(dbState);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("admin practice exam delete failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "The exam could not be removed." });
+    }
+  });
+
+  app.get("/api/admin/practice/stats", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      res.json({ ok: true, stats: await practiceStats() });
+    } catch (err) {
+      console.error("admin practice stats failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Practice statistics could not be read." });
+    }
+  });
+
+  app.get("/api/admin/practice/attempts", async (req, res) => {
+    const session = verifyRequestSession(req);
+    if (!session || !isStaffSession(session)) {
+      res.status(403).json({ ok: false, error: "A support staff or administrator session is required." });
+      return;
+    }
+    try {
+      const rows = await listAllAttempts(500);
+      res.json({ ok: true, attempts: rows });
+    } catch (err) {
+      console.error("admin practice attempts failed:", err instanceof Error ? err.message : err);
+      res.status(503).json({ ok: false, error: "Practice attempts could not be read." });
+    }
   });
 
   // ============================================================================

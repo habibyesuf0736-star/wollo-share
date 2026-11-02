@@ -685,19 +685,24 @@ export default function LoginPage({ initialTab }) {
             <form onSubmit={submitRecovery} className="d-flex flex-column gap-3">
               <p className="small text-secondary">We email a one-time code that expires in 30 minutes.</p>
               <div>
-                <label className="form-label small fw-semibold mb-0">Account email</label>
+                <label className="form-label small fw-semibold mb-0" htmlFor="recoveryEmail">
+                  Account email
+                </label>
                 <div className="ws-field-icon">
                   <Mail size={16} aria-hidden="true" />
-                  <input className="form-control" type="email" value={recovery.email} onChange={(e) => setRecovery({ ...recovery, email: e.target.value })} />
+                  <input id="recoveryEmail" className="form-control" type="email" value={recovery.email} onChange={(e) => setRecovery({ ...recovery, email: e.target.value })} />
                 </div>
               </div>
               {recovery.stage === "code" ? (
                 <>
                   <div>
-                    <label className="form-label small fw-semibold mb-0">Recovery code</label>
+                    <label className="form-label small fw-semibold mb-0" htmlFor="recoveryCode">
+                      Recovery code
+                    </label>
                     <div className="ws-field-icon">
                       <KeyRound size={16} aria-hidden="true" />
                       <input
+                        id="recoveryCode"
                         className="form-control mono"
                         inputMode="numeric"
                         autoComplete="one-time-code"
@@ -709,10 +714,13 @@ export default function LoginPage({ initialTab }) {
                     </div>
                   </div>
                   <div>
-                    <label className="form-label small fw-semibold mb-0">New password</label>
+                    <label className="form-label small fw-semibold mb-0" htmlFor="recoveryPassword">
+                      New password
+                    </label>
                     <div className="ws-field-icon">
                       <Lock size={16} aria-hidden="true" />
                       <input
+                        id="recoveryPassword"
                         className="form-control"
                         type="password"
                         placeholder="New password (min 8 characters)"

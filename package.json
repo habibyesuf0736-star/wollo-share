@@ -13,13 +13,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "tsx server/local.ts",
+    "dev": "node scripts/copy-pdfjs-assets.mjs && tsx server/local.ts",
     "start": "tsx server/local.ts",
-    "build": "vite build && tsx scripts/prerender-seo.ts",
+    "build": "node scripts/copy-pdfjs-assets.mjs && vite build && tsx scripts/prerender-seo.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "pdfjs:assets": "node scripts/copy-pdfjs-assets.mjs",
     "app:bundle": "node scripts/build-app-bundle.mjs",
+    "app:apk": "npm run app:bundle && npx cap sync android && cd mobile-app/android && gradlew.bat assembleDebug",
     "admin:reset-password": "tsx scripts/reset-admin-password.ts",
     "db:status": "tsx scripts/supabase-sync.ts status",
     "db:init": "node scripts/supabase-init.mjs",
@@ -27,13 +29,20 @@
     "db:pull": "tsx scripts/supabase-sync.ts pull"
   },
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "8.2.2",
     "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.6.0",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
     "bootstrap": "^5.3.8",
+    "docx-preview": "^0.4.1",
     "dotenv": "^18.0.8",
     "express": "^4.21.2",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
     "nodemailer": "^10.1.2",
+    "pdfjs-dist": "^6.4.299",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"

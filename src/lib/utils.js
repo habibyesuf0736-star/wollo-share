@@ -224,6 +224,20 @@ export function typeFromFileName(fileName) {
   return "Other";
 }
 
+const TYPE_EXTENSIONS = { PDF: "pdf", PPT: "pptx", DOC: "docx", XLS: "xlsx", Video: "mp4" };
+
+/* A saved file with no extension is a file the phone cannot open, so the display title
+   borrows the real extension from the stored link and falls back to the material's type. */
+export function namedFile(title, href, type) {
+  const clean = String(title || "wollo-share-material").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ");
+  if (!clean) return "wollo-share-material";
+  if (/\.[a-z0-9]{1,5}$/i.test(clean)) return clean;
+  const path = String(href || "").split("?")[0].split("#")[0];
+  const match = path.match(/\.([a-z0-9]{1,5})$/i);
+  const ext = (match ? match[1] : TYPE_EXTENSIONS[String(type || "").toUpperCase()]) || "";
+  return ext ? `${clean}.${ext.toLowerCase()}` : clean;
+}
+
 export function formatFileSize(bytes) {
   const kb = Number(bytes) / 1024;
   if (kb >= 1024) return `${(kb / 1024).toFixed(1)} MB`;

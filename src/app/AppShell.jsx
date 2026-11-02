@@ -1,12 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store/AppContext.jsx";
 import { PLANS } from "../lib/plans.js";
 import { FRESHMAN_DEPARTMENT, buildDepartmentGroups, matchDepartmentPrograms } from "../lib/departments.js";
-import { phoneFromLocal, phoneLocalDigits, phoneProblem, triggerBrowserDownload } from "../lib/utils.js";
-import { requestPremiumPlan, requestRecovery, resendVerificationCode } from "../lib/api.js";
+import { phoneFromLocal, phoneLocalDigits, phoneProblem, namedFile, triggerBrowserDownload } from "../lib/utils.js";
+import { listLoginDevices, requestPremiumPlan, requestRecovery, resendVerificationCode, revokeLoginDevice, signOutOtherDevices } from "../lib/api.js";
 import { addToRecent, clearRecent, fileKey, listRecent, listShelf, loadLibrary, removeFromShelf, saveLibrary, toggleShelf, when } from "../mobile/local.js";
+import { hasDoc, listDocs, prepareDoc, viewDoc } from "./docs.js";
 import { COPY } from "./strings.js";
 import { APP_VERSION } from "./version.js";
+import { hasSeenIntro, hasSeenTutorial, markIntroSeen, markTutorialSeen } from "./launch.js";
+import Onboarding from "./Onboarding.jsx";
+import Scan from "./Scan.jsx";
+import Tutorial from "./Tutorial.jsx";
 
 /* ---------------------------------------------------------------------- icons */
 
@@ -28,7 +33,8 @@ const PATHS = {
   clock: "M12 4.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15Zm0 3.6V12l3.2 2",
   lock: "M7.5 10.5h9v8h-9zM9.7 10.5V8a2.3 2.3 0 0 1 4.6 0v2.5",
   crown: "M4 17.5h16M4.5 7l3.5 3 4-5.5 4 5.5 3.5-3-1.4 8H5.9z",
-  wifi: "M4.5 9.8a11 11 0 0 1 15 0M7.6 13.2a6.6 6.6 0 0 1 8.8 0M12 17.4h.01"
+  wifi: "M4.5 9.8a11 11 0 0 1 15 0M7.6 13.2a6.6 6.6 0 0 1 8.8 0M12 17.4h.01",
+  scan: "M4 9V5.6A1.6 1.6 0 0 1 5.6 4H9m6 0h3.4A1.6 1.6 0 0 1 20 5.6V9m0 6v3.4a1.6 1.6 0 0 1-1.6 1.6H15m-6 0H5.6A1.6 1.6 0 0 1 4 18.4V15M4 12h16"
 };
 
 function Icon({ name, size = 20, fill = false }) {
@@ -73,12 +79,17 @@ function outdated(current, minimum) {
 /* --------------------------------------------------------------------- shell */
 
 export default function AppShell() {
-  const { booting, appSettings, appearanceSettings, gate, closeGate, toast, toasts } = useApp();
+  const { booting, appSettings, appearanceSettings, gate, closeGate, toast, toasts, session, allowFileFetch, requestDownload } = useApp();
   const [lang, setLang] = useState(() => localStorage.getItem("wollo_app_lang") || "en");
   const [theme, setTheme] = useState(
     () => localStorage.getItem("wollo_app_theme") || appSettings.theme || "auto"
   );
   const [tab, setTab] = useState("home");
+  const [intro, setIntro] = useState(() => !hasSeenIntro());
+  const [authMode, setAuthMode] = useState("signin");
+  const [tutorial, setTutorial] = useState(false);
+  const [read, setRead] = useState(null);
+  const [ReaderLayer, setReaderLayer] = useState(null);
 
   useEffect(() => {
     localStorage.setItem("wollo_app_lang", lang);
@@ -125,6 +136,99 @@ export default function AppShell() {
     }
   }, [closeGate, gate]);
 
+  // The walkthrough is a device-side, per-account hint: a second account on the same phone
+  // has not been shown it yet, and signing out never un-shows it for the account that saw it.
+  const signedIn = Boolean(session);
+  useEffect(() => {
+    if (!signedIn) {
+      setTutorial(false);
+      return;
+    }
+    if (!hasSeenTutorial(session.id)) setTutorial(true);
+  }, [session, signedIn]);
+
+  const closeTutorial = () => {
+    markTutorialSeen(session?.id);
+    setTutorial(false);
+  };
+
+  // The reader carries the PDF engine, the .docx layout engine and the slide renderer, so it
+  // is pulled in the first time a student opens a file and never weighs down the launch.
+  useEffect(() => {
+    if (!read || ReaderLayer) return undefined;
+    let live = true;
+    import("./Reader.jsx").then((mod) => {
+      if (live) setReaderLayer(() => mod.default);
+    });
+    return () => {
+      live = false;
+    };
+  }, [read, ReaderLayer]);
+
+  // Keeping a copy is a download in everything but name, so it asks the same server rule.
+  // When the rule wants an ad or a plan first, the reader steps aside and the normal gate —
+  // with its countdown — takes the screen.
+  const copyForRead = useCallback(
+    async (entry, { store = true } = {}) => {
+      const got = await allowFileFetch(entry.courseId, entry.materialId, entry.sideMaterialId || "");
+      if (!got.allowed) {
+        requestDownload(entry.courseId, entry.materialId, entry.sideMaterialId || "");
+        return { error: "auth" };
+      }
+      if (!got.url) return { error: "remote" };
+      const full = { ...entry, name: got.name || entry.name, course: got.course || entry.course, url: got.url };
+      if (!store) return viewDoc(full.url);
+      const stored = await prepareDoc(
+        { key: full.key, name: full.name, course: full.course, courseId: full.courseId, materialId: full.materialId, sideMaterialId: full.sideMaterialId || "" },
+        full.url
+      );
+      if (stored.error) return stored;
+      addToRecent({ key: full.key, name: full.name, course: full.course, courseId: full.courseId, materialId: full.materialId, sideMaterialId: full.sideMaterialId || "", type: full.type, url: full.url });
+      return stored;
+    },
+    [allowFileFetch, requestDownload]
+  );
+
+  const openRead = useCallback((entry) => {
+    if (!entry.courseId || !entry.materialId) {
+      if (entry.url) triggerBrowserDownload(entry.url, namedFile(entry.name, entry.url, entry.type));
+      return;
+    }
+    setRead(entry);
+  }, []);
+
+  // A document takes the whole screen, so the page behind it stops moving.
+  useEffect(() => {
+    if (!read) return undefined;
+    const root = document.documentElement;
+    const before = root.style.overflow;
+    root.style.overflow = "hidden";
+    return () => {
+      root.style.overflow = before;
+    };
+  }, [read]);
+
+  // On the phone, back walks out of the layers the student is standing in — the reader, the
+  // walkthrough, a gate sheet, a deeper tab — and only then leaves the app. It can never step
+  // past sign-in.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.Capacitor?.isNativePlatform?.()) return undefined;
+    const plugin = window.Capacitor.Plugins.App;
+    if (!plugin?.addListener) return undefined;
+    const handle = plugin.addListener("backButton", () => {
+      if (read) return setRead(null);
+      if (intro) return;
+      if (tutorial) return closeTutorial();
+      if (gate) return closeGate();
+      if (!signedIn) return plugin.minimizeApp?.() ?? plugin.exitApp?.();
+      if (tab !== "home") return setTab("home");
+      return plugin.exitApp?.();
+    });
+    return () => {
+      handle?.then?.((removed) => removed?.remove?.());
+    };
+  }, [closeGate, gate, intro, read, signedIn, tab, tutorial]);
+
   const t = COPY[lang] || COPY.en;
 
   if (appSettings.enabled === false) return <OffScreen t={t} />;
@@ -133,27 +237,48 @@ export default function AppShell() {
 
   return (
     <>
-      {tab === "home" ? <Home t={t} go={setTab} /> : null}
-      {tab === "browse" ? <Browse t={t} /> : null}
-      {tab === "saved" ? <Saved t={t} /> : null}
-      {tab === "account" ? <Account t={t} lang={lang} onLang={setLang} theme={theme} onTheme={chooseTheme} go={setTab} /> : null}
+      {intro ? (
+        <Onboarding
+          t={t}
+          lang={lang}
+          onLang={setLang}
+          onFinish={(mode) => {
+            markIntroSeen();
+            if (mode) setAuthMode(mode);
+            setIntro(false);
+          }}
+        />
+      ) : !signedIn ? (
+        <Auth t={t} lang={lang} onLang={setLang} theme={theme} onTheme={chooseTheme} note={t.gateBody} startMode={authMode} />
+      ) : (
+        <>
+          {tab === "home" ? <Home t={t} go={setTab} onRead={openRead} /> : null}
+          {tab === "browse" ? <Browse t={t} onRead={openRead} /> : null}
+          {tab === "scan" ? <Scan t={t} /> : null}
+          {tab === "saved" ? <Saved t={t} onRead={openRead} /> : null}
+          {tab === "account" ? <Account t={t} lang={lang} onLang={setLang} theme={theme} onTheme={chooseTheme} go={setTab} onTutorial={() => setTutorial(true)} /> : null}
 
-      <nav className="a-dock" aria-label={t.brand}>
-        {[
-          ["home", t.home, "home"],
-          ["browse", t.browse, "search"],
-          ["saved", t.saved, "shelf"],
-          ["account", t.account, "account"]
-        ].map(([key, label, icon]) => (
-          <button key={key} type="button" className={tab === key ? "on" : ""} onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined}>
-            <Icon name={icon} size={19} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
+          <nav className="a-dock" aria-label={t.brand}>
+            {[
+              ["home", t.home, "home"],
+              ["browse", t.browse, "search"],
+              ["scan", t.scan, "scan"],
+              ["saved", t.saved, "shelf"],
+              ["account", t.account, "account"]
+            ].map(([key, label, icon]) => (
+              <button key={key} type="button" className={tab === key ? "on" : ""} onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined}>
+                <Icon name={icon} size={19} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
 
-      {gate && gate.type === "ad" ? <AdSheet t={t} /> : null}
-      {gate && gate.type === "upgrade" ? <UpgradeSheet t={t} onPlans={() => setTab("account")} /> : null}
+          {gate && gate.type === "ad" ? <AdSheet t={t} /> : null}
+          {gate && gate.type === "upgrade" ? <UpgradeSheet t={t} onPlans={() => setTab("account")} /> : null}
+          {tutorial ? <Tutorial t={t} onClose={closeTutorial} /> : null}
+          {read && ReaderLayer ? <ReaderLayer t={t} entry={read} keep={(opts) => copyForRead(read, opts)} onClose={() => setRead(null)} /> : null}
+        </>
+      )}
 
       <div aria-live="polite">
         {(toasts || []).map((item) => (
@@ -242,7 +367,7 @@ function UpdateScreen({ t, url }) {
 
 /* ---------------------------------------------------------------------- home */
 
-function Home({ t, go }) {
+function Home({ t, go, onRead }) {
   const { session, activeUser, coursesData, canSeeCourse, appSettings, downloadPolicy, downloadStatus } = useApp();
   const [shelf] = useState(() => listShelf());
   const [recent] = useState(() => listRecent());
@@ -328,7 +453,7 @@ function Home({ t, go }) {
           <h2 className="a-label">{t.recent}</h2>
           <div className="a-panel">
             {recent.slice(0, 4).map((entry) => (
-              <button className="a-item" key={entry.key} onClick={() => openSaved(entry)}>
+              <button className="a-item" key={entry.key} onClick={() => (readableDoc(entry.name, entry.type) ? onRead(entry) : openSaved(entry))}>
                 <span className="a-badge">{ext(entry.type)}</span>
                 <span className="a-main">
                   <strong>{entry.name}</strong>
@@ -346,7 +471,7 @@ function Home({ t, go }) {
 
 /* -------------------------------------------------------------------- browse */
 
-function Browse({ t }) {
+function Browse({ t, onRead }) {
   const { session, activeUser, coursesData, canSeeCourse, requestDownload } = useApp();
   const [query, setQuery] = useState("");
   const [only, setOnly] = useState("mine");
@@ -356,6 +481,7 @@ function Browse({ t }) {
   const [recent, setRecent] = useState(() => listRecent());
   const [online, setOnline] = useState(() => navigator.onLine !== false);
   const [saved, setSaved] = useState(() => loadLibrary());
+  const [copies, setCopies] = useState(0);
   const department = String(activeUser?.department || "").trim();
 
   const live = useMemo(() => coursesData.filter((c) => canSeeCourse(c)), [canSeeCourse, coursesData]);
@@ -363,10 +489,24 @@ function Browse({ t }) {
 
   useEffect(() => {
     window.__WS_ON_DOWNLOAD__ = (file) => {
-      addToRecent({ ...file, key: fileKey(file.courseId, file.materialId, file.sideMaterialId || "") });
+      const key = fileKey(file.courseId, file.materialId, file.sideMaterialId || "");
+      addToRecent({ ...file, key });
+      // A file that has just been allowed down is worth keeping in the reader's own store:
+      // that copy is what opens with the radio off.
+      if (file.url && readableDoc(file.name, file.type) && !hasDoc(key))
+        prepareDoc({ key, name: file.name, course: file.course, courseId: file.courseId, materialId: file.materialId, sideMaterialId: file.sideMaterialId || "" }, file.url)
+          .then((got) => {
+            if (!got.error) setCopies((n) => n + 1);
+          });
       setRecent(listRecent());
     };
     return () => delete window.__WS_ON_DOWNLOAD__;
+  }, []);
+
+  useEffect(() => {
+    const tick = () => setCopies((n) => n + 1);
+    window.addEventListener("wollo:docs", tick);
+    return () => window.removeEventListener("wollo:docs", tick);
   }, []);
 
   useEffect(() => {
@@ -388,6 +528,8 @@ function Browse({ t }) {
 
   const shelfKeys = useMemo(() => new Set(shelf.map((item) => item.key)), [shelf]);
   const recentKeys = useMemo(() => new Set(recent.map((item) => item.key)), [recent]);
+  // Which files the reader already holds on this phone, so a row can say so.
+  const onPhone = useMemo(() => new Set(listDocs().map((item) => item.key)), [copies]);
   const mineIds = useMemo(() => new Set(matchDepartmentPrograms(visible, department).map((c) => c.id)), [department, visible]);
   const needle = query.trim().toLowerCase();
 
@@ -497,7 +639,9 @@ function Browse({ t }) {
                       mat={mat}
                       shelfKeys={shelfKeys}
                       recentKeys={recentKeys}
+                      stored={onPhone.has(fileKey(course.id, mat.id, ""))}
                       onOpen={() => setDetail({ course, mat })}
+                      onRead={() => onRead(readEntry(course, mat))}
                       onTake={() => requestDownload(course.id, mat.id, "")}
                       onStar={() => star(course, mat)}
                     />
@@ -514,7 +658,9 @@ function Browse({ t }) {
                           side={side}
                           shelfKeys={shelfKeys}
                           recentKeys={recentKeys}
+                          stored={onPhone.has(fileKey(course.id, mat.id, side.id))}
                           onOpen={() => setDetail({ course, mat, side })}
+                          onRead={() => onRead(readEntry(course, mat, side))}
                           onTake={() => requestDownload(course.id, mat.id, side.id)}
                           onStar={() => star(course, mat, side)}
                         />
@@ -535,7 +681,12 @@ function Browse({ t }) {
           course={detail.course}
           mat={detail.mat}
           side={detail.side}
+          stored={onPhone.has(fileKey(detail.course.id, detail.mat.id, detail.side ? detail.side.id : ""))}
           starred={shelfKeys.has(fileKey(detail.course.id, detail.mat.id, detail.side ? detail.side.id : ""))}
+          onRead={() => {
+            onRead(readEntry(detail.course, detail.mat, detail.side));
+            setDetail(null);
+          }}
           onClose={() => setDetail(null)}
           onTake={() => {
             requestDownload(detail.course.id, detail.mat.id, detail.side ? detail.side.id : "");
@@ -551,24 +702,27 @@ function Browse({ t }) {
   );
 }
 
-function FileRow({ t, course, mat, side, shelfKeys, recentKeys, onOpen, onTake, onStar }) {
+function FileRow({ t, course, mat, side, shelfKeys, recentKeys, stored, onOpen, onRead, onTake, onStar }) {
   const file = side || mat;
   const key = fileKey(course.id, mat.id, side ? side.id : "");
   const meta = side ? mat.name : [mat.type, mat.size].filter(Boolean).join(" · ");
   const taken = recentKeys.has(key);
   const kept = shelfKeys.has(key);
+  const canRead = readableDoc(file.name, file.type);
   return (
     <div className="a-item">
       <button className="a-main" onClick={onOpen} style={{ textAlign: "left" }}>
         <strong>{file.name}</strong>
-        <em>{meta}</em>
+        <em>
+          {[meta, stored ? t.readerOffline : ""].filter(Boolean).join(" · ")}
+        </em>
       </button>
       <button className={`a-act${kept ? " on" : ""}`} onClick={onStar} aria-label={kept ? t.remove : t.keep} aria-pressed={kept} type="button">
         <Icon name="saved" size={16} fill={kept} />
       </button>
-      <button className="a-btn row" onClick={onTake}>
-        {taken || opensFile(file) ? t.open : t.download}
-        <Icon name={taken || opensFile(file) ? "open" : "down"} size={15} />
+      <button className="a-btn row" onClick={canRead ? onRead : onTake}>
+        {canRead ? t.readerOpen : taken || opensFile(file) ? t.open : t.download}
+        <Icon name={canRead ? "open" : taken || opensFile(file) ? "open" : "down"} size={15} />
       </button>
     </div>
   );
@@ -604,21 +758,22 @@ function Sheet({ t, eyebrow, title, onClose, children }) {
   );
 }
 
-function FileSheet({ t, course, mat, side, starred, onClose, onTake, onStar }) {
+function FileSheet({ t, course, mat, side, stored, starred, onClose, onRead, onTake, onStar }) {
   const { rateMaterial, myRatingFor, appSettings } = useApp();
   const file = side || mat;
   const mine = myRatingFor(mat.id) || 0;
   const [stars, setStars] = useState(mine);
   const avg = Number(mat.ratingAvg || 0).toFixed(1);
+  const canRead = readableDoc(file.name, file.type);
   return (
     <Sheet t={t} eyebrow={course.name} title={file.name} onClose={onClose}>
       <p className="a-quiet" style={{ marginTop: 0 }}>
-        {[file.type, file.size].filter(Boolean).join(" · ")}
+        {[file.type, file.size, stored ? t.readerOffline : ""].filter(Boolean).join(" · ")}
         {mat.ratingCount ? ` · ${avg}★ ${mat.ratingCount}` : ""}
       </p>
-      <button className="a-btn primary" onClick={onTake}>
-        {opensFile(file) ? t.open : t.download}
-        <Icon name={opensFile(file) ? "open" : "down"} size={17} />
+      <button className="a-btn primary" onClick={canRead ? onRead : onTake}>
+        {canRead ? t.readerOpen : opensFile(file) ? t.open : t.download}
+        <Icon name="open" size={17} />
       </button>
       <button className="a-btn quiet" onClick={onStar}>
         <Icon name="saved" size={16} fill={starred} />
@@ -654,12 +809,19 @@ function FileSheet({ t, course, mat, side, starred, onClose, onTake, onStar }) {
 
 /* --------------------------------------------------------------------- saved */
 
-function Saved({ t }) {
+function Saved({ t, onRead }) {
   const { refreshFromServer } = useApp();
   const [shelf, setShelf] = useState(() => listShelf());
   const [recent, setRecent] = useState(() => listRecent());
   const [saved, setSaved] = useState(() => loadLibrary());
   const [online, setOnline] = useState(() => navigator.onLine !== false);
+  const [copies, setCopies] = useState(0);
+
+  useEffect(() => {
+    const tick = () => setCopies((n) => n + 1);
+    window.addEventListener("wollo:docs", tick);
+    return () => window.removeEventListener("wollo:docs", tick);
+  }, []);
 
   useEffect(() => {
     const up = () => setOnline(true);
@@ -671,6 +833,10 @@ function Saved({ t }) {
       window.removeEventListener("offline", down);
     };
   }, []);
+
+  const onPhone = useMemo(() => new Set(listDocs().map((item) => item.key)), [copies]);
+  // A file the reader can draw opens in the reader; anything else keeps its old behaviour.
+  const open = (entry) => (readableDoc(entry.name, entry.type) ? onRead(entry) : openSaved(entry));
 
   return (
     <main className="a">
@@ -688,9 +854,9 @@ function Saved({ t }) {
       <div className="a-panel">
         {shelf.map((entry) => (
           <div className="a-item" key={entry.key}>
-            <button className="a-main" onClick={() => openSaved(entry)} style={{ textAlign: "left" }}>
+            <button className="a-main" onClick={() => open(entry)} style={{ textAlign: "left" }}>
               <strong>{entry.name}</strong>
-              <em>{entry.course}</em>
+              <em>{[entry.course, onPhone.has(entry.key) ? t.readerOffline : ""].filter(Boolean).join(" · ")}</em>
             </button>
             <span className="a-side">{when(entry.savedAt)}</span>
             <button
@@ -713,12 +879,12 @@ function Saved({ t }) {
       <div className="a-panel">
         {recent.map((entry) => (
           <div className="a-item" key={entry.key}>
-            <button className="a-main" onClick={() => openSaved(entry)} style={{ textAlign: "left" }}>
+            <button className="a-main" onClick={() => open(entry)} style={{ textAlign: "left" }}>
               <strong>{entry.name}</strong>
-              <em>{entry.course}</em>
+              <em>{[entry.course, onPhone.has(entry.key) ? t.readerOffline : ""].filter(Boolean).join(" · ")}</em>
             </button>
             <span className="a-side">{when(entry.at)}</span>
-            <button className="a-act" onClick={() => openSaved(entry)} aria-label={t.open} type="button">
+            <button className="a-act" onClick={() => open(entry)} aria-label={t.open} type="button">
               <Icon name="open" size={16} />
             </button>
           </div>
@@ -773,7 +939,75 @@ function Prefs({ t, lang, onLang, theme, onTheme }) {
   );
 }
 
-function Account({ t, lang, onLang, theme, onTheme, go }) {
+// Every screen the account is live on. The phone that holds the session can sign the others
+// out, and the server drops a revoked token on its very next request.
+function Devices({ t }) {
+  const { session, logout, toast } = useApp();
+  const [rows, setRows] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await listLoginDevices(session.authToken);
+      setRows(res.ok ? res.devices : []);
+      if (!res.ok) toast(res.error || t.fail);
+    } catch {
+      setRows([]);
+      toast(t.scanOffline);
+    }
+  }, [session, t.fail, t.scanOffline, toast]);
+
+  useEffect(() => {
+    if (session?.authToken) load();
+  }, [load, session]);
+
+  const drop = async (deviceId) => {
+    const res = await revokeLoginDevice(deviceId, session.authToken).catch(() => null);
+    if (!res) return toast(t.scanOffline);
+    if (res.current) return logout();
+    if (!res.ok) return toast(res.error || t.fail);
+    toast(res.message);
+    setRows((old) => (old || []).filter((row) => row.id !== deviceId));
+  };
+
+  const dropOthers = async () => {
+    const res = await signOutOtherDevices(session.authToken).catch(() => null);
+    if (!res) return toast(t.scanOffline);
+    if (!res.ok) return toast(res.error || t.fail);
+    toast(res.message);
+    setRows((old) => (old || []).filter((row) => row.current));
+  };
+
+  const others = (rows || []).filter((row) => !row.current);
+
+  return (
+    <>
+      <h2 className="a-label">{t.devices}</h2>
+      <div className="a-panel">
+        {(rows || []).map((row) => (
+          <div className="a-item" key={row.id}>
+            <span className="a-main">
+              <strong>{row.current ? t.deviceThis : row.label || t.scanUnknown}</strong>
+              <em>{[row.method, when(row.createdAt)].filter(Boolean).join(" · ")}</em>
+            </span>
+            {row.current ? null : (
+              <button className="a-act" onClick={() => drop(row.id)} aria-label={t.deviceOut} type="button">
+                <Icon name="close" size={16} />
+              </button>
+            )}
+          </div>
+        ))}
+        {rows && !rows.length ? <p className="a-quiet">{t.deviceNone}</p> : null}
+      </div>
+      {others.length ? (
+        <button className="a-btn line" onClick={dropOthers} type="button">
+          {t.deviceOutAll}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function Account({ t, lang, onLang, theme, onTheme, go, onTutorial }) {
   const { session, activeUser, downloadStatus, downloadPolicy, logout, isStaff, appSettings, toast } = useApp();
   const [premium, setPremium] = useState(false);
   if (!session) return <Auth t={t} lang={lang} onLang={onLang} theme={theme} onTheme={onTheme} />;
@@ -808,6 +1042,8 @@ function Account({ t, lang, onLang, theme, onTheme, go }) {
 
       <Prefs t={t} lang={lang} onLang={onLang} theme={theme} onTheme={onTheme} />
 
+      <Devices t={t} />
+
       {appSettings.hidePremium ? null : (
         <button className="a-btn primary" onClick={() => setPremium(true)}>
           <Icon name="crown" size={17} />
@@ -831,6 +1067,11 @@ function Account({ t, lang, onLang, theme, onTheme, go }) {
       <button className="a-btn quiet" onClick={() => go("saved")}>
         <Icon name="shelf" size={16} />
         {t.saved}
+      </button>
+
+      <button className="a-btn quiet" onClick={onTutorial}>
+        <Icon name="note" size={16} />
+        {t.tutReplay}
       </button>
 
       <button
@@ -971,9 +1212,9 @@ function UpgradeSheet({ t, onPlans }) {
 
 /* ---------------------------------------------------------------------- auth */
 
-function Auth({ t, lang, onLang, theme, onTheme }) {
+function Auth({ t, lang, onLang, theme, onTheme, note, startMode }) {
   const { login, register, verifySignup, signInWithCode, resendSignInCode, finishRecovery, coursesData, appSettings, toast } = useApp();
-  const [mode, setMode] = useState("signin");
+  const [mode, setMode] = useState(startMode === "signup" ? "signup" : "signin");
   const [signin, setSignin] = useState({ identifier: "", password: "" });
   const [signup, setSignup] = useState({ name: "", email: "", phone: "", password: "", department: FRESHMAN_DEPARTMENT });
   const [pending, setPending] = useState("");
@@ -1102,11 +1343,12 @@ function Auth({ t, lang, onLang, theme, onTheme }) {
     <main className="a">
       <header className="a-head">
         <div>
-          <p className="a-eyebrow">{t.brand}</p>
+          <p className="a-eyebrow">{note ? t.gateTitle : t.brand}</p>
           <h1 className="a-title">{title}</h1>
         </div>
         <span className="a-mark" aria-hidden="true">W</span>
       </header>
+      {note ? <p className="a-lede">{note}</p> : null}
       {body}
       {error ? <p className="a-err">{error}</p> : null}
       {notice ? <p className="a-flag">{notice}</p> : null}
@@ -1262,6 +1504,31 @@ function opensFile(file) {
   return file.type === "Video" || /^https:\/\/(www\.)?(youtube\.com|youtu\.be)/i.test(String(file.url || ""));
 }
 
+// What the offline reader draws. A .doc, a .ppt or a spreadsheet is not on the list: those
+// stay ordinary downloads rather than pretending to open.
+const DOC_EXT = /\.(pdf|docx|pptx|txt|html|htm)$/i;
+
+function readableDoc(name, type) {
+  if (DOC_EXT.test(String(name || ""))) return true;
+  return ["pdf", "docx", "pptx", "text", "txt"].includes(String(type || "").toLowerCase().replace(/\./g, ""));
+}
+
+// The reader works from a library row, a starred row or a recent download, so every one of
+// them is handed over in the same shape: a key, a name and where the file came from.
+function readEntry(course, mat, side) {
+  const file = side || mat;
+  return {
+    key: fileKey(course.id, mat.id, side ? side.id : ""),
+    name: file.name || course.name || "Document",
+    course: course.name || "",
+    courseId: course.id,
+    materialId: mat.id,
+    sideMaterialId: side ? side.id : "",
+    type: file.type || "",
+    url: file.url && !String(file.url).startsWith("#sample") ? file.url : ""
+  };
+}
+
 function ext(type) {
   const raw = String(type || "PDF").trim();
   return raw.slice(0, 4).toUpperCase();
@@ -1278,5 +1545,5 @@ function short(name) {
 }
 
 function openSaved(entry) {
-  if (entry.url) triggerBrowserDownload(entry.url, entry.name);
+  if (entry.url) triggerBrowserDownload(entry.url, namedFile(entry.name, entry.url, entry.type));
 }

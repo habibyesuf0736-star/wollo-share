@@ -16,5 +16,14 @@ fs.mkdirSync(out, { recursive: true });
 fs.copyFileSync(entry, path.join(out, "index.html"));
 fs.cpSync(path.join(dist, "assets"), path.join(out, "assets"), { recursive: true });
 
+// The reader's engines come with the bundle: the worker, the character maps, the standard
+// fonts and the decoders all have to be on the device for a saved file to open offline.
+// The material files themselves stay on the server — a student downloads what they read.
+const offline = ["pdfjs"];
+for (const folder of offline) {
+  const from = path.join(dist, folder);
+  if (fs.existsSync(from)) fs.cpSync(from, path.join(out, folder), { recursive: true });
+}
+
 const bytes = [...fs.readdirSync(path.join(out, "assets"))].reduce((sum, f) => sum + fs.statSync(path.join(out, "assets", f)).size, 0);
 console.log(`app-dist ready · index.html + ${fs.readdirSync(path.join(out, "assets")).length} assets (${Math.round(bytes / 1024)} KB)`);

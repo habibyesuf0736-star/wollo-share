@@ -893,6 +893,971 @@ a {
   animation: a-shimmer 1.3s linear infinite;
 }
 
+/* --------------------------------------------------------------- welcome */
+/* The six-screen introduction. It keeps its own palette rather than the app's accent, because the
+   brand is the point here: navy for authority, royal blue for action, gold only where a screen
+   needs one premium detail. Every moving part animates transform or opacity alone — no filters, no
+   blur, nothing that makes a low-end Android phone stutter on first launch. */
+
+.ob {
+  --ob-navy: #142b4a;
+  --ob-blue: #2878d0;
+  --ob-gold: #d9ad50;
+
+  /* sky layers: three gradients stacked, cross-faded by opacity so a screen change slides from one
+     field into the next instead of snapping */
+  --ob-sky-deep: linear-gradient(163deg, #0b1b31 0%, #142b4a 38%, #1c5aa0 74%, #2878d0 100%);
+  --ob-sky-light: linear-gradient(168deg, #f4f7fb 0%, #ffffff 52%, #e4eefa 100%);
+  --ob-sky-warm: linear-gradient(168deg, #fbf6ea 0%, #ffffff 48%, #f3e6c8 100%);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--ob-navy);
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+/* tone: the deep navy field — welcome, courses, news */
+.ob--navy {
+  --ob-ink: #ffffff;
+  --ob-body: rgba(217, 232, 248, 0.82);
+  --ob-chip: rgba(255, 255, 255, 0.13);
+  --ob-chip-line: rgba(255, 255, 255, 0.26);
+  --ob-chip-ink: #eaf2fb;
+  --ob-dot: rgba(255, 255, 255, 0.32);
+  --ob-dot-on: var(--ob-gold);
+  --ob-disc-a: #ffffff;
+  --ob-disc-b: #dcebf9;
+  --ob-disc-c: rgba(124, 178, 226, 0.18);
+  --ob-glow-a: rgba(40, 120, 208, 0.5);
+  --ob-glow-b: rgba(217, 173, 80, 0.3);
+  --ob-sky-light-on: 0;
+  --ob-sky-warm-on: 0;
+}
+
+/* tone: the soft paper field — materials, offline */
+.ob--light {
+  --ob-ink: var(--ob-navy);
+  --ob-body: #4c617d;
+  --ob-chip: rgba(20, 43, 74, 0.07);
+  --ob-chip-line: rgba(20, 43, 74, 0.14);
+  --ob-chip-ink: #2b4767;
+  --ob-dot: rgba(20, 43, 74, 0.2);
+  --ob-dot-on: var(--ob-blue);
+  --ob-disc-a: #ffffff;
+  --ob-disc-b: #eaf2fc;
+  --ob-disc-c: rgba(40, 120, 208, 0.16);
+  --ob-glow-a: rgba(40, 120, 208, 0.24);
+  --ob-glow-b: rgba(217, 173, 80, 0.2);
+  --ob-sky-light-on: 1;
+  --ob-sky-warm-on: 0;
+}
+
+/* tone: the gold field, saved for the last screen so joining feels like arriving */
+.ob--gold {
+  --ob-ink: var(--ob-navy);
+  --ob-body: #56617a;
+  --ob-chip: rgba(20, 43, 74, 0.06);
+  --ob-chip-line: rgba(20, 43, 74, 0.13);
+  --ob-chip-ink: #2b4767;
+  --ob-dot: rgba(20, 43, 74, 0.2);
+  --ob-dot-on: var(--ob-gold);
+  --ob-disc-a: #ffffff;
+  --ob-disc-b: #f8efdc;
+  --ob-disc-c: rgba(217, 173, 80, 0.28);
+  --ob-glow-a: rgba(217, 173, 80, 0.42);
+  --ob-glow-b: rgba(40, 120, 208, 0.22);
+  --ob-sky-light-on: 1;
+  --ob-sky-warm-on: 1;
+}
+
+.ob-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+.ob-sky {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.ob-sky--deep {
+  background: var(--ob-sky-deep);
+}
+
+.ob-sky--light {
+  background: var(--ob-sky-light);
+  opacity: var(--ob-sky-light-on);
+}
+
+.ob-sky--warm {
+  background: var(--ob-sky-warm);
+  opacity: var(--ob-sky-warm-on);
+}
+
+.ob-blob {
+  position: absolute;
+  width: 76vw;
+  height: 76vw;
+  max-width: 560px;
+  max-height: 560px;
+  border-radius: 50%;
+  transition: background 0.42s ease;
+}
+
+.ob-blob--a {
+  top: -18%;
+  right: -26%;
+  background: radial-gradient(circle, var(--ob-glow-a) 0%, rgba(255, 255, 255, 0) 68%);
+  animation: ob-drift 13s ease-in-out infinite alternate;
+}
+
+.ob-blob--b {
+  bottom: -22%;
+  left: -28%;
+  background: radial-gradient(circle, var(--ob-glow-b) 0%, rgba(255, 255, 255, 0) 66%);
+  animation: ob-drift 17s ease-in-out infinite alternate-reverse;
+}
+
+/* a single sheet of repeating shapes, used instead of a noise bitmap so first launch stays tiny */
+.ob-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.5) 0.6px, transparent 0.6px);
+  background-size: 22px 22px;
+  mix-blend-mode: overlay;
+}
+
+.ob-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 18px 0;
+}
+
+.ob-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--ob-ink);
+  transition: color 0.42s ease;
+}
+
+.ob-mark-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ob-gold);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--ob-gold) 26%, transparent);
+}
+
+.ob-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ob-lang,
+.ob-skip {
+  border: 1px solid var(--ob-chip-line);
+  background: var(--ob-chip);
+  color: var(--ob-ink);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  transition: color 0.42s ease, background 0.2s ease, border-color 0.42s ease;
+}
+
+.ob-lang {
+  min-width: 48px;
+}
+
+.ob-lang:active,
+.ob-skip:active {
+  background: color-mix(in oklab, var(--ob-blue) 30%, transparent);
+}
+
+.ob-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.ob-track {
+  display: flex;
+  width: 100%;
+  transition: transform 0.42s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.ob-page {
+  flex: 0 0 100%;
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 28px 4px;
+  text-align: center;
+}
+
+/* six scenes mounted at once means six loops running; only the one on screen may tick */
+.ob-page[aria-hidden="true"] * {
+  animation-play-state: paused;
+}
+
+.ob-step {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  color: var(--ob-ink);
+  opacity: 0.66;
+  margin-bottom: 6px;
+  transition: color 0.42s ease;
+}
+
+.ob-step i {
+  font-style: normal;
+  opacity: 0.6;
+}
+
+.ob-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(74vw, 264px);
+  aspect-ratio: 1;
+  margin-bottom: 18px;
+}
+
+.ob-art-glow {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, var(--ob-glow-a), rgba(255, 255, 255, 0) 70%);
+  opacity: 0.32;
+  animation: ob-pulse 6s ease-in-out infinite alternate;
+}
+
+.ob-art-svg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* a dropped-in 3D render sits under the animated prop layer, not instead of it */
+/* an SVG <image>, not an <img> — it has to paint between the disc and the prop chips */
+.ob-art-img {
+  transform-box: fill-box;
+  transform-origin: 50% 92%;
+  animation: ob-breathe-img 6.4s ease-in-out infinite alternate;
+}
+
+.ob-title {
+  margin: 0 0 8px;
+  max-width: 22ch;
+  font-size: clamp(21px, 5.8vw, 27px);
+  line-height: 1.16;
+  font-weight: 800;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  color: var(--ob-ink);
+  transition: color 0.42s ease;
+}
+
+.ob-body {
+  margin: 0;
+  max-width: 34ch;
+  font-size: clamp(13.5px, 3.7vw, 15px);
+  line-height: 1.58;
+  color: var(--ob-body);
+  text-wrap: pretty;
+  transition: color 0.42s ease;
+}
+
+.ob-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 20px calc(22px + env(safe-area-inset-bottom));
+}
+
+.ob-dots {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.ob-dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ob-dot);
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.ob-dots button.on {
+  width: 26px;
+  background: var(--ob-dot-on);
+}
+
+.ob-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ob-nav .a-btn {
+  width: auto;
+  flex: 1;
+  margin-top: 0;
+}
+
+/* the app's own accent is a green the brand does not use — inside the welcome flow, action is blue */
+.ob .a-btn.primary {
+  background: var(--ob-blue);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(20, 43, 74, 0.24);
+}
+
+.ob .a-btn.primary:active {
+  background: #1f66b6;
+}
+
+.ob .a-btn.quiet {
+  background: var(--ob-chip);
+  color: var(--ob-ink);
+  border: 1px solid var(--ob-chip-line);
+}
+
+.ob-nav .ob-back {
+  flex: 0 0 auto;
+  padding: 13px 18px;
+}
+
+.ob-hide {
+  visibility: hidden;
+}
+
+.ob-final {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.ob-final .ob-cta {
+  width: 100%;
+  margin-top: 0;
+}
+
+.ob-quiet {
+  border: 0;
+  background: none;
+  padding: 6px 12px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ob-ink);
+  opacity: 0.78;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--ob-chip-line);
+  transition: color 0.42s ease;
+}
+
+/* ------------------------------------------------------------------ motion */
+
+.ob-page:not([aria-hidden="true"]) .ob-step {
+  animation: ob-in 0.4s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.ob-page:not([aria-hidden="true"]) .ob-art {
+  animation: ob-in-art 0.52s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.ob-page:not([aria-hidden="true"]) .ob-title {
+  animation: ob-in 0.46s 0.1s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.ob-page:not([aria-hidden="true"]) .ob-body {
+  animation: ob-in 0.46s 0.17s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* the figure breathes from its feet, so the whole body stays planted */
+.ob-figure {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: ob-breathe 5.4s ease-in-out infinite alternate;
+}
+
+.ob-blink {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: ob-blink 6.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.ob-wave {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: ob-wave 1.5s ease-in-out infinite alternate;
+}
+
+.ob-cheer-l,
+.ob-cheer-r {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: ob-cheer 1.15s ease-in-out infinite alternate;
+}
+
+.ob-cheer-r {
+  animation-delay: 0.14s;
+}
+
+.ob-float {
+  animation: ob-float 3.8s ease-in-out infinite alternate;
+}
+
+.ob-slide {
+  animation: ob-slide 4.6s ease-in-out infinite alternate;
+}
+
+.ob-orbit {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: ob-spin 26s linear infinite;
+}
+
+.ob-halo {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: ob-halo 7.5s ease-in-out infinite alternate;
+}
+
+.ob-leaf {
+  animation: ob-leaf 4.4s ease-in-out infinite;
+}
+
+.ob-progress {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  animation: ob-load 2.8s cubic-bezier(0.5, 0, 0.4, 1) infinite;
+}
+
+.ob-fill {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  animation: ob-load 2.8s cubic-bezier(0.5, 0, 0.4, 1) infinite;
+  animation-delay: 0.3s;
+}
+
+.ob-drop {
+  animation: ob-drop 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.ob-slash {
+  stroke-dasharray: 34;
+  stroke-dashoffset: 0;
+  animation: ob-offline 3.4s ease-in-out infinite;
+}
+
+.ob-confetti rect {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: ob-confetti 2.4s cubic-bezier(0.3, 0.6, 0.5, 1) infinite;
+}
+
+@keyframes ob-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes ob-in-art {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+}
+
+@keyframes ob-breathe {
+  from {
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    transform: translateY(-2.5px) scale(1.012);
+  }
+}
+
+@keyframes ob-breathe-img {
+  from {
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    transform: translateY(-3px) scale(1.015);
+  }
+}
+
+@keyframes ob-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  92%,
+  95% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes ob-wave {
+  from {
+    transform: rotate(-13deg) translateY(1px);
+  }
+
+  to {
+    transform: rotate(15deg) translateY(-2px);
+  }
+}
+
+@keyframes ob-cheer {
+  from {
+    transform: translateY(2px) rotate(-6deg);
+  }
+
+  to {
+    transform: translateY(-6px) rotate(6deg);
+  }
+}
+
+@keyframes ob-float {
+  from {
+    transform: translateY(-8px);
+  }
+
+  to {
+    transform: translateY(9px);
+  }
+}
+
+@keyframes ob-slide {
+  from {
+    transform: translateX(-6px);
+  }
+
+  to {
+    transform: translateX(7px);
+  }
+}
+
+@keyframes ob-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ob-halo {
+  from {
+    transform: scale(0.97);
+    opacity: 0.86;
+  }
+
+  to {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+
+@keyframes ob-pulse {
+  from {
+    opacity: 0.24;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 0.4;
+    transform: scale(1.04);
+  }
+}
+
+/* a page catching light, not a page swinging off its spine */
+@keyframes ob-leaf {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  38%,
+  62% {
+    opacity: 0.95;
+  }
+}
+
+@keyframes ob-load {
+  0% {
+    transform: scaleX(0.06);
+  }
+
+  70%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes ob-drop {
+  0% {
+    transform: translateY(-12px);
+    opacity: 0;
+  }
+
+  22% {
+    opacity: 1;
+  }
+
+  72%,
+  100% {
+    transform: translateY(22px);
+    opacity: 0;
+  }
+}
+
+@keyframes ob-offline {
+  0%,
+  55%,
+  100% {
+    opacity: 1;
+  }
+
+  70%,
+  88% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes ob-confetti {
+  0% {
+    transform: translateY(-14px) rotate(0deg);
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(46px) rotate(220deg);
+    opacity: 0;
+  }
+}
+
+@keyframes ob-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(-4%, 3%, 0);
+  }
+}
+
+/* ----------------------------------------------------------------- layout */
+
+/* a tall phone has the room, so the illustration should take it rather than leave a gap */
+@media (min-height: 800px) {
+  .ob-art {
+    width: min(80vw, 312px);
+    margin-bottom: 26px;
+  }
+
+  .ob-title {
+    margin-bottom: 10px;
+  }
+
+  .ob-foot {
+    gap: 18px;
+  }
+}
+
+/* tall phones have room to spare; short ones must not push the button under the thumb */
+@media (max-height: 700px) {
+  .ob-art {
+    width: min(58vw, 208px);
+    margin-bottom: 14px;
+  }
+
+  .ob-foot {
+    gap: 13px;
+  }
+}
+
+@media (max-height: 600px) {
+  .ob-art {
+    width: min(46vw, 168px);
+    margin-bottom: 10px;
+  }
+
+  .ob-title {
+    font-size: 20px;
+  }
+
+  .ob-body {
+    font-size: 13px;
+  }
+
+  .ob-step {
+    display: none;
+  }
+}
+
+@media (max-width: 340px) {
+  .ob-page {
+    padding-inline: 18px;
+  }
+
+  .ob-art {
+    width: min(80vw, 232px);
+  }
+
+  .ob-top {
+    padding-inline: 14px;
+  }
+}
+
+/* a phone on its side reads as a card, not a column */
+@media (orientation: landscape) and (max-height: 520px) {
+  .ob-view {
+    align-items: flex-start;
+  }
+
+  .ob-page {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 4px 26px;
+    text-align: left;
+  }
+
+  .ob-step {
+    position: absolute;
+    top: 10px;
+    left: 18px;
+  }
+
+  .ob-art {
+    width: min(34vh, 178px);
+    margin-bottom: 0;
+    flex: 0 0 auto;
+  }
+
+  .ob-copy {
+    max-width: 32ch;
+  }
+
+  .ob-title {
+    font-size: 21px;
+  }
+
+  .ob-foot {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 620px) {
+  .ob-page {
+    max-width: 520px;
+    margin: 0 auto;
+  }
+
+  .ob-art {
+    width: min(46vw, 320px);
+    margin-bottom: 26px;
+  }
+
+  .ob-top,
+  .ob-foot {
+    padding-inline: max(28px, calc((100vw - 520px) / 2));
+  }
+}
+
+/* ------------------------------------------------------------------ themes */
+
+/* The two paper fields become night fields, and the characters keep their own light. The night
+   palette is declared once here and merely applied below, because it has to answer to both the
+   system preference and the theme switch the student sets inside the app. */
+.ob {
+  --ob-n-sky-light: linear-gradient(168deg, #0c1526 0%, #131e31 52%, #182742 100%);
+  --ob-n-sky-warm: linear-gradient(168deg, #1a1710 0%, #131e31 52%, #2a2318 100%);
+  --ob-n-ink: #eef4fb;
+  --ob-n-body: rgba(203, 219, 238, 0.76);
+  --ob-n-chip: rgba(255, 255, 255, 0.1);
+  --ob-n-chip-line: rgba(255, 255, 255, 0.2);
+  --ob-n-dot: rgba(255, 255, 255, 0.28);
+  --ob-n-disc-a: rgba(255, 255, 255, 0.16);
+  --ob-n-disc-b: rgba(124, 178, 226, 0.2);
+  --ob-n-disc-c: rgba(124, 178, 226, 0.04);
+}
+
+:root[data-a-theme="dark"] .ob--light,
+:root[data-a-theme="dark"] .ob--gold {
+  --ob-sky-light: var(--ob-n-sky-light);
+  --ob-sky-warm: var(--ob-n-sky-warm);
+  --ob-ink: var(--ob-n-ink);
+  --ob-body: var(--ob-n-body);
+  --ob-chip: var(--ob-n-chip);
+  --ob-chip-line: var(--ob-n-chip-line);
+  --ob-chip-ink: #dce8f6;
+  --ob-dot: var(--ob-n-dot);
+  --ob-dot-on: var(--ob-gold);
+  --ob-disc-a: var(--ob-n-disc-a);
+  --ob-disc-b: var(--ob-n-disc-b);
+  --ob-disc-c: var(--ob-n-disc-c);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-a-theme]) .ob--light,
+  :root:not([data-a-theme]) .ob--gold,
+  :root[data-a-theme="auto"] .ob--light,
+  :root[data-a-theme="auto"] .ob--gold {
+    --ob-sky-light: var(--ob-n-sky-light);
+    --ob-sky-warm: var(--ob-n-sky-warm);
+    --ob-ink: var(--ob-n-ink);
+    --ob-body: var(--ob-n-body);
+    --ob-chip: var(--ob-n-chip);
+    --ob-chip-line: var(--ob-n-chip-line);
+    --ob-chip-ink: #dce8f6;
+    --ob-dot: var(--ob-n-dot);
+    --ob-dot-on: var(--ob-gold);
+    --ob-disc-a: var(--ob-n-disc-a);
+    --ob-disc-b: var(--ob-n-disc-b);
+    --ob-disc-c: var(--ob-n-disc-c);
+  }
+}
+
+/* ----------------------------------------------------------- walkthrough */
+.tu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(8, 11, 13, 0.62);
+}
+
+.tu {
+  width: 100%;
+  max-width: 30rem;
+  overflow: hidden;
+  background: var(--a-panel);
+  border-radius: 22px 22px 0 0;
+  padding: 14px 18px calc(20px + env(safe-area-inset-bottom));
+  box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.26);
+  animation: tu-rise 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.tu-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tu-eyebrow {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--a-faint);
+}
+
+.tu-track {
+  display: flex;
+  transition: transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.tu-page {
+  flex: 0 0 100%;
+  min-width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  min-height: 116px;
+  padding: 16px 2px 18px;
+}
+
+.tu-ico {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--a-tint);
+  color: var(--a-accent-text);
+}
+
+.tu-title {
+  margin: 0 0 5px;
+  font-size: 16.5px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.tu-body {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--a-quiet);
+}
+
+.tu-meter {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.tu-meter i {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--a-line);
+  transition: background 0.25s ease;
+}
+
+.tu-meter i.on {
+  background: var(--a-accent);
+}
+
+@keyframes tu-rise {
+  from {
+    transform: translateY(100%);
+  }
+}
+
 @keyframes a-shimmer {
   to {
     background-position: -200% 0;
@@ -912,5 +1877,13 @@ a {
   *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+
+  /* these two end their cycle at opacity 0, so freezing them would erase the prop instead of
+     stilling it — hold them at the visible middle of their travel */
+  .ob-drop,
+  .ob-confetti rect {
+    animation: none;
+    opacity: 1;
   }
 }

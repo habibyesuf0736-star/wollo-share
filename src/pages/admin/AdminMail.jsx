@@ -350,6 +350,7 @@ export default function AdminMail() {
           <span className="flex-grow-1" />
           <select
             className="form-select form-select-sm"
+            aria-label="Email delivery provider"
             style={{ maxWidth: 180 }}
             value={form.preference}
             onChange={(e) => setForm({ ...form, preference: e.target.value })}
@@ -389,6 +390,7 @@ export default function AdminMail() {
               <input
                 className="form-control form-control-sm"
                 placeholder="Relay URL, e.g. https://relay.example.com"
+                aria-label="Hyvor relay URL"
                 value={form.relayUrl}
                 onChange={(e) => setForm({ ...form, relayUrl: e.target.value })}
               />
@@ -397,6 +399,7 @@ export default function AdminMail() {
                   className="form-control form-control-sm"
                   type="password"
                   autoComplete="new-password"
+                  aria-label="Hyvor project API key"
                   placeholder={stored.relayKey ? "Project API key · saved (leave blank to keep)" : "Project API key (sends:send)"}
                   value={form.relayApiKey}
                   onChange={(e) => setForm({ ...form, relayApiKey: e.target.value })}
@@ -410,6 +413,7 @@ export default function AdminMail() {
               <input
                 className="form-control form-control-sm"
                 placeholder="Verified sender, e.g. Wollo Share <no-reply@yourdomain.com>"
+                aria-label="Hyvor verified sender address"
                 value={form.relayFrom}
                 onChange={(e) => setForm({ ...form, relayFrom: e.target.value })}
               />
@@ -423,6 +427,7 @@ export default function AdminMail() {
                 <input
                   className="form-control form-control-sm"
                   placeholder="Host, e.g. smtp-relay.brevo.com"
+                  aria-label="SMTP host"
                   value={form.smtpHost}
                   onChange={(e) => setForm({ ...form, smtpHost: e.target.value })}
                 />
@@ -430,6 +435,7 @@ export default function AdminMail() {
                   className="form-control form-control-sm"
                   style={{ maxWidth: 96 }}
                   placeholder="Port"
+                  aria-label="SMTP port"
                   inputMode="numeric"
                   value={form.smtpPort}
                   onChange={(e) => setForm({ ...form, smtpPort: e.target.value, smtpSecure: e.target.value.trim() === "465" })}
@@ -439,6 +445,7 @@ export default function AdminMail() {
                 <input
                   className="form-control form-control-sm"
                   placeholder="SMTP login / user"
+                  aria-label="SMTP login"
                   value={form.smtpUser}
                   onChange={(e) => setForm({ ...form, smtpUser: e.target.value })}
                 />
@@ -460,6 +467,7 @@ export default function AdminMail() {
                   className="form-control form-control-sm"
                   type="password"
                   autoComplete="new-password"
+                  aria-label="SMTP password or key"
                   placeholder={stored.smtpPass ? "Password / SMTP key · saved (leave blank to keep)" : "Password or SMTP key"}
                   value={form.smtpPass}
                   onChange={(e) => setForm({ ...form, smtpPass: e.target.value })}
@@ -473,6 +481,7 @@ export default function AdminMail() {
               <input
                 className="form-control form-control-sm"
                 placeholder="From address (must be verified with the provider)"
+                aria-label="SMTP from address"
                 value={form.smtpFrom}
                 onChange={(e) => setForm({ ...form, smtpFrom: e.target.value })}
               />
@@ -487,6 +496,7 @@ export default function AdminMail() {
                   className="form-control form-control-sm"
                   type="password"
                   autoComplete="new-password"
+                  aria-label="Mailtrap API token"
                   placeholder={stored.mailtrapToken ? "Mailtrap API token · saved (leave blank to keep)" : "Mailtrap API token"}
                   value={form.mailtrapToken}
                   onChange={(e) => setForm({ ...form, mailtrapToken: e.target.value })}
@@ -500,12 +510,14 @@ export default function AdminMail() {
               <input
                 className="form-control form-control-sm"
                 placeholder="Mailtrap sender (leave blank to use the SMTP from address)"
+                aria-label="Mailtrap sender address"
                 value={form.mailtrapFrom}
                 onChange={(e) => setForm({ ...form, mailtrapFrom: e.target.value })}
               />
               <input
                 className="form-control form-control-sm"
                 placeholder="Hosted template UUID (optional — password reset email)"
+                aria-label="Mailtrap hosted template UUID"
                 value={form.mailtrapTemplateUuid}
                 onChange={(e) => setForm({ ...form, mailtrapTemplateUuid: e.target.value })}
               />
@@ -519,6 +531,7 @@ export default function AdminMail() {
                 className="form-control form-control-sm"
                 type="password"
                 autoComplete="new-password"
+                aria-label="Brevo API key"
                 placeholder={stored.brevoKey ? "Brevo API key (xkeysib-…) · saved (leave blank to keep)" : "Brevo API key (xkeysib-…)"}
                 value={form.brevoApiKey}
                 onChange={(e) => setForm({ ...form, brevoApiKey: e.target.value })}
@@ -532,6 +545,7 @@ export default function AdminMail() {
             <input
               className="form-control form-control-sm mt-2"
               placeholder="Brevo sender (leave blank to use the SMTP from address)"
+              aria-label="Brevo sender address"
               value={form.brevoFrom}
               onChange={(e) => setForm({ ...form, brevoFrom: e.target.value })}
             />
@@ -548,6 +562,7 @@ export default function AdminMail() {
           <input
             className="form-control form-control-sm"
             style={{ maxWidth: 260 }}
+            aria-label="Send test email to"
             placeholder={session ? session.email : "test@yourdomain.com"}
             value={testEmail}
             onChange={(e) => setTestEmail(e.target.value)}

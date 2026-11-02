@@ -1,0 +1,586 @@
+/* The offline reader. It borrows the app surface's palette and hairlines, and adds the two
+   contracts the drawing engines need: pdf.js lays its selectable text layer out from the CSS
+   custom properties below, and the slide renderer positions its shapes in absolute boxes. */
+
+.rd {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--a-bg);
+  color: var(--a-ink);
+}
+
+.rd-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  background: var(--a-panel);
+  border-bottom: 1px solid var(--a-line);
+}
+
+.rd-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.rd-name strong {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-name em {
+  display: block;
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--a-faint);
+}
+
+.rd-x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--a-raise);
+  color: var(--a-ink);
+}
+
+.rd-x.on {
+  background: var(--a-accent);
+  color: var(--a-on-accent);
+}
+
+.rd-tools {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: var(--a-panel);
+  border-bottom: 1px solid var(--a-line);
+  scrollbar-width: none;
+}
+
+.rd-tools::-webkit-scrollbar,
+.rd-foot::-webkit-scrollbar,
+.rd-marks::-webkit-scrollbar,
+.rd-find::-webkit-scrollbar {
+  display: none;
+}
+
+.rd-tool,
+.rd-zoom button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--a-raise);
+  color: var(--a-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rd-tool.on {
+  background: var(--a-tint);
+  color: var(--a-accent-text);
+}
+
+.rd-zoom {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--a-raise);
+}
+
+.rd-zoom button {
+  padding: 5px 10px;
+  background: none;
+}
+
+.rd-zoom .rd-fit {
+  color: var(--a-accent-text);
+}
+
+.rd-dim {
+  margin-left: 3px;
+  font-weight: 700;
+  color: var(--a-faint);
+}
+
+.rd-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--a-panel);
+  border-bottom: 1px solid var(--a-line);
+}
+
+.rd-find input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--a-line);
+  border-radius: 999px;
+  background: var(--a-bg);
+  color: var(--a-ink);
+  font-size: 14px;
+}
+
+.rd-find input:focus {
+  border-color: var(--a-tint-line);
+  outline: none;
+}
+
+.rd-find span {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--a-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rd-find button {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--a-raise);
+  font-size: 17px;
+  line-height: 1;
+  color: var(--a-ink);
+}
+
+.rd-find button:disabled {
+  opacity: 0.35;
+}
+
+.rd-grid {
+  display: flex;
+  gap: 8px;
+  flex: none;
+  align-items: flex-start;
+  padding: 10px 12px;
+  overflow-x: auto;
+  background: var(--a-panel);
+  border-bottom: 1px solid var(--a-line);
+  scrollbar-width: none;
+}
+
+.rd-grid button {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 108px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--a-line);
+  border-radius: 8px;
+  background: var(--a-raise);
+}
+
+.rd-grid button.on {
+  border-color: var(--a-accent);
+}
+
+.rd-grid > button > span {
+  position: relative;
+  display: block;
+  min-height: 58px;
+}
+
+.rd-grid canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.rd-grid em {
+  display: block;
+  padding: 3px 0;
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--a-faint);
+}
+
+.rd-note {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--a-faint);
+  background: var(--a-raise);
+  border-bottom: 1px solid var(--a-line);
+}
+
+.rd-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rd-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px calc(92px + env(safe-area-inset-bottom));
+}
+
+.rd-page {
+  flex: none;
+  background: var(--a-panel);
+  border: 1px solid var(--a-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.rd-sheet {
+  position: relative;
+  min-height: 40px;
+}
+
+.r-canvas {
+  display: block;
+}
+
+/* pdf.js builds its own spans and reads these properties back; --total-scale-factor is the
+   CSS scale it is given, and it divides its device-pixel measurements by it. */
+.r-text {
+  --min-font-size: 1;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: clip;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-align: initial;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  color-scheme: only light;
+}
+
+.r-text > span:not(.markedContent),
+.r-text .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+
+  position: absolute;
+  z-index: 1;
+  color: transparent;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.r-text .markedContent {
+  display: contents;
+}
+
+.r-text ::selection {
+  background: color-mix(in oklab, var(--a-accent) 38%, transparent);
+  color: transparent;
+}
+
+.r-text span.r-hit {
+  background: color-mix(in oklab, var(--a-accent) 22%, transparent);
+}
+
+.r-text span.r-now {
+  background: color-mix(in oklab, var(--a-accent) 55%, transparent);
+  outline: 2px solid var(--a-accent);
+}
+
+.r-hit {
+  background: color-mix(in oklab, var(--a-accent) 22%, transparent);
+  border-radius: 2px;
+}
+
+mark.r-hit {
+  color: inherit;
+  padding: 0 1px;
+}
+
+mark.r-hit.r-now {
+  background: var(--a-accent);
+  color: var(--a-on-accent);
+}
+
+.rd-flow {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 16px 16px calc(92px + env(safe-area-inset-bottom));
+}
+
+.rd-flow img {
+  max-width: 100%;
+  height: auto;
+}
+
+.r-pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* slides, placed where the file says they sit */
+.r-abs {
+  position: absolute;
+  overflow: hidden;
+}
+
+.r-txt {
+  line-height: 1.22;
+}
+
+.r-sline {
+  display: block;
+  margin: 0 0 0.18em;
+  overflow-wrap: anywhere;
+}
+
+.r-img {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  border-radius: 4px;
+}
+
+.r-blk {
+  margin-bottom: 16px;
+}
+
+.rd-blank {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 26px calc(40px + env(safe-area-inset-bottom));
+  text-align: center;
+}
+
+.rd-ask {
+  font-size: 19px;
+  margin-bottom: 2px;
+}
+
+.rd-blank .a-btn {
+  max-width: 19rem;
+}
+
+.rd-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: var(--a-panel);
+  border-top: 1px solid var(--a-line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.rd-foot button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 8px 11px;
+  border-radius: 999px;
+  background: var(--a-raise);
+  color: var(--a-ink);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rd-foot button.on {
+  background: var(--a-tint);
+  color: var(--a-accent-text);
+}
+
+.rd-foot span {
+  flex: none;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--a-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rd-chip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(62px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  padding: 4px 6px 4px 4px;
+  border-radius: 999px;
+  background: var(--a-dock);
+  box-shadow: 0 10px 26px -18px rgba(0, 0, 0, 0.9);
+  max-width: calc(100% - 32px);
+}
+
+.rd-chip button {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--a-dock-quiet);
+  white-space: nowrap;
+}
+
+.rd-chip button:first-child {
+  background: var(--a-accent);
+  color: var(--a-on-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 15rem;
+}
+
+.rd-marks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(54px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 12px;
+  overflow-x: auto;
+  background: var(--a-panel);
+  border-top: 1px solid var(--a-line);
+  scrollbar-width: none;
+}
+
+.rd-marks .a-label {
+  margin: 0;
+  flex: none;
+  font-size: 11px;
+}
+
+.rd-marks button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 8px 6px 11px;
+  border-radius: 999px;
+  background: var(--a-raise);
+  color: var(--a-ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.rd-marks button span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--a-panel);
+  color: var(--a-faint);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.rd-present {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.rd-present .rd-sheet {
+  background: #fff;
+}
+
+.rd-hud {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(20, 23, 26, 0.82);
+}
+
+.rd-hud button {
+  padding: 8px 13px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.rd-hud span {
+  padding: 0 4px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* night reading turns the page down, the chrome stays the app's own */
+.rd-night {
+  background: #0a0c0d;
+}
+
+.rd-night .rd-page {
+  border-color: #22282d;
+  background: #12161a;
+}
+
+.rd-night .r-canvas,
+.rd-night .rd-flow {
+  filter: invert(1) hue-rotate(180deg);
+}

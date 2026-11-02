@@ -9,6 +9,7 @@ export default function AdminCourses() {
   const { coursesData, usersData, updateCourse, deleteCourse, moveCourse, toast } = useApp();
   const [search, setSearch] = useState("");
   const [college, setCollege] = useState("All");
+  const [limit, setLimit] = useState(30);
   const [modal, setModal] = useState({ open: false, courseId: null });
   const [confirm, setConfirm] = useState({ open: false, courseId: null });
   const [accessCourse, setAccessCourse] = useState(null);
@@ -36,11 +37,11 @@ export default function AdminCourses() {
         <div className="row g-2 align-items-end">
           <div className="col-12 col-md-5">
             <label className="form-label small fw-semibold">Search courses</label>
-            <input className="form-control" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Title, code or description" />
+            <input className="form-control" aria-label="Search courses" value={search} onChange={(e) => { setSearch(e.target.value); setLimit(30); }} placeholder="Title, code or description" />
           </div>
           <div className="col-6 col-md-3">
             <label className="form-label small fw-semibold">College</label>
-            <select className="form-select" value={college} onChange={(e) => setCollege(e.target.value)}>
+            <select className="form-select" aria-label="Filter courses by college" value={college} onChange={(e) => { setCollege(e.target.value); setLimit(30); }}>
               <option value="All">All colleges</option>
               {colleges.map((c) => (
                 <option key={c}>{c}</option>
@@ -69,7 +70,7 @@ export default function AdminCourses() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((course) => {
+            {rows.slice(0, limit).map((course) => {
               const index = coursesData.indexOf(course);
               const avg = courseAverageRating(course);
               const files = (course.materials || []).length;
@@ -143,6 +144,12 @@ export default function AdminCourses() {
           </tbody>
         </table>
       </div>
+
+      {rows.length > limit ? (
+        <button type="button" className="btn btn-sm btn-outline-secondary align-self-center" onClick={() => setLimit((v) => v + 60)}>
+          Show {Math.min(60, rows.length - limit)} more of {rows.length} courses
+        </button>
+      ) : null}
 
       <CourseStudentsModal course={accessCourse} onClose={() => setAccessCourse(null)} />
       <CourseFormModal open={modal.open} courseId={modal.courseId} onClose={() => setModal({ open: false, courseId: null })} />

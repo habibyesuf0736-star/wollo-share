@@ -304,7 +304,7 @@ export default function AdminUsers() {
         <div className="row g-2 align-items-end">
           <div className="col-12 col-md-7">
             <label className="form-label small fw-semibold">Search accounts</label>
-            <input className="form-control" placeholder="Name, email or department" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className="form-control" aria-label="Search accounts" placeholder="Name, email or department" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="col-12 col-md-5 text-md-end">
             <button
@@ -381,7 +381,7 @@ export default function AdminUsers() {
                 </td>
                 <td className="small" data-label="Department">{user.department || "—"}</td>
                 <td className="col-plan" data-label="Plan">
-                  <select className="form-select form-select-sm" value={planOf(user)} onChange={(e) => updatePlan(user, e.target.value)}>
+                  <select className="form-select form-select-sm" aria-label={`Plan for ${user.name || user.email || "account"}`} value={planOf(user)} onChange={(e) => updatePlan(user, e.target.value)}>
                     {PLANS.map((value) => (
                       <option key={value} value={value}>
                         {PLAN_LABELS[value]}
