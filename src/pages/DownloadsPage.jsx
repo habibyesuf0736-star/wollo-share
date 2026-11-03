@@ -217,9 +217,9 @@ export default function DownloadsPage() {
 
       {docs.length === 0 ? (
         <EmptyState
-          icon={Download}
+          icon={<Download size={24} />}
           title="No files downloaded yet"
-          body="Open any material in the library and tap 'Save for offline' to keep it here for when you have no internet."
+          description="Open any material in the library and tap 'Save for offline' to keep it here for when you have no internet."
           action={
             <button type="button" className="btn btn-primary" onClick={goLibrary}>
               <ExternalLink size={15} className="me-1 align-text-bottom" aria-hidden="true" />

@@ -639,7 +639,7 @@ export default function AdminPractice() {
                 <PlusCircle size={15} /> New question
               </button>
               {questions.length === 0 ? (
-                <EmptyState icon={ClipboardList} title="No questions yet" body="Add your first question and publish it to make it available to students." />
+                <EmptyState icon={<ClipboardList size={24} />} title="No questions yet" description="Add your first question and publish it to make it available to students." />
               ) : (
                 <div className="d-flex flex-column gap-2">
                   {questions.map((q) => (
@@ -677,7 +677,7 @@ export default function AdminPractice() {
                 <PlusCircle size={15} /> New exam
               </button>
               {exams.length === 0 ? (
-                <EmptyState icon={Target} title="No exams yet" body="Create an exam to group questions into a timed, marked experience for students." />
+                <EmptyState icon={<Target size={24} />} title="No exams yet" description="Create an exam to group questions into a timed, marked experience for students." />
               ) : (
                 <div className="d-flex flex-column gap-2">
                   {exams.map((e) => (

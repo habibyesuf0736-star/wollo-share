@@ -117,7 +117,7 @@ function TopStudents({ scope, onScope }) {
       ) : error ? (
         <PracticeError message={error} />
       ) : rows.length === 0 ? (
-        <EmptyState icon={Award} title="No practice scores yet" body="Be the first student to answer a question and take the top spot." />
+        <EmptyState icon={<Award size={24} />} title="No practice scores yet" description="Be the first student to answer a question and take the top spot." />
       ) : (
         <div className="ws-leaderboard-row" role="list">
           {rows.slice(0, 8).map((entry) => (
@@ -446,7 +446,7 @@ function Browser({ session, favorites, onToggleFavorite }) {
           ))}
         </div>
       ) : questions.length === 0 ? (
-        <EmptyState icon={ClipboardList} title="No questions match" body="Try different filters, or ask your administrator to add questions for this course." />
+        <EmptyState icon={<ClipboardList size={24} />} title="No questions match" description="Try different filters, or ask your administrator to add questions for this course." />
       ) : (
         <>
           <div className="ws-question-list">
@@ -604,7 +604,7 @@ function Exams({ session }) {
           ))}
         </div>
       ) : exams.length === 0 ? (
-        <EmptyState icon={ClipboardList} title="No exams published yet" body="When an administrator publishes a timed exam, it appears here for you to take." />
+        <EmptyState icon={<ClipboardList size={24} />} title="No exams published yet" description="When an administrator publishes a timed exam, it appears here for you to take." />
       ) : (
         <div className="ws-exam-grid">
           {exams.map((exam) => (
@@ -690,9 +690,9 @@ function Saved({ session, favorites, onToggleFavorite }) {
     <section aria-label="Saved questions">
       <PracticeError message={error} />
       {loading ? (
-        <EmptyState icon={Bookmark} title="Loading saved questions" body="" />
+        <EmptyState icon={<Bookmark size={24} />} title="Loading saved questions" description="" />
       ) : questions.length === 0 ? (
-        <EmptyState icon={Bookmark} title="No saved questions yet" body="Tap the bookmark on any question to keep it here for later." />
+        <EmptyState icon={<Bookmark size={24} />} title="No saved questions yet" description="Tap the bookmark on any question to keep it here for later." />
       ) : (
         <>
           <div className="ws-question-list">
@@ -742,9 +742,9 @@ function History({ session }) {
     };
   }, [session?.authToken]);
 
-  if (loading) return <EmptyState icon={ListChecks} title="Loading your attempts" body="" />;
+  if (loading) return <EmptyState icon={<ListChecks size={24} />} title="Loading your attempts" description="" />;
   if (error) return <PracticeError message={error} />;
-  if (attempts.length === 0) return <EmptyState icon={ListChecks} title="No attempts yet" body="Your practice and exam attempts will appear here, with your scores." />;
+  if (attempts.length === 0) return <EmptyState icon={<ListChecks size={24} />} title="No attempts yet" description="Your practice and exam attempts will appear here, with your scores." />;
 
   return (
     <div className="ws-history-list">
